@@ -9,9 +9,9 @@ Copy these into the GitHub OAuth App form, the Google Auth Platform branding pag
 | Application name | Moss |
 | Tagline (up to 60 chars) | Game servers that keep growing, quietly. |
 | Logo | `docs/brand/moss-logo-1024.png` (square, 1024 px); vector at `docs/brand/moss-logo.svg` |
-| Homepage URL | `https://github.com/T1nkiePlayz/Moss`, or your own panel URL |
-| Privacy policy URL | `[https://your-domain/privacy]`. Google requires one for production apps; a GitHub page or the text below works. |
-| Terms of service URL | `[https://your-domain/terms]` (optional) |
+| Homepage URL | `https://moss.ashtontink.com` |
+| Privacy policy URL | `https://moss.ashtontink.com/privacy/` |
+| Terms of service URL | `https://moss.ashtontink.com/terms/` |
 | Developer / support contact | your email |
 
 ## Short description (about 140 characters)

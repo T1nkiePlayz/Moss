@@ -55,6 +55,7 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/files/rename", post(files::rename))
         .route("/servers/{id}/files/upload", post(files::upload))
         .route("/servers/{id}/files/download", get(files::download))
+        .route("/content/providers", get(content::providers))
         .route("/content/search", get(content::search))
         .route("/content/projects/{pid}", get(content::project))
         .route("/servers/{id}/content", get(content::installed).post(content::install))
@@ -110,7 +111,7 @@ async fn static_files(State(st): State<St>, uri: Uri) -> Response {
     if is_index {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
         let sb = st.cfg.supabase_url.trim_end_matches('/');
-        let csp = format!("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://cdn.modrinth.com https://*.supabase.co https://avatars.githubusercontent.com; connect-src 'self' {sb} ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+        let csp = format!("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://cdn.modrinth.com https://*.forgecdn.net https://*.supabase.co https://avatars.githubusercontent.com; connect-src 'self' {sb} ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
         if let Ok(v) = HeaderValue::from_str(&csp) { h.insert(header::CONTENT_SECURITY_POLICY, v); }
     } else if path.starts_with("assets/") {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
@@ -204,6 +205,10 @@ async fn servers_create(State(st): State<St>, user: User, Json(r): Json<CreateRe
     if !rt.is_some_and(|x| x["installable"] == true) { return Err(ApiError::bad("runtime.unsupported", "unknown or not yet installable runtime").field("runtime", "choose an installable runtime")); }
     let is_mc = !matches!(r.runtime.as_str(), "custom" | "sim");
     if is_mc && r.accept_eula != Some(true) { return Err(ApiError::bad("eula.required", "You must accept the Minecraft EULA to create a Minecraft server.").field("accept_eula", "required")); }
+    // versions end up in upstream URLs, so only plain version-ish strings are accepted
+    let plain = |v: &str| !v.is_empty() && v.len() <= 40 && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'));
+    if !plain(&r.game_version) { return Err(ApiError::bad("validation", "invalid game version").field("game_version", "letters, digits and . _ + -")); }
+    if r.loader_version.as_deref().is_some_and(|l| !plain(l)) { return Err(ApiError::bad("validation", "invalid loader version").field("loader_version", "letters, digits and . _ + -")); }
     let mem = r.memory_mb.unwrap_or(2048);
     if !(256..=262144).contains(&mem) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", "256–262144")); }
     let custom = match (&r.runtime[..], &r.custom) {

@@ -10,7 +10,7 @@ pub const MAX_BYTES: u64 = 4 << 30;
 
 const ALLOWED: &[&str] = &[
     "mojang.com", "minecraft.net", "papermc.io", "purpurmc.org", "fabricmc.net", "modrinth.com", "adoptium.net",
-    "github.com", "githubusercontent.com", "azul.com",
+    "github.com", "githubusercontent.com", "azul.com", "forgecdn.net",
 ];
 
 pub fn host_allowed(host: &str) -> bool {
@@ -46,9 +46,18 @@ impl Hasher {
 
 /// Returns the hex SHA-256 (or the algorithm used for verification when one is provided) of the downloaded file.
 pub async fn fetch(http: &reqwest::Client, url: &str, dest: &Path, expect: Option<Hash>, token: &tokio_util::sync::CancellationToken, progress: impl Fn(f64)) -> Result<String> {
+    fetch_ext(http, url, dest, expect, token, progress, Default::default()).await
+}
+
+/// Extra request headers and one additional exact host that may be contacted (used for the CurseForge download proxy).
+#[derive(Default)]
+pub struct Opts { pub headers: reqwest::header::HeaderMap, pub extra_host: Option<String> }
+
+pub async fn fetch_ext(http: &reqwest::Client, url: &str, dest: &Path, expect: Option<Hash>, token: &tokio_util::sync::CancellationToken, progress: impl Fn(f64), opts: Opts) -> Result<String> {
     let u = reqwest::Url::parse(url).context("bad url")?;
-    if u.scheme() != "https" || !u.host_str().is_some_and(host_allowed) { bail!("refusing to download from {}", u.host_str().unwrap_or("?")); }
-    let resp = http.get(u).send().await?.error_for_status()?;
+    let host_ok = u.host_str().is_some_and(|h| host_allowed(h) || opts.extra_host.as_deref() == Some(h));
+    if u.scheme() != "https" || !host_ok { bail!("refusing to download from {}", u.host_str().unwrap_or("?")); }
+    let resp = http.get(u).headers(opts.headers).send().await?.error_for_status()?;
     let total = resp.content_length();
     if total.is_some_and(|t| t > MAX_BYTES) { bail!("download is larger than the safety limit"); }
     if let Some(p) = dest.parent() { tokio::fs::create_dir_all(p).await?; }
@@ -86,6 +95,7 @@ mod tests {
     #[test]
     fn allow_list_matches_domains_not_suffix_tricks() {
         assert!(host_allowed("cdn.modrinth.com") && host_allowed("fill-data.papermc.io") && host_allowed("github.com"));
+        assert!(host_allowed("edge.forgecdn.net") && !host_allowed("forgecdn.net.evil.io"));
         assert!(!host_allowed("evilmodrinth.com") && !host_allowed("modrinth.com.evil.io") && !host_allowed("169.254.169.254") && !host_allowed("localhost"));
     }
 }

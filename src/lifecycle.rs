@@ -52,6 +52,18 @@ pub fn build_command(st: &St, s: &Srv) -> ApiResult<Vec<String>> {
 }
 
 pub async fn start(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
+    {
+        let mut live = st.live.lock().unwrap();
+        let l = live.entry(s.id.clone()).or_default();
+        if l.alive || l.starting { return Err(ApiError::conflict("server.running", "server is already running")); }
+        l.starting = true;
+    }
+    let r = start_inner(st, s, actor).await;
+    if let Some(l) = st.live.lock().unwrap().get_mut(&s.id) { l.starting = false; }
+    r
+}
+
+async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     if !s.installed { return Err(ApiError::conflict("server.not_installed", "server is not installed yet")); }
     if s.is_mc() && s.eula_at.is_none() { return Err(ApiError::conflict("eula.required", "The Minecraft EULA must be accepted before this server can start.")); }
     if st.live.lock().unwrap().get(&s.id).is_some_and(|l| l.alive) { return Err(ApiError::conflict("server.running", "server is already running")); }

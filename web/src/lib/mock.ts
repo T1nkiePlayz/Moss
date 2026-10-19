@@ -263,10 +263,10 @@ export function openEvents(h: Handlers): A.Stream {
 export async function blobFor(path: string) { return new Blob([`mock download of ${path}\n`]); }
 
 // ---- router ----
-const V = (pid: string): A.Project => ({
-  project_id: pid, title: hits.find((h) => h.project_id === pid)?.title ?? pid, description: 'A fantastic project.', icon_url: null,
-  body: 'This is the long description of the project.\n\nFeatures:\n- Fast\n- Configurable\n- Well maintained', links: { source: 'https://github.com', issues: 'https://github.com', wiki: 'https://modrinth.com' }, license: 'MIT', gallery: [],
-  versions: ['2.4.1', '2.4.0', '2.3.9-beta.1', '2.3.8'].map((v, i) => ({ id: pid + v, name: `v${v}`, version_number: v, channel: v.includes('beta') ? 'beta' : 'release', date: ago((i * 12 + 2) * DAY), downloads: 120000 - i * 20000, files: [{ filename: `${pid}-${v}.jar`, size: 2.1e6, primary: true }], game_versions: ['1.21.4', '1.21.3'], loaders: ['paper', 'fabric'], dependencies: i === 0 ? [{ project_id: 'fabric-api', kind: 'required' as const }] : [] })),
+const V = (pid: string, cf = false): A.Project => ({
+  project_id: pid, title: [...hits, ...cfHits].find((h) => h.project_id === pid)?.title ?? pid, description: 'A fantastic project.', icon_url: null,
+  body: 'This is the long description of the project.\n\nFeatures:\n- Fast\n- Configurable\n- Well maintained', links: cf ? { page: 'https://www.curseforge.com/minecraft/bukkit-plugins/' + pid } : { source: 'https://github.com', issues: 'https://github.com', wiki: 'https://modrinth.com' }, license: 'MIT', gallery: [],
+  versions: ['2.4.1', '2.4.0', '2.3.9-beta.1', '2.3.8'].map((v, i) => ({ id: pid + v, name: `v${v}`, version_number: v, channel: v.includes('beta') ? 'beta' : 'release', date: ago((i * 12 + 2) * DAY), downloads: 120000 - i * 20000, files: [{ filename: `${pid}-${v}.jar`, size: 2.1e6, primary: true }], game_versions: ['1.21.4', '1.21.3'], loaders: ['paper', 'fabric'], dependencies: i === 0 ? [{ project_id: 'fabric-api', kind: 'required' as const }] : [], ...(cf && i === 1 ? { downloadable: false } : {}) })),
 });
 const hits: A.Hit[] = [
   ['luckperms', 'LuckPerms', 'Luck', 'A permissions plugin for Minecraft servers.', 12400000, ['management', 'utility']],
@@ -278,6 +278,8 @@ const hits: A.Hit[] = [
   ['dynmap', 'Dynmap', 'mikeprimm', 'Live Google-Maps style web map.', 3500000, ['utility']],
   ['coreprotect', 'CoreProtect', 'Intelli', 'Fast, efficient block logging and rollback.', 2800000, ['protection', 'management']],
 ].map(([project_id, title, author, description, downloads, categories]) => ({ project_id: project_id as string, slug: project_id as string, title: title as string, description: description as string, author: author as string, icon_url: null, downloads: downloads as number, follows: Math.round((downloads as number) / 40), categories: categories as string[], updated: ago(((title as string).length % 9) * DAY), client_side: 'unsupported', server_side: 'required' }));
+
+const cfHits: A.Hit[] = [['cf-worldguard', 'WorldGuard', 'sk89q', 'Protect areas of your world with regions.', 5400000, ['admin-tools']], ['cf-jei', 'Just Enough Items', 'mezz', 'View items and recipes.', 90000000, ['utility']], ['cf-dynmap', 'Dynmap', 'mikeprimm', 'Live web map.', 3000000, ['map-information']]].map(([project_id, title, author, description, downloads, categories]) => ({ project_id: project_id as string, slug: project_id as string, title: title as string, description: description as string, author: author as string, icon_url: null, downloads: downloads as number, follows: 0, categories: categories as string[], updated: ago(3 * DAY), client_side: null, server_side: null }));
 
 export async function handle(method: string, rawPath: string, body: unknown): Promise<unknown> {
   await sleep(50 + Math.random() * 120);
@@ -314,10 +316,11 @@ export async function handle(method: string, rawPath: string, body: unknown): Pr
   if (p === '/content/search') {
     const qq = (qs.get('q') ?? '').toLowerCase();
     const s = sv(qs.get('server_id')!);
-    const r = hits.filter((h) => !qq || (h.title + h.description).toLowerCase().includes(qq));
+    const r = (qs.get('provider') === 'curseforge' ? cfHits : hits).filter((h) => !qq || (h.title + h.description).toLowerCase().includes(qq));
     return { hits: r.slice(+(qs.get('offset') ?? 0), +(qs.get('offset') ?? 0) + +(qs.get('limit') ?? 20)), total: r.length, compat: { kind: s.content_kind, loader: s.runtime, game_version: s.game_version } };
   }
-  if (M(/^\/content\/projects\/([^/]+)$/)) return V(decodeURIComponent(m![1]));
+  if (p === '/content/providers') { const rt = sv(qs.get('server_id')!).runtime; return { providers: [{ id: 'modrinth', name: 'Modrinth', available: true, supported: true, reason: null }, { id: 'curseforge', name: 'CurseForge', available: true, supported: rt !== 'velocity', reason: rt === 'velocity' ? 'CurseForge has no proxy plugins' : null }] }; }
+  if (M(/^\/content\/projects\/([^/]+)$/)) return V(decodeURIComponent(m![1]), qs.get('provider') === 'curseforge');
 
   if (p === '/servers') {
     if (method === 'GET') return servers;
@@ -362,12 +365,12 @@ export async function handle(method: string, rawPath: string, body: unknown): Pr
     if (sub === '/files/upload') { const pth = qs.get('path') ?? ''; for (const f of (body as FormData).getAll('file') as File[]) fs[s.id][(pth ? pth + '/' : '') + f.name] = BIN.test(f.name) ? '\0'.repeat(Math.min(f.size, 5000)) : await f.text(); return; }
     if (sub === '/content' && method === 'GET') return { items: content[s.id] ?? [] };
     if (sub === '/content/plan') {
-      const h = hits.find((x) => x.project_id === b.project_id);
+      const h = [...hits, ...cfHits].find((x) => x.project_id === b.project_id);
       return { items: [{ action: 'install', title: h?.title ?? b.project_id, filename: `${b.project_id}-2.4.1.jar`, size: 2.1e6, reason: 'Selected by you' }, ...(b.project_id === 'worldedit' ? [{ action: 'install', title: 'FastAsyncWorldEdit support lib', filename: 'lib-1.0.jar', size: 420000, reason: 'Required dependency' }] : [])], warnings: s.state === 'running' ? ['The server is running; a restart is needed to load it.'] : [], requires_restart: true };
     }
     if (sub === '/content' && method === 'POST') {
-      const h = hits.find((x) => x.project_id === b.project_id);
-      return op('content.install', `Installing ${h?.title ?? b.project_id}`, s.id, ['Resolving dependencies', 'Downloading', 'Verifying sha512', 'Placing files'], { done: () => { content[s.id].push({ id: uid(), provider: 'modrinth', project_id: b.project_id, version_id: b.version_id ?? uid(), title: h?.title ?? b.project_id, version_number: '2.4.1', filename: `${b.project_id}-2.4.1.jar`, kind: s.content_kind, sha512: 'ff00'.repeat(20), installed_at: now(), pinned: false, source: 'moss' }); pushUndo(s.id, `Installed ${h?.title}`, [`plugins/${b.project_id}.jar`]); log('content.install', s.name, h?.title ?? ''); } });
+      const h = [...hits, ...cfHits].find((x) => x.project_id === b.project_id);
+      return op('content.install', `Installing ${h?.title ?? b.project_id}`, s.id, ['Resolving dependencies', 'Downloading', 'Verifying sha512', 'Placing files'], { done: () => { content[s.id].push({ id: uid(), provider: b.provider ?? 'modrinth', project_id: b.project_id, version_id: b.version_id ?? uid(), title: h?.title ?? b.project_id, version_number: '2.4.1', filename: `${b.project_id}-2.4.1.jar`, kind: s.content_kind, sha512: 'ff00'.repeat(20), installed_at: now(), pinned: false, source: 'moss' }); pushUndo(s.id, `Installed ${h?.title}`, [`plugins/${b.project_id}.jar`]); log('content.install', s.name, h?.title ?? ''); } });
     }
     if (S(/^\/content\/([^/]+)$/)) {
       const list = content[s.id]; const i = list.findIndex((x) => x.id === mm![1]);

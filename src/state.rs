@@ -39,6 +39,8 @@ pub struct Live {
     pub last_state: String,
     pub cpu_prev: Option<(u64, Instant)>,
     pub exiting: bool,
+    /// A start is in progress; stops two quick Start clicks (or an autostart racing a click) from launching twice.
+    pub starting: bool,
 }
 
 #[derive(Clone, Copy, serde::Serialize)]
@@ -65,6 +67,8 @@ pub struct Inner {
     pub users: Mutex<HashMap<String, (Instant, crate::auth::User)>>,
     pub jwks: Mutex<Option<(Instant, Value)>>,
     pub host: Mutex<crate::metrics::HostSampler>,
+    pub cf: Mutex<crate::curseforge::Limiter>,
+    pub cf_sem: tokio::sync::Semaphore,
 }
 
 pub type St = Arc<Inner>;

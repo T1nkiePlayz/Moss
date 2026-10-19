@@ -1,9 +1,13 @@
+<script module lang="ts">
+  let remembered: import('../../lib/api').ProviderId = 'modrinth';
+</script>
+
 <script lang="ts">
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
   import States from '../../components/States.svelte';
   import PlanModal from '../../components/PlanModal.svelte';
-  import { api, errMsg, type ChangePlan, type ContentItem, type Hit, type Project, type SearchResult, type Server } from '../../lib/api';
+  import { api, errMsg, type ChangePlan, type ContentItem, type Hit, type Project, type ProviderId, type ProviderInfo, type SearchResult, type Server } from '../../lib/api';
   import { compact, bytes, relTime, num, initials } from '../../lib/format';
   import { onOp, toast, toastError, trackOp, undoToast } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';
@@ -20,6 +24,26 @@
   let updates = $state<Record<string, { latest: string; version_id: string }>>({});
   let checking = $state(false);
   // browse
+  let providers = $state<ProviderInfo[]>([]);
+  let chosen = $state<ProviderId>(remembered);
+  const usable = (p: ProviderInfo) => p.available && p.supported;
+  const avail = $derived(providers.filter((p) => p.available));
+  const multi = $derived(avail.length > 1);
+  const provider = $derived<ProviderId>(providers.find((p) => p.id === chosen && usable(p))?.id ?? providers.find(usable)?.id ?? 'modrinth');
+  const pname = $derived(providers.find((p) => p.id === provider)?.name ?? 'Modrinth');
+  const pLabel = (id: string) => (id === 'curseforge' ? 'CurseForge' : id === 'modrinth' ? 'Modrinth' : 'Manual');
+  $effect(() => { s.id; api.providers(s.id).then((r) => (providers = r.providers), () => (providers = [])); });
+  function pick(id: ProviderId) {
+    if (id === provider) return;
+    chosen = remembered = id; q = ''; hits = []; res = null;
+  }
+  function segKey(e: KeyboardEvent) {
+    const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    if (!d) return;
+    e.preventDefault();
+    const ok = providers.filter(usable), n = ok[(ok.findIndex((p) => p.id === provider) + d + ok.length) % ok.length];
+    if (n) { pick(n.id); (e.currentTarget as HTMLElement).querySelector<HTMLElement>(`[data-p="${n.id}"]`)?.focus(); }
+  }
   let q = $state('');
   let sort = $state('relevance');
   let res = $state<SearchResult | null>(null);
@@ -40,14 +64,14 @@
     const my = ++seq;
     searching = true; sErr = '';
     try {
-      const r = await api.search({ server_id: s.id, q: q.trim(), sort, offset, limit: 20 });
+      const r = await api.search({ server_id: s.id, q: q.trim(), sort, offset, limit: 20, provider });
       if (my !== seq) return;
       res = r;
       hits = offset ? [...hits, ...r.hits] : r.hits;
     } catch (e) { if (my === seq) sErr = errMsg(e); }
     if (my === seq) searching = false;
   }
-  $effect(() => { q; sort; if (view !== 'browse') return; clearTimeout(timer); timer = setTimeout(() => search(0), q ? 300 : 0); return () => clearTimeout(timer); });
+  $effect(() => { q; sort; provider; if (view !== 'browse') return; clearTimeout(timer); timer = setTimeout(() => search(0), q ? 300 : 0); return () => clearTimeout(timer); });
 
   // react to finished operations for this server
   $effect(() => onOp(async (o) => {
@@ -59,12 +83,12 @@
     } catch { /* undo is best effort */ }
   }));
 
-  const installedIds = $derived(new Set((items ?? []).map((i) => i.project_id).filter(Boolean)));
+  const installedIds = $derived(new Set((items ?? []).filter((i) => i.provider === provider).map((i) => i.project_id).filter(Boolean)));
 
   async function review(hit: { project_id: string; title: string }, version_id?: string) {
     try {
-      const p = await api.plan(s.id, hit.project_id, version_id);
-      plan = { plan: p, title: `Install ${hit.title}`, label: 'Install', run: () => api.install(s.id, hit.project_id, version_id) };
+      const p = await api.plan(s.id, hit.project_id, version_id, provider);
+      plan = { plan: p, title: `Install ${hit.title}`, label: 'Install', run: () => api.install(s.id, hit.project_id, version_id, provider) };
     } catch (e) { toastError(e, 'Could not build a plan'); }
   }
   function reviewRemove(it: ContentItem) {
@@ -100,15 +124,22 @@
   }
   async function openDetail(hit: Hit) {
     detail = { hit, project: null, err: '' };
-    try { const p = await api.project(hit.project_id, s.id); if (detail?.hit === hit) detail.project = p; } catch (e) { if (detail?.hit === hit) detail.err = errMsg(e); }
+    try { const p = await api.project(hit.project_id, s.id, provider); if (detail?.hit === hit) detail.project = p; } catch (e) { if (detail?.hit === hit) detail.err = errMsg(e); }
   }
 </script>
 
 <div class="row between wrap" style="margin-bottom:16px">
   <div class="row g6" role="group" aria-label="View">
     <button class="chip" aria-pressed={view === 'installed'} onclick={() => (view = 'installed')}>Installed{#if items}<span class="tnum faint">{items.length}</span>{/if}</button>
-    <button class="chip" aria-pressed={view === 'browse'} onclick={() => (view = 'browse')}><Icon name="search" size={14} />Browse Modrinth</button>
+    <button class="chip" aria-pressed={view === 'browse'} onclick={() => (view = 'browse')}><Icon name="search" size={14} />Browse{multi ? '' : ' ' + pname}</button>
   </div>
+  {#if view === 'browse' && multi}
+    <div class="seg" role="radiogroup" aria-label="Content provider" tabindex="-1" onkeydown={segKey}>
+      {#each avail as p (p.id)}
+        <button class="segb" role="radio" aria-checked={provider === p.id} tabindex={provider === p.id ? 0 : -1} data-p={p.id} disabled={!usable(p)} title={usable(p) ? undefined : (p.reason ?? 'Not available')} onclick={() => pick(p.id)}>{p.name}</button>
+      {/each}
+    </div>
+  {/if}
   {#if view === 'installed' && canManage}<button class="btn" disabled={checking} onclick={check}><Icon name="refresh" size={15} />{checking ? 'Checking…' : 'Check for updates'}</button>{/if}
 </div>
 
@@ -116,7 +147,7 @@
   {#if iErr}<States kind="error" text={iErr} retry={loadItems} />
   {:else if !items}<States kind="loading" rows={4} />
   {:else if !items.length}
-    <States kind="empty" icon="puzzle" title="No {label.toLowerCase()} installed" text="Browse Modrinth for {label.toLowerCase()} that match this server's version and loader."><button class="btn primary" onclick={() => (view = 'browse')}><Icon name="search" size={15} />Browse</button></States>
+    <States kind="empty" icon="puzzle" title="No {label.toLowerCase()} installed" text="Browse for {label.toLowerCase()} that match this server's version and loader."><button class="btn primary" onclick={() => (view = 'browse')}><Icon name="search" size={15} />Browse</button></States>
   {:else}
     <div class="table-wrap">
       <table>
@@ -125,7 +156,7 @@
           {#each items as it (it.id)}
             <tr>
               <td><div class="ellipsis" style="max-width:260px"><b>{it.title}</b></div><div class="xs faint mono ellipsis" style="max-width:260px">{it.filename}</div></td>
-              <td><span class="badge {it.source === 'moss' ? 'ok' : ''}" title={it.source === 'moss' ? 'Installed by Moss from Modrinth' : 'Dropped in manually; Moss cannot update it'}>{it.provider === 'modrinth' ? 'Modrinth' : 'Manual'}</span></td>
+              <td><span class="badge {it.source === 'moss' ? 'ok' : ''}" title={it.source === 'moss' ? `Installed by Moss from ${pLabel(it.provider)}` : 'Dropped in manually; Moss cannot update it'}>{pLabel(it.provider)}</span></td>
               <td class="tnum">{it.version_number ?? '—'}{#if updates[it.id]}<span class="badge info" style="margin-left:6px">→ {updates[it.id].latest}</span>{/if}</td>
               <td class="muted">{relTime(it.installed_at)}</td>
               <td class="num">
@@ -146,7 +177,7 @@
 {:else}
   <div class="row wrap" style="margin-bottom:12px">
     <div class="grow" style="max-width:420px;position:relative;min-width:200px">
-      <input class="input" style="padding-left:34px" type="search" placeholder="Search {label.toLowerCase()}…" aria-label="Search Modrinth" bind:value={q} />
+      <input class="input" style="padding-left:34px" type="search" placeholder="Search {label.toLowerCase()}…" aria-label="Search {pname}" bind:value={q} />
       <span class="ico"><Icon name="search" size={15} /></span>
     </div>
     <select class="select" style="width:auto" aria-label="Sort" bind:value={sort}>
@@ -154,6 +185,7 @@
     </select>
     {#if res}<span class="xs muted">Showing {res.compat.kind.replace('_', ' ')} for <b>{res.compat.loader}</b> · {res.compat.game_version}</span>{/if}
   </div>
+  {#if provider === 'curseforge' && s.content_kind !== 'datapacks'}<p class="xs muted" style="margin:-4px 0 12px">Results from CurseForge. CurseForge does not say whether a mod runs on servers, so check the project page.</p>{/if}
   {#if sErr && !hits.length}<States kind="error" text={sErr} retry={() => search(0)} />
   {:else if searching && !hits.length}<div class="grid cols-auto">{#each [1, 2, 3, 4, 5, 6] as _}<div class="skel" style="height:150px"></div>{/each}</div>
   {:else if !hits.length}<States kind="empty" icon="search" title="No results" text="Try a different search. Client-only projects are hidden." />
@@ -164,6 +196,7 @@
           <div class="row" style="align-items:flex-start">
             {#if h.icon_url}<img class="ico2" src={h.icon_url} alt="" loading="lazy" />{:else}<div class="ico2 ph">{initials(h.title)}</div>{/if}
             <div class="grow"><h3 class="ellipsis">{h.title}</h3><div class="xs muted">by {h.author}</div></div>
+            {#if multi}<span class="tag" title="Source: {pname}">{pname}</span>{/if}
           </div>
           <p class="muted sm desc">{h.description}</p>
           <div class="row g4 wrap">{#each h.categories.slice(0, 3) as c}<span class="tag">{c}</span>{/each}</div>
@@ -203,9 +236,11 @@
             <div class="grow">
               <div class="row g6"><b class="tnum">{v.version_number}</b><span class="badge {v.channel === 'release' ? 'ok' : v.channel === 'beta' ? 'warn' : 'danger'}">{v.channel}</span></div>
               <div class="xs muted">{relTime(v.date)} · {compact(v.downloads)} downloads · {v.files.find((f) => f.primary)?.filename ?? v.files[0]?.filename} ({bytes(v.files[0]?.size)})</div>
+              {#if v.downloadable === false}<div class="xs warn-t">Author disabled automatic downloads — get it from the project page{#if p.links.page}&nbsp;(<a href={p.links.page} target="_blank" rel="noreferrer noopener">open</a>){/if} and upload it in Files</div>{/if}
+              {#if v.warning}<div class="xs warn-t">{v.warning}</div>{/if}
               {#if v.dependencies.some((d) => d.kind === 'required')}<div class="xs faint">Requires {v.dependencies.filter((d) => d.kind === 'required').map((d) => d.project_id).join(', ')}</div>{/if}
             </div>
-            {#if canManage}<button class="btn sm {v === p.versions[0] ? 'primary' : ''}" onclick={() => review(detail!.hit, v.id)}>Install</button>{/if}
+            {#if canManage}<button class="btn sm {v === p.versions[0] ? 'primary' : ''}" disabled={v.downloadable === false} onclick={() => review(detail!.hit, v.id)}>Install</button>{/if}
           </li>
         {/each}
       </ul>
@@ -216,6 +251,12 @@
 {#if plan}<PlanModal plan={plan.plan} title={plan.title} confirmLabel={plan.label} busy={applying} onconfirm={apply} oncancel={() => (plan = null)} />{/if}
 
 <style>
+  .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--s2); }
+  .segb { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
+  .segb[aria-checked='true'] { background: var(--a-soft); color: var(--a-text); font-weight: 600; }
+  .segb:disabled { opacity: 0.5; cursor: not-allowed; }
+  .segb:focus-visible { outline: 2px solid var(--a-text); outline-offset: 1px; }
+  .warn-t { color: var(--warn); }
   .ico { position: absolute; left: 11px; top: 10px; color: var(--faint); pointer-events: none; display: grid; }
   .hit { display: flex; flex-direction: column; gap: 10px; min-height: 170px; }
   .ico2 { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; flex: none; background: var(--s3); }

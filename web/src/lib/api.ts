@@ -34,22 +34,24 @@ export interface TimelineEvent { time: string; kind: 'start' | 'ready' | 'stop' 
 export interface FileEntry { name: string; kind: 'dir' | 'file' | 'symlink'; size: number; modified: string }
 export interface FileList { path: string; entries: FileEntry[] }
 export interface FileContent { content: string; size: number; truncated: boolean; binary: boolean }
+export type ProviderId = 'modrinth' | 'curseforge';
+export interface ProviderInfo { id: ProviderId; name: string; available: boolean; supported: boolean; reason: string | null }
 export interface Hit {
   project_id: string; slug: string; title: string; description: string; author: string; icon_url: string | null;
-  downloads: number; follows: number; categories: string[]; updated: string; client_side: string; server_side: string;
+  downloads: number; follows: number; categories: string[]; updated: string; client_side: string | null; server_side: string | null;
 }
 export interface SearchResult { hits: Hit[]; total: number; compat: { kind: ContentKind; loader: string; game_version: string } }
 export interface ProjectVersion {
   id: string; name: string; version_number: string; channel: 'release' | 'beta' | 'alpha'; date: string; downloads: number;
   files: { filename: string; size: number; primary: boolean }[]; game_versions: string[]; loaders: string[];
-  dependencies: { project_id: string; kind: 'required' | 'optional' | 'incompatible' }[];
+  dependencies: { project_id: string; kind: 'required' | 'optional' | 'incompatible' }[]; downloadable?: boolean; warning?: string | null;
 }
 export interface Project {
   project_id: string; title: string; description: string; body: string; icon_url: string | null;
   links: { source?: string; issues?: string; wiki?: string; page?: string }; license: string; gallery: string[]; versions: ProjectVersion[];
 }
 export interface ContentItem {
-  id: string; provider: 'modrinth' | 'manual'; project_id: string | null; version_id: string | null; title: string;
+  id: string; provider: ProviderId | 'manual'; project_id: string | null; version_id: string | null; title: string;
   version_number: string | null; filename: string; kind: string; sha512: string | null; installed_at: string; pinned: boolean; source: 'moss' | 'manual';
 }
 export interface ChangePlan { items: { action: 'install' | 'replace' | 'remove'; title: string; filename: string; size: number; reason: string }[]; warnings: string[]; requires_restart: boolean }
@@ -206,12 +208,13 @@ export const api = {
     return send('POST', `/servers/${e(id)}/files/upload${q({ path })}`, fd);
   },
 
-  search: (p: { server_id: string; q: string; offset?: number; limit?: number; sort?: string; category?: string }) =>
+  search: (p: { server_id: string; q: string; offset?: number; limit?: number; sort?: string; category?: string; provider?: ProviderId }) =>
     get<SearchResult>(`/content/search${q(p)}`, { ttl: 30000 }),
-  project: (pid: string, server_id: string) => get<Project>(`/content/projects/${e(pid)}${q({ server_id })}`, { ttl: 60000 }),
+  providers: (server_id: string) => get<{ providers: ProviderInfo[] }>(`/content/providers${q({ server_id })}`, { ttl: 60000 }),
+  project: (pid: string, server_id: string, provider?: ProviderId) => get<Project>(`/content/projects/${e(pid)}${q({ server_id, provider })}`, { ttl: 60000 }),
   content: (id: string) => get<{ items: ContentItem[] }>(`/servers/${e(id)}/content`),
-  plan: (id: string, project_id: string, version_id?: string) => send<ChangePlan>('POST', `/servers/${e(id)}/content/plan`, { project_id, version_id }),
-  install: (id: string, project_id: string, version_id?: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/content`, { project_id, version_id }),
+  plan: (id: string, project_id: string, version_id?: string, provider?: ProviderId) => send<ChangePlan>('POST', `/servers/${e(id)}/content/plan`, { project_id, version_id, provider }),
+  install: (id: string, project_id: string, version_id?: string, provider?: ProviderId) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/content`, { project_id, version_id, provider }),
   removeContent: (id: string, item: string) => send<{ operation: Operation }>('DELETE', `/servers/${e(id)}/content/${e(item)}`),
   checkUpdates: (id: string) => send<{ updates: { item_id: string; title: string; current: string; latest: string; version_id: string }[] }>('POST', `/servers/${e(id)}/content/check-updates`),
   updateContent: (id: string, item: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/content/${e(item)}/update`),

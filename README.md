@@ -73,7 +73,7 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 **Files & config** · browse, upload, download, edit, rename, delete, all confined to the server directory (no `..`, no symlink escapes) · form-based `server.properties` editor with a raw mode · atomic writes · undo.
 
-**Content** · Modrinth search filtered by runtime, loader, game version and server side · detail pages with compatible versions · dependency resolution · installed inventory with provenance (`Modrinth` vs manually added files) · update checks and pinning · removal keeps plugin data.
+**Content** · Modrinth and CurseForge search filtered by runtime, loader and game version (client-only Modrinth projects are filtered out) · detail pages with compatible versions · dependency resolution · installed inventory with provenance (`Modrinth` vs manually added files) · update checks and pinning · removal keeps plugin data.
 
 **Backups & schedules** · manual and scheduled backups with retention that never removes your last good one · verify any backup on demand · restore as a new server or in place (a safety backup is taken and the old directory is kept) · interval or daily-at schedules with an explicit UTC offset for backup, start, stop, restart and console commands · missed runs execute once, never as a backlog.
 
@@ -177,6 +177,9 @@ Flags and environment variables (flags win):
 | `SUPABASE_JWT_SECRET` | – | Only for legacy HS256-signed projects. |
 | `MOSS_OWNER_EMAILS` | – | Comma-separated emails that become owner on first verified sign-in. |
 | `MOSS_REQUIRE_VERIFIED_EMAIL` | `true` | Require a verified email before matching owner/invite. |
+| `CURSEFORGE_API_KEY` | – | Your own CurseForge key for direct access (secret; `.env.local`). Without it Moss uses the Supabase edge function, see [docs/curseforge.md](docs/curseforge.md). |
+| `MOSS_CURSEFORGE_PROXY` | auto | Edge function URL, or `off` to disable CurseForge. |
+| `MOSS_CURSEFORGE_API_URL` | `https://api.curseforge.com` | API base for direct mode (https, or loopback for tests). |
 | `MOSS_DEV_RUNTIMES` | `false` | Expose the simulated server runtime (demos, tests). |
 | `RUST_LOG` | `moss=info` | Log filter. |
 
@@ -221,7 +224,7 @@ One axum process: SQLite for state, a persisted operation engine with per-server
 
 - Linux x86-64 only; no container backend, so no per-server resource caps beyond the JVM heap.
 - Metrics are in memory (about one hour); there is no long-term history yet.
-- Modrinth only; CurseForge is planned behind the same provider interface.
+- Content comes from Modrinth and CurseForge only. CurseForge needs a key (see [docs/curseforge.md](docs/curseforge.md)) and cannot say whether a mod is server-safe.
 - Forge/NeoForge and non-Minecraft games are not supported.
 - One node. Backups are local; no remote storage.
 - If the host reboots, running servers stop (as always); Moss restarts the ones that were running when it comes back, or that have *autostart* set.
@@ -229,13 +232,14 @@ One axum process: SQLite for state, a persisted operation engine with per-server
 
 ## Roadmap
 
-Container runtime backend (Docker/Podman) with resource limits · CurseForge provider · Forge/NeoForge · event-driven workflows · remote backup destinations · staged updates with a readiness gate · multi-node · public status pages · long-term metrics. The detailed plan lives in [docs/PLAN.md](docs/PLAN.md).
+Container runtime backend (Docker/Podman) with resource limits · Forge/NeoForge · event-driven workflows · remote backup destinations · staged updates with a readiness gate · multi-node · public status pages · long-term metrics. The detailed plan lives in [docs/PLAN.md](docs/PLAN.md).
 
 ## Documentation index
 
 | Doc | What it covers |
 |---|---|
 | [docs/supabase.md](docs/supabase.md) | Auth setup, owners, invites, roles |
+| [docs/curseforge.md](docs/curseforge.md) | CurseForge setup, edge function, limits and terms |
 | [docs/architecture.md](docs/architecture.md) | Process model, operations, safety rules |
 | [docs/api.md](docs/api.md) | HTTP API reference |
 | [docs/PLAN.md](docs/PLAN.md) | Product and engineering plan |

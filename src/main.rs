@@ -1,4 +1,4 @@
-mod api; mod auth; mod backups; mod config; mod console; mod content; mod db; mod download; mod error; mod files; mod health;
+mod api; mod auth; mod backups; mod config; mod console; mod content; mod curseforge; mod db; mod download; mod error; mod files; mod health;
 mod installer; mod java; mod lifecycle; mod mcping; mod metrics; mod ops; mod runtimes; mod sched; mod server; mod state; mod undo;
 
 use clap::{Parser, Subcommand};
@@ -65,6 +65,7 @@ async fn build_state(cfg: config::Config) -> anyhow::Result<state::St> {
         live: Mutex::new(HashMap::new()), hubs: Mutex::new(HashMap::new()), stats: Mutex::new(HashMap::new()), tickets: Mutex::new(HashMap::new()),
         ops: Mutex::new(ops::Registry::default()), locks: Mutex::new(HashMap::new()), cache: Mutex::new(HashMap::new()), users: Mutex::new(HashMap::new()),
         jwks: Mutex::new(None), host: Mutex::new(metrics::HostSampler::default()),
+        cf: Mutex::new(Default::default()), cf_sem: tokio::sync::Semaphore::new(curseforge::CONCURRENCY),
     }))
 }
 
@@ -107,10 +108,17 @@ async fn doctor(cfg: config::Config) -> anyhow::Result<()> {
     println!("[{}] disk: {:.1} GiB free of {:.1} GiB", ok(f > (2 << 30)), f as f64 / (1u64 << 30) as f64, t as f64 / (1u64 << 30) as f64);
     println!("[{}] port {} available", ok(tokio::net::TcpListener::bind((cfg.bind.as_str(), cfg.port)).await.is_ok()), cfg.port);
     let st = build_state(cfg.clone()).await?;
-    let j = tokio::task::spawn_blocking(move || java::installs(&st, true)).await?;
+    let st2 = st.clone();
+    let j = tokio::task::spawn_blocking(move || java::installs(&st2, true)).await?;
     if j.is_empty() { println!("[warn] no Java found — Moss can download Temurin from Settings → Java"); }
     for i in j { println!("[ok  ] java {} ({}) at {}{}", i.major, i.version, i.path.display(), if i.managed { " [managed]" } else { "" }); }
     println!("[{}] auth: {}", ok(cfg.dev() || !cfg.supabase_url.is_empty()), if cfg.dev() { "dev mode (no login, loopback only)" } else { "supabase" });
+    let cf = match curseforge::mode(&st) {
+        Some(curseforge::Mode::Key(_)) => "direct, with CURSEFORGE_API_KEY".to_string(),
+        Some(curseforge::Mode::Proxy(u)) => format!("through the edge function at {u}"),
+        None => "off (deploy the Supabase edge function or set CURSEFORGE_API_KEY)".to_string(),
+    };
+    println!("[info] curseforge: {cf}");
     Ok(())
 }
 

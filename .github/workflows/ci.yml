@@ -36,6 +36,9 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: CurseForge edge function test
+        working-directory: .
+        run: node supabase/functions/curseforge/index.test.mts
 
   backend:
     name: Backend

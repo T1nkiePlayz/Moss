@@ -28,6 +28,15 @@ pub struct Config {
     /// Require Supabase `email_verified` before an account can be matched to an owner/invite.
     #[arg(long, env = "MOSS_REQUIRE_VERIFIED_EMAIL", default_value_t = true, action = clap::ArgAction::Set)]
     pub require_verified_email: bool,
+    /// Your own CurseForge API key for direct access (secret; keep it in .env.local). Without it, Moss uses the project's `curseforge` edge function.
+    #[arg(long, env = "CURSEFORGE_API_KEY", default_value = "", hide_env_values = true)]
+    pub curseforge_api_key: String,
+    /// API base for direct CurseForge access (https, or loopback http for tests).
+    #[arg(long, env = "MOSS_CURSEFORGE_API_URL", default_value = "https://api.curseforge.com")]
+    pub curseforge_api_url: String,
+    /// Edge function URL for CurseForge; empty = `<SUPABASE_URL>/functions/v1/curseforge`, `off` disables CurseForge.
+    #[arg(long, env = "MOSS_CURSEFORGE_PROXY", default_value = "")]
+    pub curseforge_proxy: String,
     /// Expose the simulated game server runtime (development and demos).
     #[arg(long, env = "MOSS_DEV_RUNTIMES", default_value_t = false, action = clap::ArgAction::Set)]
     pub dev_runtimes: bool,
@@ -54,6 +63,10 @@ impl Config {
             }
         } else if self.supabase_url.is_empty() {
             anyhow::bail!("SUPABASE_URL is required in supabase auth mode (or run with MOSS_AUTH=dev on loopback)");
+        }
+        let u = &self.curseforge_api_url;
+        if !(u.starts_with("https://") || u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost")) {
+            anyhow::bail!("MOSS_CURSEFORGE_API_URL must be https (or loopback http for tests)");
         }
         Ok(())
     }

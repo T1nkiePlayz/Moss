@@ -1,0 +1,3 @@
+# Only the Edge Function settings Moss needs; deploy with: supabase functions deploy curseforge
+[functions.curseforge]
+verify_jwt = true

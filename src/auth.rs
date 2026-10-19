@@ -12,6 +12,9 @@ pub struct User {
     pub id: String,
     pub email: String,
     pub role: String,
+    /// The caller's Supabase access token, kept only to forward to the CurseForge edge function.
+    #[serde(skip)]
+    pub token: Option<String>,
 }
 
 pub const ALL_PERMS: &[&str] = &[
@@ -113,7 +116,7 @@ async fn provision(st: &St, c: Claims) -> ApiResult<User> {
     let require_verified = st.cfg.require_verified_email;
     let sub = c.sub.clone();
     let user = st.db.call(move |db| {
-        let by_id = db.query_row("SELECT id,email,role FROM users WHERE id=?", [&sub], |r| Ok(User { id: r.get(0)?, email: r.get(1)?, role: r.get(2)? }));
+        let by_id = db.query_row("SELECT id,email,role FROM users WHERE id=?", [&sub], |r| Ok(User { id: r.get(0)?, email: r.get(1)?, role: r.get(2)?, token: None }));
         if let Ok(u) = by_id { return Ok(Some(u)); }
         if email.is_empty() || (require_verified && !verified) { return Ok(None); }
         // invited (pre-created, unlinked) account?
@@ -123,14 +126,14 @@ async fn provision(st: &St, c: Claims) -> ApiResult<User> {
             db.execute("INSERT INTO users(id,email,role,linked,created_at) VALUES (?,?,?,1,?)", rusqlite::params![sub, email, role, crate::db::now()])?;
             db.execute("UPDATE grants SET user_id=? WHERE user_id=?", [&sub, &old_id])?;
             db.execute("DELETE FROM users WHERE id=?", [&old_id])?;
-            return Ok(Some(User { id: sub, email, role }));
+            return Ok(Some(User { id: sub, email, role, token: None }));
         }
         let owner_count: i64 = db.query_row("SELECT COUNT(*) FROM users WHERE role='owner'", [], |r| r.get(0))?;
         let role = (owners.contains(&email) || (owners.is_empty() && owner_count == 0)).then_some("owner");
         match role {
             Some(role) => {
                 db.execute("INSERT INTO users(id,email,role,linked,created_at) VALUES (?,?,?,1,?)", rusqlite::params![sub, email, role, crate::db::now()])?;
-                Ok(Some(User { id: sub, email, role: role.into() }))
+                Ok(Some(User { id: sub, email, role: role.into(), token: None }))
             }
             None => Ok(None),
         }
@@ -148,11 +151,13 @@ impl FromRequestParts<St> for User {
     type Rejection = ApiError;
     async fn from_request_parts(parts: &mut Parts, st: &St) -> Result<Self, ApiError> {
         if st.cfg.dev() {
-            return Ok(User { id: "dev".into(), email: "dev@localhost".into(), role: "owner".into() });
+            return Ok(User { id: "dev".into(), email: "dev@localhost".into(), role: "owner".into(), token: None });
         }
         let token = parts.headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;
         let claims = verify(st, token).await?;
-        provision(st, claims).await
+        let mut user = provision(st, claims).await?;
+        user.token = Some(token.to_string());
+        Ok(user)
     }
 }
 

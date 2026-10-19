@@ -51,7 +51,9 @@ Server object:
 - `GET /servers/{id}/files/content?path=` → `{content,size,truncated,binary}` (text ≤ 2 MiB)
 - `PUT /servers/{id}/files/content {path,content}` → `{undo_id}` · `POST …/files/mkdir {path}` · `POST …/files/rename {from,to}` · `DELETE …/files?path=` · `POST …/files/upload?path=` (multipart field `file`, repeatable) · `GET …/files/download?path=`
 
-## Content (Modrinth; typed by runtime)
+## Content (Modrinth and CurseForge; typed by runtime)
+- `GET /content/providers?server_id=` → `{providers:[{id:"modrinth"|"curseforge",name,available,supported,reason|null}]}`. `available` = configured on this instance, `supported` = has content for the server's runtime. See [curseforge.md](curseforge.md).
+- `search`, `projects/{id}`, `plan` and install take an optional `provider` (`modrinth` default, `curseforge`). CurseForge hits have null `client_side`/`server_side`; versions may carry `downloadable:false` and a `warning`. A CurseForge rate limit answers 429 `provider.rate_limited`.
 - `GET /content/search?server_id=&q=&offset=0&limit=20&sort=relevance|downloads|updated|follows&category=` → `{hits:[{project_id,slug,title,description,author,icon_url,downloads,follows,categories:string[],updated,client_side,server_side}],total,compat:{kind,loader,game_version}}` (client-only projects are filtered out; `compat.kind` names the tab: plugins/mods/proxy_plugins/datapacks)
 - `GET /content/projects/{project_id}?server_id=` → `{project_id,title,description,body,icon_url,links:{source,issues,wiki,page},license,gallery:string[],versions:[{id,name,version_number,channel:"release"|"beta"|"alpha",date,downloads,files:[{filename,size,primary}],game_versions,loaders,dependencies:[{project_id,kind:"required"|"optional"|"incompatible"}]}]}` (versions already filtered to the server's loader + game version)
 - `GET /servers/{id}/content` → `{items:[{id,provider:"modrinth"|"manual",project_id|null,version_id|null,title,version_number|null,filename,kind,sha512|null,installed_at,pinned,source:"moss"|"manual"}]}` (manually-dropped jars appear as `manual`)

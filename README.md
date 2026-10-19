@@ -162,6 +162,8 @@ export MOSS_OWNER_EMAILS=you@example.com
 
 Nobody gets in without being the owner or being invited, even if sign-ups are open on your Supabase project.
 
+The repository's `.env` already holds this project's public `SUPABASE_URL` and publishable key, and Moss loads `.env` then `.env.local` from its working directory (real environment variables win). Fork it for your own instance by replacing those two values; keep secrets and `MOSS_OWNER_EMAILS` in the gitignored `.env.local`.
+
 ## Configuration
 
 Flags and environment variables (flags win):

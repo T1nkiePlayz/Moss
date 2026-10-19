@@ -1,6 +1,5 @@
 #!/bin/sh
-# Run Moss against your Supabase project using .env.local (gitignored).
+# Run Moss with the settings in .env (public Supabase project) and .env.local (your overrides).
 set -e
 cd "$(dirname "$0")/.."
-set -a; . ./.env.local; set +a
 exec cargo run --release -- serve

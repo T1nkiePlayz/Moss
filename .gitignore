@@ -3,7 +3,7 @@
 *.sqlite*
 web/node_modules/
 web/dist/
-.env
-.env.*
-!.env.example
+# .env holds only public project settings and is committed; put secrets and overrides in .env.local
+.env.local
+.env.*.local
 .DS_Store

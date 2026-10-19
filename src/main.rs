@@ -18,7 +18,31 @@ enum Cmd {
     SimServer { #[arg(long, default_value_t = 25565)] port: u16 },
 }
 
+/// Load `.env` then `.env.local` from the working directory (and the binary's directory). Real environment
+/// variables always win, then `.env.local`, then `.env`. Lines are `KEY=value`; `#` starts a comment.
+fn load_dotenv() {
+    let mut dirs = vec![std::path::PathBuf::from(".")];
+    if let Some(d) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) { dirs.push(d); }
+    let preset: std::collections::HashSet<String> = std::env::vars().map(|(k, _)| k).collect();
+    let mut loaded: std::collections::HashMap<String, String> = Default::default();
+    for name in [".env", ".env.local"] {
+        for d in &dirs {
+            let Ok(text) = std::fs::read_to_string(d.join(name)) else { continue };
+            for line in text.lines() {
+                let line = line.trim();
+                let Some((k, v)) = line.split_once('=') else { continue };
+                let (k, v) = (k.trim().trim_start_matches("export ").trim(), v.trim().trim_matches(|c| c == '"' || c == '\''));
+                if k.is_empty() || k.starts_with('#') || v.is_empty() || preset.contains(k) { continue; }
+                loaded.insert(k.to_string(), v.to_string());
+            }
+        }
+    }
+    // single-threaded at this point, before the runtime starts
+    for (k, v) in loaded { unsafe { std::env::set_var(k, v); } }
+}
+
 fn main() -> anyhow::Result<()> {
+    load_dotenv();
     let cli = Cli::parse();
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "moss=info,tower_http=warn".into())).with_target(false).init();
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;

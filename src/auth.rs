@@ -69,9 +69,10 @@ struct Claims {
 }
 
 async fn jwks(st: &St, force: bool) -> anyhow::Result<Value> {
-    if !force
-        && let Some((t, v)) = st.jwks.lock().unwrap().as_ref()
-            && t.elapsed() < Duration::from_secs(600) { return Ok(v.clone()); }
+    // A forced refresh (unknown key id) is rate-limited so garbage tokens cannot make us hammer Supabase.
+    let ttl = if force { Duration::from_secs(30) } else { Duration::from_secs(600) };
+    if let Some((t, v)) = st.jwks.lock().unwrap().as_ref()
+        && t.elapsed() < ttl { return Ok(v.clone()); }
     let url = format!("{}/auth/v1/.well-known/jwks.json", st.cfg.supabase_url.trim_end_matches('/'));
     let v: Value = st.http.get(url).header("apikey", &st.cfg.supabase_anon_key).send().await?.error_for_status()?.json().await?;
     *st.jwks.lock().unwrap() = Some((Instant::now(), v.clone()));
@@ -117,9 +118,11 @@ async fn provision(st: &St, c: Claims) -> ApiResult<User> {
         if email.is_empty() || (require_verified && !verified) { return Ok(None); }
         // invited (pre-created, unlinked) account?
         if let Ok((old_id, role)) = db.query_row("SELECT id,role FROM users WHERE email=? AND linked=0", [&email], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
-            db.execute("DELETE FROM users WHERE id=?", [&old_id])?;
+            // grants cascade on user delete, so free the unique email, add the real row, move grants, then drop the placeholder
+            db.execute("UPDATE users SET email=email||'#invite' WHERE id=?", [&old_id])?;
             db.execute("INSERT INTO users(id,email,role,linked,created_at) VALUES (?,?,?,1,?)", rusqlite::params![sub, email, role, crate::db::now()])?;
-            db.execute("UPDATE grants SET user_id=? WHERE user_id=?", [&sub, &old_id]).ok();
+            db.execute("UPDATE grants SET user_id=? WHERE user_id=?", [&sub, &old_id])?;
+            db.execute("DELETE FROM users WHERE id=?", [&old_id])?;
             return Ok(Some(User { id: sub, email, role }));
         }
         let owner_count: i64 = db.query_row("SELECT COUNT(*) FROM users WHERE role='owner'", [], |r| r.get(0))?;

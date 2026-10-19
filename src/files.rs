@@ -139,8 +139,13 @@ pub async fn upload(State(st): State<St>, user: User, Path(id): Path<String>, Qu
         let tmp = target.with_extension("moss-upload");
         let mut out = tokio::fs::File::create(&tmp).await?;
         use tokio::io::AsyncWriteExt;
-        while let Some(chunk) = f.chunk().await.map_err(|e| ApiError::bad("upload.invalid", e.to_string()))? { out.write_all(&chunk).await?; }
-        out.flush().await?;
+        let res: ApiResult<()> = async {
+            while let Some(chunk) = f.chunk().await.map_err(|e| ApiError::bad("upload.invalid", e.to_string()))? { out.write_all(&chunk).await?; }
+            out.flush().await?;
+            Ok(())
+        }.await;
+        drop(out);
+        if let Err(e) = res { let _ = tokio::fs::remove_file(&tmp).await; return Err(e); }
         tokio::fs::rename(&tmp, &target).await?;
         saved.push(rel_of(&s.dir(&st), &target));
     }
@@ -156,11 +161,11 @@ pub async fn download(State(st): State<St>, user: User, Path(id): Path<String>, 
     let f = tokio::fs::File::open(&p).await?;
     let m = f.metadata().await?;
     if !m.is_file() { return Err(ApiError::bad("path.not_file", "not a file")); }
-    let name = p.file_name().map(|n| n.to_string_lossy().replace('"', "")).unwrap_or_default();
+    let name: String = p.file_name().map(|n| n.to_string_lossy().chars().map(|c| if c.is_ascii_graphic() && c != '"' && c != '\\' || c == ' ' { c } else { '_' }).collect()).unwrap_or_default();
     let mut r = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(f)).into_response();
     let h = r.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
-    h.insert(header::CONTENT_DISPOSITION, HeaderValue::from_str(&format!("attachment; filename=\"{name}\"")).unwrap());
+    h.insert(header::CONTENT_DISPOSITION, HeaderValue::from_str(&format!("attachment; filename=\"{name}\"")).unwrap_or_else(|_| HeaderValue::from_static("attachment")));
     h.insert(header::CONTENT_LENGTH, HeaderValue::from(m.len()));
     Ok(r)
 }

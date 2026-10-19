@@ -158,7 +158,7 @@ async fn prune(st: &St, sid: &str, keep: Option<i64>) {
     let keep = match keep { Some(k) => k, None => st.setting("backup_keep", "7").await.parse().unwrap_or(7) }.max(1);
     let s2 = sid.to_string();
     let victims: Vec<String> = st.db.call(move |c| {
-        let mut q = c.prepare("SELECT id FROM backups WHERE server_id=? AND kind='scheduled' AND status IN ('ok','failed') ORDER BY created_at DESC LIMIT -1 OFFSET ?")?;
+        let mut q = c.prepare("SELECT id FROM backups WHERE server_id=?1 AND kind='scheduled' AND status IN ('ok','failed') AND id <> COALESCE((SELECT id FROM backups WHERE server_id=?1 AND status='ok' ORDER BY created_at DESC LIMIT 1), '') ORDER BY created_at DESC LIMIT -1 OFFSET ?2")?;
         q.query_map(rusqlite::params![s2, keep], |r| r.get(0))?.collect()
     }).await.unwrap_or_default();
     for v in victims { let _ = remove_backup(st, sid, &v).await; }

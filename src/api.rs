@@ -128,10 +128,15 @@ async fn me(user: User) -> Json<Value> {
     Json(json!({"id": user.id, "email": user.email, "role": user.role, "permissions": perms}))
 }
 
-async fn ticket(State(st): State<St>, user: User) -> Json<Value> {
+async fn ticket(State(st): State<St>, user: User) -> ApiResult<Json<Value>> {
     let t = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
-    st.tickets.lock().unwrap().insert(t.clone(), (Instant::now(), user));
-    Json(json!({"ticket": t}))
+    {
+        let mut m = st.tickets.lock().unwrap();
+        m.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(30));
+        if m.len() >= 2000 { return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "ticket.busy", "too many outstanding tickets")); }
+        m.insert(t.clone(), (Instant::now(), user));
+    }
+    Ok(Json(json!({"ticket": t})))
 }
 
 async fn status(State(st): State<St>, _u: User) -> Json<Value> {
@@ -252,7 +257,7 @@ async fn server_patch(State(st): State<St>, user: User, Path(id): Path<String>, 
         if server::list(&st).await?.iter().any(|o| o.id != id && o.port == port) { return Err(ApiError::conflict("port.taken", "port already assigned to another Moss server").field("port", "already assigned")); }
     }
     let now = crate::db::now();
-    let (i, p2, now2) = (id.clone(), (p.name.clone(), p.memory_mb, p.port, p.flags_profile.clone(), p.autostart, p.restart_policy.as_ref().map(|r| (r.enabled, r.max_per_10m.clamp(0, 20))), p.tags.clone().map(|t| serde_json::to_string(&t.into_iter().take(12).collect::<Vec<_>>()).unwrap()), p.notes.clone(), p.accept_eula), now);
+    let (i, p2, now2) = (id.clone(), (p.name.clone(), p.memory_mb, p.port, p.flags_profile.clone(), p.autostart, p.restart_policy.as_ref().map(|r| (r.enabled, r.max_per_10m.clamp(0, 20))), p.tags.clone().map(|t| serde_json::to_string(&t.into_iter().map(|x| x.trim().chars().take(32).collect::<String>()).filter(|x| !x.is_empty()).take(12).collect::<Vec<_>>()).unwrap()), p.notes.clone(), p.accept_eula), now);
     st.db.call(move |c| {
         let (name, mem, port, flags, auto, rp, tags, notes, eula) = p2;
         if let Some(v) = name { c.execute("UPDATE servers SET name=? WHERE id=?", rusqlite::params![v.trim(), i])?; }
@@ -293,7 +298,15 @@ async fn server_delete(State(st): State<St>, user: User, Path(id): Path<String>,
         tokio::fs::rename(&dir, kept.join(format!("{}-{}", s.id, s.name.chars().filter(|c| c.is_alphanumeric()).collect::<String>()))).await?;
     }
     let i = id.clone();
-    st.db.call(move |c| { c.execute("DELETE FROM servers WHERE id=?", [&i])?; c.execute("DELETE FROM timeline WHERE server_id=?", [&i])?; c.execute("DELETE FROM backups WHERE server_id=?", [&i]) }).await?;
+    // Backups outlive the server unless its data is deleted too, so a removed server can still be restored as a new one.
+    if q.delete_data { let _ = tokio::fs::remove_dir_all(st.cfg.backups_dir().join(&id)).await; }
+    let wipe = q.delete_data;
+    st.db.call(move |c| {
+        c.execute("DELETE FROM servers WHERE id=?", [&i])?;
+        c.execute("DELETE FROM timeline WHERE server_id=?", [&i])?;
+        if wipe { c.execute("DELETE FROM backups WHERE server_id=?", [&i])?; }
+        Ok(())
+    }).await?;
     st.live.lock().unwrap().remove(&id);
     st.hubs.lock().unwrap().remove(&id);
     st.stats.lock().unwrap().remove(&id);

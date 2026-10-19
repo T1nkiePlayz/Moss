@@ -1,0 +1,9 @@
+/target/
+/moss-data/
+*.sqlite*
+web/node_modules/
+web/dist/
+.env
+.env.*
+!.env.example
+.DS_Store

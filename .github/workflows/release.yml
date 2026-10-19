@@ -1,0 +1,99 @@
+name: Release Moss
+
+# Push a tag such as v0.1.0 to build and publish a release. Run it by hand
+# (Actions > Release Moss > Run workflow) to rebuild an existing tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    name: Build and publish (linux x86_64)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write      # lets GitHub issue the short-lived certificate for build attestations
+      attestations: write  # stores the attestations for this repository
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Sync version from tag
+        run: node scripts/sync-version.mjs "$TAG"
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Build the web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build the release binary (embeds the web UI)
+        run: cargo build --release --locked
+
+      - name: Package
+        run: |
+          name="moss-${TAG}-linux-x86_64"
+          mkdir -p "dist/$name"
+          cp target/release/moss LICENSE README.md "dist/$name/"
+          cp packaging/moss.service packaging/moss.env.example "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/moss-*.tar.gz
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## Moss $TAG"
+            echo
+            # The tagged commit's message is the release announcement (write it as such).
+            git log -1 --format=%B "$TAG"
+            echo
+            echo "### Install"
+            echo "1. Download \`moss-${TAG}-linux-x86_64.tar.gz\` and verify it: \`sha256sum -c SHA256SUMS.txt\` and \`gh attestation verify moss-${TAG}-linux-x86_64.tar.gz --repo \${GITHUB_REPOSITORY}\`."
+            echo "2. Follow the *Quick start* and *Supabase* sections of the README. Moss binds to loopback by default."
+            echo
+            echo "> Early development: storage formats may change between versions. Keep your own backups of anything you care about."
+          } > notes.md
+          flags=(--draft --title "Moss $TAG" --notes-file notes.md --verify-tag)
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/moss-*.tar.gz dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" "${flags[@]}" dist/moss-*.tar.gz dist/SHA256SUMS.txt
+          fi

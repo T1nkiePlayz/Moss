@@ -1,0 +1,49 @@
+[package]
+name = "moss"
+version = "0.1.0"
+edition = "2024"
+description = "Moss — a fast, local-first game server controller (Minecraft Java first)"
+license = "GPL-3.0-only"
+repository = "https://github.com/T1nkiePlayz/Moss"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = { version = "0.8.9", features = ["ws", "multipart", "macros"] }
+base64 = "0.23.1"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+flate2 = "1.1.10"
+futures-util = "0.3.34"
+hex = "0.4.3"
+jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
+libc = "0.2.191"
+mime_guess = "2.0.5"
+rand = "0.10.3"
+reqwest = { version = "0.13.5", features = ["rustls", "json", "stream", "query"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+rust-embed = "8.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha1 = "0.11.0"
+sha2 = "0.11.1"
+tar = "0.4.46"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["full"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
+tower-http = { version = "0.7.1", features = ["compression-gzip", "compression-br", "trace", "cors", "set-header"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.28.0", features = ["v4", "v7"] }
+zstd = { version = "0.14.3", features = ["zstdmt"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+debug = 0

@@ -1,0 +1,23 @@
+{
+  "name": "moss-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "VITE_MOCK=1 vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "lint": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.7",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  }
+}

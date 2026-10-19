@@ -1,0 +1,38 @@
+[Unit]
+Description=Moss game server controller
+Documentation=https://github.com/T1nkiePlayz/Moss
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=moss
+Group=moss
+EnvironmentFile=/etc/moss/moss.env
+ExecStart=/usr/local/bin/moss serve --data-dir /var/lib/moss
+Restart=on-failure
+RestartSec=3
+
+# Game servers are launched detached and MUST survive controller restarts and upgrades.
+# Only the controller process is signalled on stop/restart; Moss re-attaches to running servers on start.
+KillMode=process
+SendSIGKILL=no
+TimeoutStopSec=20
+
+# Hardening (the JVM needs writable+executable memory, so MemoryDenyWriteExecute stays off)
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/moss
+StateDirectory=moss
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

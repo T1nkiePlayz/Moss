@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#090d0b" />
+    <title>Moss</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Apply stored theme before first paint to avoid a flash.
+      try {
+        var p = JSON.parse(localStorage.getItem('moss.prefs') || '{}');
+        var t = p.theme || 'system';
+        if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+        if (p.accent) document.documentElement.dataset.accent = p.accent;
+        if (p.density) document.documentElement.dataset.density = p.density;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

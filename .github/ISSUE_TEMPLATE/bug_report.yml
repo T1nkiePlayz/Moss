@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in Moss is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Create a Paper server\n2. ...\n3. ..."
+  - type: input
+    id: version
+    attributes:
+      label: Moss version
+      description: Shown in Settings, or run `moss --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Server runtime involved
+      options: [None / panel only, Vanilla, Paper, Purpur, Folia, Fabric, Velocity, Custom]
+  - type: input
+    id: os
+    attributes:
+      label: OS and install method
+      placeholder: Arch Linux, systemd unit from the release tarball
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output of `moss doctor` and relevant `journalctl -u moss` lines. Remove tokens and emails first.
+      render: text

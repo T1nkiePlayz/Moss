@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/brand/moss-logo-256.png" alt="Moss logo" width="96">
+</p>
+
 <h1 align="center">Moss</h1>
 
 <p align="center">

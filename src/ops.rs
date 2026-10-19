@@ -120,7 +120,8 @@ where
     let ctx = OpCtx { st: st.clone(), id: op.id.clone(), token };
     tokio::spawn(async move {
         ctx.update(|o| { o.state = "running".into(); o.started_at = Some(now()); o.stage = "Starting".into(); }, true, true);
-        let res = f(ctx.clone()).await;
+        // run in its own task so a panic becomes a failed operation instead of one stuck "running" forever
+        let res = tokio::spawn(f(ctx.clone())).await.unwrap_or_else(|e| Err(anyhow::anyhow!("internal error: {e}")));
         let cancelled = ctx.cancelled();
         ctx.update(|o| {
             o.ended_at = Some(now());

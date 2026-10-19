@@ -48,6 +48,10 @@ async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     cfg.validate()?;
     let st = build_state(cfg.clone()).await?;
     ops::recover(&st).await?;
+    {
+        let st = st.clone();
+        tokio::spawn(async move { loop { let _ = st.db.call(crate::db::prune_history).await; tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await; } });
+    }
     st.db.call(|c| c.execute("UPDATE backups SET status='failed' WHERE status IN ('running','verifying')", [])).await?;
     st.db.call(|c| c.execute("UPDATE servers SET installed=0, install_error='installation was interrupted by a controller restart — delete and recreate this server' WHERE installed=0 AND install_error IS NULL AND created_at < ?", [db::now()])).await.ok();
     { let s2 = st.clone(); tokio::task::spawn_blocking(move || { java::installs(&s2, true); }); }

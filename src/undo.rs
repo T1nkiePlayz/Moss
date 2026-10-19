@@ -16,13 +16,15 @@ pub async fn snapshot(st: &St, s: &Srv, title: &str, files: &[String]) -> ApiRes
         let mut out = vec![];
         for rel in rels {
             let p = safe_join(&root, &rel)?;
-            let existed = p.is_file() && std::fs::metadata(&p).map(|m| m.len() <= MAX_FILE).unwrap_or(false);
-            if existed {
+            let existed = p.is_file();
+            // too large to copy: record it as skipped so a revert leaves the file alone instead of deleting it
+            let skipped = existed && std::fs::metadata(&p).map(|m| m.len() > MAX_FILE).unwrap_or(true);
+            if existed && !skipped {
                 let dst = base.join(&rel);
                 if let Some(par) = dst.parent() { std::fs::create_dir_all(par)?; }
                 std::fs::copy(&p, &dst)?;
             }
-            out.push(json!({"path": rel, "existed": existed}));
+            out.push(json!({"path": rel, "existed": existed, "skipped": skipped}));
         }
         Ok(out)
     }).await.map_err(|e| anyhow::anyhow!(e))??;
@@ -74,6 +76,7 @@ pub async fn revert(State(st): State<St>, user: User, Path(uid): Path<String>) -
         for e in entries {
             let rel = e["path"].as_str().unwrap_or_default();
             let p = safe_join(&root, rel)?;
+            if e["skipped"] == true { continue; }
             if e["existed"] == true {
                 if let Some(par) = p.parent() { std::fs::create_dir_all(par)?; }
                 atomic_write(&p, &std::fs::read(base.join(rel))?)?;

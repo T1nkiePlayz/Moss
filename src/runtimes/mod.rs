@@ -1,8 +1,12 @@
 //! Runtime catalogue, version discovery and download resolution. Uses official metadata APIs only
-//! (Mojang manifest, PaperMC Fill, Purpur, Fabric Meta) and verifies checksums when upstream publishes them.
+//! (Mojang manifest, PaperMC Fill, Purpur, Fabric Meta, NeoForge/Forge maven, Quilt Meta) and verifies checksums
+//! when upstream publishes them. Forge, NeoForge and Quilt live in `modded`; launch arguments in `launch`.
 use crate::{download::Hash, state::St};
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
+
+pub mod launch;
+pub mod modded;
 
 pub struct Resolved { pub url: String, pub hash: Option<Hash>, pub java_major: u32, pub loader_version: Option<String> }
 
@@ -15,14 +19,15 @@ pub fn catalogue(dev: bool) -> Value {
         json!({"id":"fabric","name":"Fabric","category":"modded","tier":"stable","content_kind":"mods","description":"Lightweight mod loader. Server-side and both-side mods.","installable":true}),
         json!({"id":"velocity","name":"Velocity","category":"proxy","tier":"stable","content_kind":"proxy_plugins","description":"Modern, fast proxy for linking servers into a network.","installable":true}),
         json!({"id":"custom","name":"Custom command","category":"custom","tier":"experimental","content_kind":"none","description":"Run any server software from an explicit command. Reduced automatic management.","installable":true}),
-        json!({"id":"neoforge","name":"NeoForge","category":"modded","tier":"planned","content_kind":"mods","description":"Planned: installer runs inside a sandbox once container isolation lands.","installable":false}),
-        json!({"id":"forge","name":"Forge","category":"modded","tier":"planned","content_kind":"mods","description":"Planned.","installable":false}),
+        json!({"id":"neoforge","name":"NeoForge","category":"modded","tier":"stable","content_kind":"mods","description":"Modern Forge successor for Minecraft 1.20.2 and newer. Runs the official installer.","installable":true}),
+        json!({"id":"forge","name":"Forge","category":"modded","tier":"experimental","content_kind":"mods","description":"Minecraft Forge for 1.17 and newer (modern installer). Runs the official installer.","installable":true}),
+        json!({"id":"quilt","name":"Quilt","category":"modded","tier":"stable","content_kind":"mods","description":"Fabric-compatible mod loader with its own ecosystem.","installable":true}),
     ];
     if dev { v.push(json!({"id":"sim","name":"Simulated server","category":"custom","tier":"experimental","content_kind":"none","description":"Built-in fake Minecraft server for demos and testing. No Java needed.","installable":true})); }
     Value::Array(v)
 }
 
-async fn get_json(st: &St, url: &str) -> Result<Value> {
+pub(crate) async fn get_json(st: &St, url: &str) -> Result<Value> {
     Ok(st.http.get(url).send().await.with_context(|| format!("GET {url}"))?.error_for_status()?.json().await?)
 }
 
@@ -65,6 +70,7 @@ pub async fn versions(st: &St, runtime: &str) -> Result<Value> {
                 let rec = out.iter().find(|(_, s)| *s).map(|(v, _)| v.clone());
                 (out, rec)
             }
+            "neoforge" | "forge" | "quilt" => return Ok(modded::to_json(&modded::catalogue(st, runtime).await?)),
             "sim" => (vec![("1.0".into(), true)], Some("1.0".into())),
             "custom" => (vec![("custom".into(), true)], Some("custom".into())),
             other => return Err(anyhow!("runtime {other} has no installable versions")),
@@ -119,6 +125,7 @@ pub async fn resolve(st: &St, runtime: &str, game: &str, loader: Option<&str>) -
             let inst = inst.as_array().and_then(|a| a.iter().find(|x| x["stable"] == true)).and_then(|x| x["version"].as_str()).ok_or_else(|| anyhow!("no stable Fabric installer"))?.to_string();
             Ok(Resolved { url: format!("https://meta.fabricmc.net/v2/versions/loader/{game}/{loader}/{inst}/server/jar"), hash: None, java_major: java_for_game(st, game).await, loader_version: Some(loader) })
         }
+        "neoforge" | "forge" | "quilt" => modded::resolve(st, runtime, game, loader).await,
         other => Err(anyhow!("runtime {other} cannot be installed")),
     }
 }
@@ -137,10 +144,12 @@ mod tests {
     #[test]
     fn stable_names() { assert!(stable_name("1.21.8") && !stable_name("1.21.9-rc1") && !stable_name("1.21.9-pre2")); }
     #[test]
-    fn catalogue_marks_planned_runtimes_uninstallable() {
+    fn catalogue_lists_modded_runtimes_as_installable() {
         let c = catalogue(false);
-        let forge = c.as_array().unwrap().iter().find(|r| r["id"] == "forge").unwrap();
-        assert_eq!(forge["installable"], false);
+        for (id, tier) in [("neoforge", "stable"), ("forge", "experimental"), ("quilt", "stable")] {
+            let r = c.as_array().unwrap().iter().find(|r| r["id"] == id).unwrap();
+            assert_eq!((r["installable"].clone(), r["tier"].as_str(), r["content_kind"].as_str()), (json!(true), Some(tier), Some("mods")));
+        }
         assert!(c.as_array().unwrap().iter().all(|r| r["id"] != "sim"));
     }
 }

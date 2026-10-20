@@ -40,7 +40,7 @@ tower-http = { version = "0.7.1", features = ["compression-gzip", "compression-b
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.28.0", features = ["v4", "v7"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 zstd = { version = "0.14.3", features = ["zstdmt"] }
 
 [profile.release]

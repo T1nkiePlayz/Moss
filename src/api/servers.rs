@@ -11,7 +11,7 @@ pub(super) async fn servers_list(State(st): State<St>, user: User) -> ApiResult<
 struct CustomCmd { command: Vec<String> }
 #[derive(Deserialize)]
 pub(super) struct CreateReq {
-    name: String, runtime: String, game_version: String, loader_version: Option<String>, memory_mb: Option<i64>, port: Option<i64>,
+    name: String, #[serde(default)] runtime: String, #[serde(default)] game_version: String, modpack_token: Option<String>, loader_version: Option<String>, memory_mb: Option<i64>, port: Option<i64>,
     accept_eula: Option<bool>, flags_profile: Option<String>, autostart: Option<bool>, custom: Option<CustomCmd>,
     memory_limit_mb: Option<i64>, cpu_limit_pct: Option<i64>, pids_limit: Option<i64>,
 }
@@ -25,8 +25,9 @@ pub(super) async fn free_port(_st: &St, preferred: i64, used: &[i64]) -> i64 {
     }
 }
 
-pub(super) async fn servers_create(State(st): State<St>, user: User, Json(r): Json<CreateReq>) -> ApiResult<(StatusCode, Json<Value>)> {
+pub(super) async fn servers_create(State(st): State<St>, user: User, Json(mut r): Json<CreateReq>) -> ApiResult<(StatusCode, Json<Value>)> {
     user.require_admin()?;
+    if let Some(t) = &r.modpack_token { (r.runtime, r.game_version, r.loader_version) = crate::content::modpack_create_params(&user, t, &r.runtime, &r.game_version, r.loader_version.as_deref())?; }
     let name = r.name.trim().to_string();
     if name.is_empty() || name.chars().count() > 48 || name.chars().any(|c| c.is_control()) { return Err(ApiError::bad("validation", "invalid name").field("name", "1–48 characters, no control characters")); }
     let cat = runtimes::catalogue(st.cfg.dev_runtimes);
@@ -67,7 +68,7 @@ pub(super) async fn servers_create(State(st): State<St>, user: User, Json(r): Js
     tokio::fs::create_dir_all(s.dir(&st)).await?;
     if is_mc { st.audit(&user.email, "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
     st.audit(&user.email, "server.create", &name, &format!("{} {}", s.runtime, s.game_version), Some(&id)).await;
-    let op = ops::spawn_op(&st, "server.install", format!("Install {name}"), Some(&id), true, { let id = id.clone(); move |ctx| crate::installer::install(ctx, id) });
+    let op = ops::spawn_op(&st, "server.install", format!("Install {name}"), Some(&id), true, { let (id, tok, u) = (id.clone(), r.modpack_token.clone(), user.clone()); move |ctx| crate::content::install_then_import(ctx, id, tok, u) });
     Ok((StatusCode::ACCEPTED, Json(json!({"server": server::view(&s, &st), "operation": op}))))
 }
 

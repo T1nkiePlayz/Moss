@@ -2,6 +2,10 @@
 //! Schema creation and upgrades live in `migrations`.
 mod migrations;
 
+/// Applies the schema to an in-memory connection (tests of other modules).
+#[cfg(test)]
+pub fn run_migrations_for_tests(c: &Connection) -> rusqlite::Result<()> { migrations::run(c) }
+
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::{path::Path, sync::{Arc, Mutex}};

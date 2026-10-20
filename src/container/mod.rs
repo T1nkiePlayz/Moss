@@ -12,6 +12,8 @@ pub mod image;
 pub mod pull;
 #[cfg(test)]
 pub mod fake;
+#[cfg(test)]
+mod stub_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind { Docker, Podman }

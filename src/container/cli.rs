@@ -70,7 +70,8 @@ impl CliEngine {
             std::thread::sleep(Duration::from_millis(40));
         };
         let _ = (h1.join(), h2.join());
-        while let Ok(l) = rx.try_recv() { on_line(&l); }
+        while let Ok(l) = rx.try_recv() { if !on_line(&l) { stop = Some("cancelled"); } }
+        if let Some(why) = stop { bail!("{why}"); }
         Ok(code)
     }
 }

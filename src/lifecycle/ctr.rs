@@ -120,3 +120,101 @@ pub async fn remove(st: &St, id: &str) {
         container::forget_alive(&n);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{container::{Handle, fake::{self, Fake}}, runtimes::launch::test_srv};
+    use clap::Parser;
+
+    #[derive(Parser)] struct W { #[command(flatten)] c: crate::config::Config }
+
+    async fn state(fake: &Arc<Fake>) -> St {
+        let dir = std::env::temp_dir().join(format!("moss-ctr-{}", uuid::Uuid::new_v4()));
+        let cfg = W::parse_from(["x", "--auth", "dev", "--data-dir", dir.to_str().unwrap()]).c;
+        let st = crate::serve::build_state(cfg).await.unwrap();
+        // the Arc<Inner> is not shared yet, so the handle can be swapped in place
+        let mut st = st;
+        Arc::get_mut(&mut st).unwrap().container = Handle::with(fake.clone());
+        st
+    }
+    fn srv(id: &str) -> Srv { let mut s = test_srv("paper", "1.21.1", None, "minimal"); s.id = id.into(); s.isolation = "container".into(); s.port = 25570; s }
+
+    #[tokio::test]
+    async fn start_needs_the_image_then_runs_one_locked_down_container() {
+        let f = Arc::new(Fake::default());
+        let st = state(&f).await;
+        let mut s = srv("0190-aaaa");
+        s.memory_limit_mb = Some(3000); s.cpu_limit_pct = Some(150); s.pids_limit = Some(500);
+        let e = spawn(&st, &s, vec!["java".into(), "-jar".into(), "server.jar".into()]).await.unwrap_err();
+        assert_eq!(e.code, "container.image_missing");
+        assert_eq!(f.calls_named("run "), 0);
+        f.images.lock().unwrap().insert("docker.io/library/eclipse-temurin:21-jre".into());
+        let (pid, _) = spawn(&st, &s, vec!["java".into(), "-jar".into(), "server.jar".into()]).await.unwrap();
+        assert_eq!(pid, 4242);
+        let spec = f.runs.lock().unwrap()[0].clone();
+        assert_eq!((spec.name.as_str(), spec.port, spec.memory_mb, spec.cpus, spec.pids), ("moss-0190-aaaa", 25570, 3000, Some(1.5), 500));
+        assert_eq!(spec.dir, s.dir(&st));
+        assert!(crate::container::is_alive("moss-0190-aaaa"));
+    }
+
+    #[tokio::test]
+    async fn a_container_that_dies_at_once_is_reported_and_removed() {
+        let f = Arc::new(Fake::default());
+        let st = state(&f).await;
+        f.images.lock().unwrap().insert("docker.io/library/eclipse-temurin:21-jre".into());
+        *f.die_on_start.lock().unwrap() = true;
+        let e = spawn(&st, &srv("0190-bbbb"), vec!["java".into()]).await.unwrap_err();
+        assert_eq!(e.code, "container.start_failed");
+        assert!(e.message.contains("exit code 1") && e.message.contains("main class"), "{}", e.message);
+        assert!(f.containers.lock().unwrap().is_empty(), "the dead container is cleaned up");
+    }
+
+    #[tokio::test]
+    async fn probe_reattaches_by_name_and_never_reads_an_unreachable_engine_as_gone() {
+        let f = Arc::new(Fake::default());
+        let st = state(&f).await;
+        let s = srv("0190-cccc");
+        assert_eq!(probe(&st, &s).await, Some(false), "no such container");
+        f.set("moss-0190-cccc", fake::running(77));
+        assert_eq!(probe(&st, &s).await, Some(true));
+        assert!(crate::container::is_alive("moss-0190-cccc"));
+        *f.down.lock().unwrap() = true;
+        assert_eq!(probe(&st, &s).await, None, "unknown, not dead");
+        assert!(crate::container::is_alive("moss-0190-cccc"), "liveness unchanged while the engine is down");
+    }
+
+    #[tokio::test]
+    async fn exit_facts_are_collected_and_the_container_removed() {
+        let f = Arc::new(Fake::default());
+        let st = state(&f).await;
+        f.set("moss-0190-dddd", fake::exited(137, true));
+        assert_eq!(collect_exit(&st, &srv("0190-dddd")).await, (Some(137), true));
+        assert!(f.containers.lock().unwrap().is_empty());
+        assert_eq!(collect_exit(&st, &srv("0190-none")).await, (None, false));
+    }
+
+    #[tokio::test]
+    async fn liveness_and_stats_use_one_engine_call_for_all_servers() {
+        let f = Arc::new(Fake::default());
+        let st = state(&f).await;
+        let mut all = vec![];
+        for id in ["0190-e1", "0190-e2", "0190-e3"] { let mut s = srv(id); s.in_container = true; all.push(s); }
+        f.set("moss-0190-e1", fake::running(1)); f.set("moss-0190-e2", fake::exited(1, false));
+        refresh(&st, &all).await;
+        assert_eq!(f.calls_named("ps"), 1);
+        assert!(crate::container::is_alive("moss-0190-e1") && !crate::container::is_alive("moss-0190-e2") && !crate::container::is_alive("moss-0190-e3"));
+        f.stats_out.lock().unwrap().insert("moss-0190-e1".into(), Stat { cpu_pct: 12.0, mem_bytes: 1 << 30 });
+        let m = stats(&st, vec!["moss-0190-e1".into(), "moss-0190-e2".into()]).await;
+        assert_eq!(f.calls_named("stats"), 1);
+        assert_eq!(m["moss-0190-e1"].mem_bytes, 1 << 30);
+    }
+
+    #[test]
+    fn default_limits_follow_the_process_mode_defaults() {
+        let mut s = srv("x");
+        assert_eq!(limits(&s), ((4096 + 1024 + 512) as u64, None, DEFAULT_PIDS));
+        s.cpu_limit_pct = Some(50); s.memory_limit_mb = Some(100);
+        assert_eq!(limits(&s), (256, Some(0.5), DEFAULT_PIDS));
+    }
+}

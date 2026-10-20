@@ -3,7 +3,7 @@ use serde_yaml_ng::Value;
 
 fn walk(v: &Value, f: &mut dyn FnMut(&str)) {
     match v {
-        Value::Mapping(m) => for (k, v) in m { if k.as_str() == Some("uses") { if let Some(s) = v.as_str() { f(s); } } walk(v, f); },
+        Value::Mapping(m) => for (k, v) in m { if k.as_str() == Some("uses") && let Some(s) = v.as_str() { f(s); } walk(v, f); },
         Value::Sequence(s) => s.iter().for_each(|v| walk(v, f)),
         _ => {}
     }

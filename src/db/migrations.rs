@@ -13,6 +13,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0006_modpacks", include_str!("migrations/0006_modpacks.sql")),
     ("0007_container", include_str!("migrations/0007_container.sql")),
     ("0008_remote_backups", include_str!("migrations/0008_remote_backups.sql")),
+    ("0009_staging_packs", include_str!("migrations/0009_staging_packs.sql")),
 ];
 
 pub fn run(c: &Connection) -> rusqlite::Result<()> { run_with(c, MIGRATIONS) }

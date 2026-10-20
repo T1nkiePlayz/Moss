@@ -5,9 +5,10 @@ use super::*;
 /// Resolves every available update into one ordered list of steps (dependencies before dependents, no project twice).
 pub(super) async fn build_all(st: &St, s: &Srv, c: &Compat, token: Option<&str>) -> Result<(Vec<Step>, Vec<String>)> {
     let items = db_items(st, &s.id).await?;
-    let updates = apply::collect_updates(st, token, c, &items).await.map_err(|e| anyhow!(e.message))?;
+    let found = apply::collect_updates(st, token, c, &items).await;
+    let updates = found.list;
     let mut steps: Vec<Step> = vec![];
-    let mut warnings: Vec<String> = vec![];
+    let mut warnings: Vec<String> = found.problems;
     for u in updates {
         let (Some(pid), Some(prov)) = (u["project_id"].as_str(), u["provider"].as_str()) else { continue };
         let src = Src { prov: if prov == "curseforge" { Prov::Curseforge } else { Prov::Modrinth }, token: token.map(String::from) };
@@ -33,19 +34,36 @@ pub async fn update_all_plan(State(st): State<St>, user: User, Path(id): Path<St
     Ok(Json(plan_json(&st, &s, &c, &steps, warnings).await?))
 }
 
+/// Identifies a resolved plan (provider, project and version of every step, order-independent) so a staged
+/// run can prove that promoting applies exactly what was tested.
+pub(super) fn plan_signature(steps: &[Step]) -> String {
+    let mut v: Vec<String> = steps.iter().map(|s| format!("{}:{}:{}", s.prov.as_str(), s.project_id, s.version["id"].as_str().unwrap_or_default())).collect();
+    v.sort();
+    v.join(",")
+}
+
+/// What an update-all run does. `expect` is the signature a staged test was made against; `backup` takes the
+/// pre-change backup. Takes the server lock itself; returns the signature of what was applied.
+pub(super) async fn run_all(ctx: &OpCtx, s: &Srv, c: &Compat, token: Option<&str>, actor: &str, backup: bool, expect: Option<&str>) -> Result<String> {
+    let st = ctx.st.clone();
+    let _guard = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
+    ctx.stage("Checking for updates");
+    let (steps, _warnings) = build_all(&st, s, c, token).await?;
+    ctx.check()?;
+    let sig = plan_signature(&steps);
+    if let Some(e) = expect && e != sig { bail!("the available updates changed since the test copy was made; run the test again"); }
+    if steps.is_empty() { ctx.log("Everything is up to date."); return Ok(sig); }
+    if backup { crate::backups::pre_change_locked(&st, s, "updating content").await?; }
+    let label = format!("Update all ({} files)", steps.len());
+    apply::execute(ctx, s, c, &steps, token, actor, apply::Labels { undo: Some(label), audit: "content.update_all" }).await?;
+    Ok(sig)
+}
+
 pub async fn update_all(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (s, c) = compat_for(&st, &user, &id, "content.manage").await?;
     let (token, actor) = (user.token.clone(), user.actor());
     let op = ops::spawn_op(&st, "content.update_all", format!("Update all content on {}", s.name), Some(&id), true, move |ctx| async move {
-        let st = ctx.st.clone();
-        let _guard = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
-        ctx.stage("Checking for updates");
-        let (steps, _warnings) = build_all(&st, &s, &c, token.as_deref()).await?;
-        ctx.check()?;
-        if steps.is_empty() { ctx.log("Everything is up to date."); return Ok(()); }
-        crate::backups::pre_change_locked(&st, &s, "updating content").await?;
-        let label = format!("Update all ({} files)", steps.len());
-        apply::execute(&ctx, &s, &c, &steps, token.as_deref(), &actor, apply::Labels { undo: Some(label), audit: "content.update_all" }).await
+        run_all(&ctx, &s, &c, token.as_deref(), &actor, true, None).await.map(|_| ())
     });
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }

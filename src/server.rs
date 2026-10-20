@@ -90,11 +90,25 @@ pub async fn get(st: &St, id: &str) -> ApiResult<Srv> {
     st.db.call(move |c| get_sync(c, &i)).await?.ok_or_else(|| ApiError::not_found("server"))
 }
 
+/// Servers the operator manages. Staging copies are real server rows but never appear here.
 pub async fn list(st: &St) -> anyhow::Result<Vec<Srv>> {
+    st.db.call(|c| {
+        let mut q = c.prepare(&format!("SELECT {COLS} FROM servers WHERE id NOT IN (SELECT id FROM staging_runs) ORDER BY created_at"))?;
+        q.query_map([], Srv::from_row)?.collect()
+    }).await
+}
+
+/// Every server row including staging copies (for port allocation, supervision and boot reconciliation).
+pub async fn list_all(st: &St) -> anyhow::Result<Vec<Srv>> {
     st.db.call(|c| {
         let mut q = c.prepare(&format!("SELECT {COLS} FROM servers ORDER BY created_at"))?;
         q.query_map([], Srv::from_row)?.collect()
     }).await
+}
+
+pub async fn is_staging(st: &St, id: &str) -> bool {
+    let i = id.to_string();
+    st.db.call(move |c| c.query_row("SELECT 1 FROM staging_runs WHERE id=?", [i], |_| Ok(())).map(|_| true)).await.unwrap_or(false)
 }
 
 pub async fn save_pid(st: &St, id: &str, pid: Option<i64>, start: Option<i64>, last_exit: Option<String>) {

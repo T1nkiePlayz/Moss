@@ -20,7 +20,7 @@ pub fn catalogue(dev: bool) -> Value {
         json!({"id":"velocity","name":"Velocity","category":"proxy","tier":"stable","content_kind":"proxy_plugins","description":"Modern, fast proxy for linking servers into a network.","installable":true}),
         json!({"id":"custom","name":"Custom command","category":"custom","tier":"experimental","content_kind":"none","description":"Run any server software from an explicit command. Reduced automatic management.","installable":true}),
         json!({"id":"neoforge","name":"NeoForge","category":"modded","tier":"stable","content_kind":"mods","description":"Modern Forge successor for Minecraft 1.20.2 and newer. Runs the official installer.","installable":true}),
-        json!({"id":"forge","name":"Forge","category":"modded","tier":"experimental","content_kind":"mods","description":"Minecraft Forge for 1.17 and newer (modern installer). Runs the official installer.","installable":true}),
+        json!({"id":"forge","name":"Forge","category":"modded","tier":"experimental","content_kind":"mods","description":"Minecraft Forge. 1.17 and newer use the modern installer; 1.12.2 to 1.16.5 are legacy builds that run on Java 8. Runs the official installer.","installable":true}),
         json!({"id":"quilt","name":"Quilt","category":"modded","tier":"stable","content_kind":"mods","description":"Fabric-compatible mod loader with its own ecosystem.","installable":true}),
     ];
     if dev { v.push(json!({"id":"sim","name":"Simulated server","category":"custom","tier":"experimental","content_kind":"none","description":"Built-in fake Minecraft server for demos and testing. No Java needed.","installable":true})); }
@@ -70,7 +70,11 @@ pub async fn versions(st: &St, runtime: &str) -> Result<Value> {
                 let rec = out.iter().find(|(_, s)| *s).map(|(v, _)| v.clone());
                 (out, rec)
             }
-            "neoforge" | "forge" | "quilt" => return Ok(modded::to_json(&modded::catalogue(st, runtime).await?)),
+            "neoforge" | "forge" | "quilt" => {
+                let mut j = modded::to_json(&modded::catalogue(st, runtime).await?);
+                if runtime == "forge" { modded::annotate_legacy(&mut j); }
+                return Ok(j);
+            }
             "sim" => (vec![("1.0".into(), true)], Some("1.0".into())),
             "custom" => (vec![("custom".into(), true)], Some("custom".into())),
             other => return Err(anyhow!("runtime {other} has no installable versions")),

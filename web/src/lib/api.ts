@@ -77,6 +77,35 @@ export interface UpgradePlan {
   blockers: string[]; warnings: string[]; can_proceed: boolean;
 }
 export type UpgradeContent = 'update' | 'disable_incompatible' | 'keep';
+// ---- staged updates ("try on a copy first") and modpack versions ----
+export type StagingKind = 'none' | 'update_all' | 'upgrade' | 'pack_update';
+export type StagingState = 'building' | 'testing' | 'healthy' | 'unhealthy' | 'failed';
+export interface StagingReport {
+  healthy: boolean; reasons: string[]; error?: string; ready_secs: number | null; ready_timeout_s: number; watch_s: number; crashed: boolean;
+  errors: number; warnings: number; samples: string[]; fatal: string | null; changes: { title: string; action: string; to: string | null }[];
+  signature: string | null; notes: string[]; copy: { files: number; bytes: number; world: boolean }; port: number; tested_at: string;
+}
+export interface StagingRun {
+  id: string; server_id: string; kind: StagingKind; state: StagingState; include_world: boolean; report: Partial<StagingReport>; port: number | null;
+  operation_id: string | null; created_at: string; expires_at: string; expired: boolean; can_promote: boolean;
+}
+export interface StagingEstimate { files: number; copy_bytes: number; world_bytes: number; free_bytes: number; port_range: [number, number]; defaults: { ready_timeout_s: number; watch_s: number }; kinds: StagingKind[] }
+export interface StagingRequest {
+  kind: StagingKind; include_world?: boolean; upgrade?: { game_version: string; loader_version?: string; content: UpgradeContent; confirm_downgrade?: boolean }; pack?: { install_id: string; token: string };
+}
+export interface PackInfo {
+  id: string; name: string; version: string; format: string; game_version: string; loader: string; mode: string; installed_at: string; files: number;
+  pinned: boolean; items: number; override_files: number; source: { provider: string; project_id: string; version_id: string | null } | null; can_check: boolean;
+}
+export interface PackChange { title: string; path: string; from: string | null; to: string | null; reason: string | null }
+export interface PackDiff {
+  versions: { from: { version: string; game_version: string; loader: string; loader_version: string | null }; to: { version: string; game_version: string; loader: string; loader_version: string | null } };
+  files: { added: PackChange[]; removed: PackChange[]; updated: PackChange[]; held: PackChange[]; unchanged: number };
+  overrides: { added: string[]; updated: string[]; user_modified: { path: string; reason: string }[]; removed_upstream: string[]; unchanged: number };
+  blockers: string[]; warnings: string[]; can_apply: boolean; changes: boolean; signature: string;
+}
+export interface PackCheck { pinned: boolean; up_to_date: boolean | null; message?: string; current: { version: string; version_id: string | null }; latest?: { version_id: string | null; version: string }; token?: string; diff?: PackDiff }
+
 export interface ModpackInspect {
   token: string; format: 'mrpack' | 'curseforge'; name: string; version: string; summary: string | null; game_version: string;
   loader: { id: string; version: string | null }; files: { total: number; server: number; client_only: number; unavailable: number };
@@ -244,7 +273,7 @@ export const api = {
   plan: (id: string, project_id: string, version_id?: string, provider?: ProviderId) => send<ChangePlan>('POST', `/servers/${e(id)}/content/plan`, { project_id, version_id, provider }),
   install: (id: string, project_id: string, version_id?: string, provider?: ProviderId) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/content`, { project_id, version_id, provider }),
   removeContent: (id: string, item: string) => send<{ operation: Operation }>('DELETE', `/servers/${e(id)}/content/${e(item)}`),
-  checkUpdates: (id: string) => send<{ updates: { item_id: string; title: string; current: string; latest: string; version_id: string }[] }>('POST', `/servers/${e(id)}/content/check-updates`),
+  checkUpdates: (id: string) => send<{ updates: { item_id: string; title: string; current: string; latest: string; version_id: string }[]; warnings?: string[] }>('POST', `/servers/${e(id)}/content/check-updates`),
   updateContent: (id: string, item: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/content/${e(item)}/update`),
   pin: (id: string, item: string, pinned: boolean) => send('PATCH', `/servers/${e(id)}/content/${e(item)}`, { pinned }),
   // WP-A v2: toggle, identify, compatibility check, update-all, upgrade assistant, modpacks
@@ -257,6 +286,17 @@ export const api = {
   upgrade: (id: string, b: { game_version: string; loader_version?: string; content: UpgradeContent; backup: true; confirm_downgrade?: boolean }) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/upgrade`, b),
   inspectModpack: (b: { provider: ProviderId; project_id: string; version_id?: string }) => send<ModpackInspect>('POST', '/modpacks/inspect', b),
   importModpack: (id: string, token: string, mode: 'add' | 'replace') => send<{ operation: Operation }>('POST', `/servers/${e(id)}/modpacks`, { token, mode }),
+  modpacks: (id: string) => get<{ packs: PackInfo[] }>(`/servers/${e(id)}/modpacks`),
+  pinPack: (id: string, install: string, pinned: boolean) => send<{ id: string; pinned: boolean }>('PATCH', `/servers/${e(id)}/modpacks/${e(install)}`, { pinned }),
+  checkPack: (id: string, install: string) => send<PackCheck>('POST', `/servers/${e(id)}/modpacks/${e(install)}/check-update`, {}),
+  updatePack: (id: string, install: string, token: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/modpacks/${e(install)}/update`, { token }),
+  stagingEstimate: (id: string) => get<StagingEstimate>(`/servers/${e(id)}/staging/estimate`),
+  stagingRuns: (id: string) => get<StagingRun[]>(`/servers/${e(id)}/staging`),
+  stagingRun: (id: string, run: string) => get<StagingRun>(`/servers/${e(id)}/staging/${e(run)}`),
+  stagingLog: (id: string, run: string, lines = 200) => get<{ lines: string[]; truncated: boolean }>(`/servers/${e(id)}/staging/${e(run)}/log${q({ lines })}`),
+  stagingStart: (id: string, b: StagingRequest) => send<{ run: StagingRun; operation: Operation }>('POST', `/servers/${e(id)}/staging`, b),
+  stagingPromote: (id: string, run: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/staging/${e(run)}/promote`),
+  stagingDiscard: (id: string, run: string) => send<{ state: string }>('DELETE', `/servers/${e(id)}/staging/${e(run)}`),
 
   backups: (id: string) => get<Backup[]>(`/servers/${e(id)}/backups`),
   allBackups: () => get<Backup[]>('/backups'),

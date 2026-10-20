@@ -102,3 +102,19 @@ fn verification_requires_the_launch_files() {
     assert!(verify(&dir, &test_srv("quilt", "1.21.1", None, "minimal")).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn legacy_forge_verification_and_stash_cover_the_forge_jar() {
+    let dir = tmpdir();
+    let s = test_srv("forge", "1.12.2", Some("14.23.5.2860"), "minimal");
+    assert!(verify(&dir, &s).is_err());
+    std::fs::write(dir.join("forge-1.12.2-14.23.5.2860.jar"), "j").unwrap();
+    std::fs::write(dir.join("minecraft_server.1.12.2.jar"), "v").unwrap();
+    std::fs::write(dir.join("keep.txt"), "k").unwrap();
+    assert!(verify(&dir, &s).is_ok());
+    let prev = dir.join(".moss/upgrade-prev");
+    let moved = stash(&dir, &prev, "forge").unwrap();
+    assert!(moved.contains(&"forge-1.12.2-14.23.5.2860.jar".to_string()) && moved.contains(&"minecraft_server.1.12.2.jar".to_string()));
+    assert!(dir.join("keep.txt").exists() && !dir.join("forge-1.12.2-14.23.5.2860.jar").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

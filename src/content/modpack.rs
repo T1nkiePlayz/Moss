@@ -5,14 +5,18 @@
 use super::*;
 use axum::extract::{FromRequest, Multipart, Request};
 
+mod diff;
 mod export;
 mod import;
 mod inspect;
 mod remote;
+mod update;
 pub(super) mod store;
 pub mod zipsafe;
 
 pub use export::export;
+pub use update::{apply_update, check_update, install_row, list, pin, staged_plan, update_start};
+pub use store::{Identity, get as entry};
 pub use zipsafe::OverrideEntry;
 
 /// Largest pack Moss accepts, uploaded or downloaded.
@@ -77,14 +81,16 @@ async fn may_stage(st: &St, user: &User) -> ApiResult<()> {
 pub async fn inspect(State(st): State<St>, user: User, req: Request) -> ApiResult<Json<Value>> {
     may_stage(&st, &user).await?;
     let multipart = req.headers().get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|c| c.starts_with("multipart/form-data"));
-    let (path, size) = if multipart {
+    let (path, size, source) = if multipart {
         let mp = Multipart::from_request(req, &st).await.map_err(|e| ApiError::bad("upload.invalid", e.to_string()))?;
-        remote::receive_upload(&st, mp).await?
+        let (p, s) = remote::receive_upload(&st, mp).await?;
+        (p, s, None)
     } else {
         let Json(body): Json<Value> = Json::from_request(req, &st).await.map_err(|e| ApiError::bad("validation", e.to_string()))?;
-        remote::fetch_remote(&st, &user, &body).await?
+        let (p, s, id) = remote::fetch_remote(&st, &user, &body).await?;
+        (p, s, Some(id))
     };
-    match inspect::run(&st, &user, &path, size).await {
+    match inspect::run(&st, &user, &path, size, source).await {
         Ok(v) => Ok(Json(v)),
         Err(e) => { let _ = tokio::fs::remove_file(&path).await; Err(e) }
     }

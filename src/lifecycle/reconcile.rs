@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 /// Called once at startup: re-attach to servers that survived, account for ones that died while we were down, autostart.
 pub async fn reconcile(st: &St) -> anyhow::Result<()> {
-    let servers = server::list(st).await?;
+    let servers = server::list_all(st).await?;
     let mut to_start = vec![];
     for s in servers.iter().filter(|s| s.installed) {
         // A container server is re-attached by name + inspect (the PID of a container means nothing to a new controller).

@@ -31,9 +31,11 @@ pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     st.db.call(|c| c.execute("UPDATE backups SET status='failed' WHERE status IN ('running','verifying')", [])).await?;
     st.db.call(|c| c.execute("UPDATE servers SET installed=0, install_error='installation was interrupted by a controller restart — delete and recreate this server' WHERE installed=0 AND install_error IS NULL AND created_at < ?", [db::now()])).await.ok();
     { let s2 = st.clone(); tokio::task::spawn_blocking(move || { java::installs(&s2, true); }); }
+    crate::content::staging_recover(&st).await?;
     lifecycle::reconcile(&st).await?;
     lifecycle::spawn_background(&st);
     sched::spawn_background(&st);
+    crate::content::staging_spawn_background(&st);
     crate::notify::spawn_background(&st);
     crate::history::spawn_background(&st);
     let addr = format!("{}:{}", cfg.bind, cfg.port);

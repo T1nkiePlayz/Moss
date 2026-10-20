@@ -178,6 +178,43 @@ function upgradePlan(s: A.Server, c: A.ContentItem[], b: { game_version: string;
 }
 
 export const NONE = Symbol('no route');
+// ---- staged copies and modpack versions ----
+const packsBy: Record<string, A.PackInfo[]> = {};
+const runs: Record<string, A.StagingRun[]> = {};
+function packsFor(s: A.Server, uid: () => string, now: () => string): A.PackInfo[] {
+  if (s.content_kind !== 'mods') return [];
+  return (packsBy[s.id] ??= [{ id: uid(), name: 'Fabulous Survival', version: '5.1.0', format: 'mrpack', game_version: s.game_version, loader: 'fabric', mode: 'add', installed_at: now(), files: 41, pinned: false, items: 41, override_files: 12,
+    source: { provider: 'modrinth', project_id: 'fabulous-survival', version_id: 'v510' }, can_check: true }]);
+}
+function packDiff(from: string, to: string): A.PackDiff {
+  const ch = (title: string, path: string, f: string | null, t: string | null, reason: string | null = null): A.PackChange => ({ title, path, from: f, to: t, reason });
+  return {
+    versions: { from: { version: from, game_version: '1.21.4', loader: 'fabric', loader_version: '0.16.9' }, to: { version: to, game_version: '1.21.4', loader: 'fabric', loader_version: '0.16.9' } },
+    files: {
+      added: [ch('Sodium Extra', 'mods/sodium-extra-0.6.jar', null, '0.6.0')], removed: [ch('Old Minimap', 'mods/oldminimap.jar', '1.2.0', null)],
+      updated: [ch('Lithium', 'mods/lithium.jar', '0.14.3', '0.14.7'), ch('Ferrite Core', 'mods/ferritecore.jar', '7.0.0', '7.1.1')],
+      held: [ch('Iris Shaders', 'mods/iris.jar', '1.8.0', '1.8.4', 'pinned')], unchanged: 36,
+    },
+    overrides: { added: ['config/sodium-extra.json'], updated: ['config/lithium.properties'], user_modified: [{ path: 'config/ferritecore.mixin.properties', reason: 'You changed this file; the pack has a newer one. It is left as it is.' }], removed_upstream: [], unchanged: 9 },
+    blockers: [], warnings: [], can_apply: true, changes: true, signature: `sig-${to}`,
+  };
+}
+/** The staging run advances building -> testing -> healthy (or unhealthy when the test is asked to fail via the server name). */
+function advance(run: A.StagingRun, bad: boolean) {
+  setTimeout(() => { if (run.state === 'building') run.state = 'testing'; }, 1200);
+  setTimeout(() => {
+    if (run.state !== 'testing') return;
+    run.state = bad ? 'unhealthy' : 'healthy';
+    run.expires_at = new Date(Date.now() + DAY).toISOString();
+    run.can_promote = !bad && run.kind !== 'none';
+    run.report = {
+      healthy: !bad, reasons: bad ? ['The log contains a fatal error: java.lang.NoClassDefFoundError: net/example/Missing'] : [], ready_secs: bad ? null : 14.2, ready_timeout_s: 180, watch_s: 30, crashed: false,
+      errors: bad ? 3 : 0, warnings: bad ? 2 : 4, samples: bad ? ['[10:00:05 ERROR]: Could not load mod example', 'java.lang.NoClassDefFoundError: net/example/Missing'] : [], fatal: bad ? 'java.lang.NoClassDefFoundError: net/example/Missing' : null,
+      changes: run.report.changes ?? [], signature: 'sig', notes: run.include_world ? [] : ['The copy starts with a fresh world; world-specific problems will not show up.'], copy: { files: 214, bytes: 3.1e8, world: run.include_world }, port: run.port ?? 30000, tested_at: new Date().toISOString(),
+    };
+  }, 3600);
+}
+
 /** Returns NONE when the route is not a content/modpack/upgrade route. */
 export async function handleContent(c: Ctx, s: A.Server, sub: string, method: string, b: Record<string, any>): Promise<unknown> {
   const list = (c.content[s.id] ??= []);
@@ -272,6 +309,55 @@ export async function handleContent(c: Ctx, s: A.Server, sub: string, method: st
     return { operation: o };
   }
 
+  if (sub === '/staging/estimate') return { files: 1840, copy_bytes: 3.1e8, world_bytes: 1.2e9, free_bytes: 5e10, port_range: [30000, 30999], defaults: { ready_timeout_s: 180, watch_s: 30 }, kinds: ['none', 'update_all', 'upgrade', 'pack_update'] } satisfies A.StagingEstimate;
+  if (sub === '/staging' && method === 'GET') return runs[s.id] ?? [];
+  if (sub === '/staging' && method === 'POST') {
+    const list0 = runs[s.id] ??= [];
+    if (list0.some((r) => r.state === 'building' || r.state === 'testing')) throw new ApiError(409, 'staging.busy', 'A test copy is already being built for this server; wait for it or cancel it.');
+    const changes = b.kind === 'update_all' ? list.filter((x) => x.provider !== 'manual' && !x.pinned && x.enabled).slice(0, 3).map((x) => ({ title: x.title, action: 'replace', to: bump(x.version_number) }))
+      : b.kind === 'upgrade' ? [{ title: `${s.runtime} ${s.game_version}`, action: 'upgrade', to: b.upgrade?.game_version ?? null }]
+      : b.kind === 'pack_update' ? [{ title: 'Lithium', action: 'update', to: '0.14.7' }, { title: 'Old Minimap', action: 'remove', to: null }] : [];
+    const run: A.StagingRun = { id: c.uid(), server_id: s.id, kind: b.kind, state: 'building', include_world: !!b.include_world, report: { changes }, port: 30000 + list0.length, operation_id: null, created_at: c.now(), expires_at: new Date(Date.now() + DAY).toISOString(), expired: false, can_promote: false };
+    list0.unshift(run);
+    const o = c.op('staging.test', `Test a copy of ${s.name}`, s.id, ['Working out what would change', 'Copying the server', 'Starting the copy', 'Watching the copy for problems'], {});
+    run.operation_id = o.id;
+    advance(run, /broken/i.test(s.name));
+    return { run, operation: o };
+  }
+  if (R(/^\/staging\/([^/]+)\/log$/)) return { lines: ['[10:00:01 INFO]: Starting minecraft server version 1.21.4', '[10:00:04 WARN]: Can\'t keep up! Is the server overloaded?', '[10:00:09 INFO]: Done (8.1s)! For help, type "help"'], truncated: false };
+  if (R(/^\/staging\/([^/]+)\/promote$/)) {
+    const run = (runs[s.id] ?? []).find((r) => r.id === dec(m![1]));
+    if (!run) throw new ApiError(404, 'not_found', 'Test copy not found.');
+    if (!run.can_promote) throw new ApiError(409, 'staging.not_healthy', 'Only a copy that passed its checks can be applied to the real server.');
+    return { operation: c.op('staging.promote', `Apply the tested change to ${s.name}`, s.id, ['Taking a pre-change backup', 'Applying the change', 'Removing the test copy'], { done: () => { runs[s.id] = (runs[s.id] ?? []).filter((r) => r !== run); } }) };
+  }
+  if (R(/^\/staging\/([^/]+)$/)) {
+    const run = (runs[s.id] ?? []).find((r) => r.id === dec(m![1]));
+    if (!run) throw new ApiError(404, 'not_found', 'Test copy not found.');
+    if (method === 'DELETE') { runs[s.id] = (runs[s.id] ?? []).filter((r) => r !== run); return { state: 'discarded' }; }
+    return run;
+  }
+  if (sub === '/modpacks' && method === 'GET') return { packs: packsFor(s, c.uid, c.now) };
+  if (R(/^\/modpacks\/([^/]+)\/check-update$/)) {
+    await sleep(500);
+    const pk = packsFor(s, c.uid, c.now).find((x) => x.id === dec(m![1]));
+    if (!pk) throw new ApiError(404, 'not_found', 'That modpack is no longer installed.');
+    if (pk.pinned) return { pinned: true, up_to_date: null, current: { version: pk.version, version_id: null }, message: 'This pack is pinned to its current version. Unpin it to check for updates.' } satisfies A.PackCheck;
+    if (pk.version === '5.2.0') return { pinned: false, up_to_date: true, current: { version: pk.version, version_id: 'v520' }, latest: { version_id: 'v520', version: '5.2.0' } } satisfies A.PackCheck;
+    return { pinned: false, up_to_date: false, current: { version: pk.version, version_id: 'v510' }, latest: { version_id: 'v520', version: '5.2.0' }, token: `pack-${pk.id}`, diff: packDiff(pk.version, '5.2.0') } satisfies A.PackCheck;
+  }
+  if (R(/^\/modpacks\/([^/]+)\/update$/)) {
+    const pk = packsFor(s, c.uid, c.now).find((x) => x.id === dec(m![1]));
+    if (!pk) throw new ApiError(404, 'not_found', 'That modpack is no longer installed.');
+    if (pk.pinned) throw new ApiError(409, 'modpack.pinned', 'This pack is pinned to its current version; unpin it to update.');
+    return { operation: c.op('modpack.update', `Update ${pk.name} on ${s.name}`, s.id, ['Comparing the new pack version with what is installed', 'Taking a pre-change backup', 'Downloading files (2/2)', 'Applying the pack update'], { done: () => { pk.version = '5.2.0'; c.pushUndo(s.id, `Update ${pk.name} to 5.2.0`, ['mods/']); } }) };
+  }
+  if (R(/^\/modpacks\/([^/]+)$/) && method === 'PATCH') {
+    const pk = packsFor(s, c.uid, c.now).find((x) => x.id === dec(m![1]));
+    if (!pk) throw new ApiError(404, 'not_found', 'That modpack is no longer installed.');
+    pk.pinned = !!b.pinned;
+    return { id: pk.id, pinned: pk.pinned };
+  }
   if (sub === '/modpacks' && method === 'POST') {
     const pk = packs.get(b.token);
     if (!pk) throw new ApiError(410, 'modpack.token_expired', 'That modpack upload expired. Choose it again.');

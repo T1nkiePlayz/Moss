@@ -6,6 +6,10 @@ use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::{Duration, Ins
 pub const TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_PER_USER: usize = 6;
 
+/// Where a pack came from when it was fetched from a provider (uploaded packs have none).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Identity { pub provider: String, pub project_id: String, pub version_id: String }
+
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub token: String,
@@ -16,6 +20,7 @@ pub struct Entry {
     pub game_version: String,
     pub loader_version: Option<String>,
     pub name: String,
+    pub source: Option<Identity>,
 }
 
 static STORE: Mutex<Option<HashMap<String, Entry>>> = Mutex::new(None);
@@ -82,7 +87,7 @@ mod tests {
     use super::*;
 
     fn entry(user: &str, age: Duration, path: &str) -> Entry {
-        Entry { token: String::new(), path: path.into(), user: user.into(), created: Instant::now() - age, runtime: "fabric".into(), game_version: "1.21".into(), loader_version: None, name: "n".into() }
+        Entry { token: String::new(), path: path.into(), user: user.into(), created: Instant::now() - age, runtime: "fabric".into(), game_version: "1.21".into(), loader_version: None, name: "n".into(), source: None }
     }
 
     #[test]

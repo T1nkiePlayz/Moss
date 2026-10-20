@@ -92,7 +92,7 @@ pub fn users_of(st: &St, servers: &[Srv], bin: &Path) -> Vec<String> {
 }
 
 pub async fn running_users(st: &St, major: u32) -> Vec<String> {
-    let servers = server::list(st).await.unwrap_or_default();
+    let servers = server::list_all(st).await.unwrap_or_default();
     let (st2, bin) = (st.clone(), managed_bin(st, major));
     tokio::task::spawn_blocking(move || users_of(&st2, &servers, &bin)).await.unwrap_or_default()
 }

@@ -40,6 +40,20 @@ pub async fn stop_and_wait(st: &St, s: &Srv, graceful: Duration) {
     }
 }
 
+/// Stops a server and waits until its process is gone (test copies: nobody watches them, so no audit entry).
+pub async fn halt(st: &St, s: &Srv) {
+    server::set_desired(st, &s.id, "stopped").await;
+    {
+        let mut live = st.live.lock().unwrap();
+        let l = live.entry(s.id.clone()).or_default();
+        l.restart_at = None;
+        if l.alive { l.stopping = true; }
+    }
+    let fresh = server::get(st, &s.id).await.unwrap_or_else(|_| s.clone());
+    if process_alive(&fresh) { stop_and_wait(st, &fresh, Duration::from_secs(30)).await; }
+    handle_exit(st, &s.id).await;
+}
+
 pub async fn stop(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     server::set_desired(st, &s.id, "stopped").await;
     let alive = st.live.lock().unwrap().get(&s.id).is_some_and(|l| l.alive);

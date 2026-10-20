@@ -5,13 +5,13 @@ const axeSource = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const SERVER_TABS = ['', 'console', 'files', 'config', 'content', 'upgrade', 'backups', 'settings', 'access'];
 const PAGES = ['', 'servers', 'servers/new', 'backups', 'activity', 'users', 'settings'];
 
-async function audit(page: Page, label: string) {
+async function audit(page: Page, label: string, scope?: string) {
   await page.addScriptTag({ path: axeSource });
-  const result = await page.evaluate(async () => {
+  const result = await page.evaluate(async (sel) => {
     // @ts-expect-error injected by the script tag above
-    const r = await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
+    const r = await window.axe.run(sel ? document.querySelector(sel) : document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
     return r.violations.map((v: { id: string; impact: string; help: string; nodes: { target: unknown[] }[] }) => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
-  });
+  }, scope ?? null);
   const bad = result.filter((v: { impact: string }) => v.impact === 'serious' || v.impact === 'critical');
   expect(bad, `${label}: accessibility violations`).toEqual([]);
 }
@@ -81,5 +81,55 @@ test.describe('remote backups', () => {
     await page.getByRole('row').filter({ hasText: 'Remote only' }).first().getByRole('button', { name: 'Restore' }).click();
     await expect(page.getByText(/only stored on Home NAS/)).toBeVisible();
     await audit(page, 'restore dialog, remote-only');
+async function openFabricContent(page: Page) {
+  await page.goto('/');
+  await page.locator('a[href^="#/servers/"]').first().waitFor();
+  await page.goto('/#/servers');
+  const link = page.getByRole('link', { name: /Modded Fabric/ }).first();
+  await link.waitFor();
+  const href = (await link.getAttribute('href'))!.replace(/^#?\/?/, '');
+  await page.goto(`/#/${href}/content`);
+  await page.getByRole('heading', { name: 'Modpacks' }).waitFor();
+}
+
+test.describe('modpack versions and staged copies', () => {
+  test('a pack update shows its diff, keeps edited files and passes axe', async ({ page }) => {
+    await openFabricContent(page);
+    await expect(page.getByText('Fabulous Survival')).toBeVisible();
+    await page.getByRole('button', { name: 'Check for pack update' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Files you changed (kept as they are)')).toBeVisible();
+    await expect(dialog.getByText('config/ferritecore.mixin.properties')).toBeVisible();
+    await expect(dialog.getByText('Old Minimap')).toBeVisible();
+    await audit(page, 'pack diff', '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
+    await expect(dialog).toBeHidden();
+  });
+
+  test('pinning a pack is reflected and a pinned pack is not checked', async ({ page }) => {
+    await openFabricContent(page);
+    await page.getByRole('button', { name: 'Pin', exact: true }).click();
+    await expect(page.getByText('Pinned', { exact: true }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Check for pack update' }).click();
+    await expect(page.getByText('This pack is pinned', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Unpin', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Pin', exact: true })).toBeVisible();
+  });
+
+  test('a pack update can be tried on a copy, then applied', async ({ page }) => {
+    await openFabricContent(page);
+    await page.getByRole('button', { name: 'Check for pack update' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Try update on a copy first' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Include the world')).toBeVisible();
+    await audit(page, 'staged setup', '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Start test' }).click();
+    await expect(dialog.getByText(/ran without problems/)).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByText('removed automatically', { exact: false }).or(dialog.getByText('kept for 24 hours'))).toBeVisible();
+    await dialog.getByRole('button', { name: 'Show log' }).click();
+    await expect(dialog.getByLabel('Console log of the test copy')).toContainText('Done');
+    await audit(page, 'staged result', '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Update the pack' }).click();
+    await expect(dialog).toBeHidden();
   });
 });

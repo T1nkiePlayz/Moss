@@ -151,3 +151,29 @@ pub async fn upgrade_start(State(st): State<St>, user: User, Path(id): Path<Stri
     let op = ops::spawn_op(&st, "server.upgrade", title, Some(&id), true, move |ctx| run::run(ctx, s, c, token, r, actor));
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }
+
+/// What the staged-update module needs from the upgrade assistant, without exposing its private request type.
+#[derive(Clone, Deserialize, serde::Serialize)]
+pub struct Target { pub game_version: String, #[serde(default)] pub loader_version: Option<String>, #[serde(default = "default_content")] pub content: String, #[serde(default)] pub confirm_downgrade: bool }
+
+pub(super) fn validate_target(s: &Srv, t: &Target) -> ApiResult<()> {
+    upgrade_target(s)?;
+    check_versions(&t.game_version, t.loader_version.as_deref())?;
+    if !matches!(t.content.as_str(), "update" | "disable_incompatible" | "keep") { return Err(ApiError::bad("validation", "unknown content choice").field("content", "update | disable_incompatible | keep")); }
+    if classify::is_downgrade(&s.game_version, &t.game_version) && !t.confirm_downgrade { return Err(ApiError::bad("upgrade.downgrade", "this is a downgrade; send confirm_downgrade:true to proceed").field("confirm_downgrade", "required for downgrades")); }
+    Ok(())
+}
+
+/// Runs the upgrade as the caller's operation (takes the server lock itself).
+pub(super) async fn run_upgrade(ctx: OpCtx, s: Srv, c: Compat, token: Option<String>, t: &Target, backup: bool, actor: String) -> Result<()> {
+    let req = UpgradeReq { game_version: t.game_version.clone(), loader_version: t.loader_version.clone(), content: t.content.clone(), backup, confirm_downgrade: t.confirm_downgrade };
+    run::run(ctx, s, c, token, req, actor).await
+}
+
+/// Signature of the upgrade's content plan for the promote-what-was-tested check.
+pub(super) async fn upgrade_signature(st: &St, token: Option<&str>, s: &Srv, c: &Compat, t: &Target) -> Result<String> {
+    let b = build(st, token, s, c, &t.game_version, t.loader_version.as_deref(), t.confirm_downgrade).await?;
+    let mut v: Vec<String> = b.entries.iter().filter(|e| e.status == "update").map(|e| format!("{}:{}", e.link.project_id.clone().unwrap_or_default(), e.version_id.clone().unwrap_or_default())).collect();
+    v.sort();
+    Ok(format!("{}|{}", b.resolved.and_then(|r| r.loader_version).unwrap_or_default(), v.join(",")))
+}

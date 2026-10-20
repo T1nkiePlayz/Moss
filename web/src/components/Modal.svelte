@@ -32,7 +32,9 @@
       <h2>{title}</h2>
       <button class="btn ghost icon sm" aria-label="Close" onclick={onclose}><Icon name="x" /></button>
     </header>
-    <div class="body">{@render children()}</div>
+    <!-- long dialogs scroll; keyboard users need to be able to focus the scrolling area -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div class="body" tabindex="0">{@render children()}</div>
     {#if footer}<footer>{@render footer()}</footer>{/if}
   </div>
 </div>

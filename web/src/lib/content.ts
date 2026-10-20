@@ -1,5 +1,5 @@
 // Pure helpers for the content, upgrade and modpack UIs (unit-tested in content.test.ts).
-import type { ChangePlan, ContentFinding, ContentItem, ContentSeverity, ModpackInspect, ProviderId, UpgradePlan } from './api';
+import type { ChangePlan, ContentFinding, ContentItem, ContentSeverity, ModpackInspect, PackChange, PackDiff, ProviderId, StagingRun, UpgradePlan } from './api';
 
 const RANK: Record<ContentSeverity, number> = { critical: 0, warn: 1, info: 2 };
 export const SEVERITIES: ContentSeverity[] = ['critical', 'warn', 'info'];
@@ -164,3 +164,27 @@ export function removalConflicts(all: ContentItem[], removing: ContentItem[]): C
   }
   return out;
 }
+
+// ---- staged copies and pack diffs ----
+export const stagingActive = (r: Pick<StagingRun, 'state'>) => r.state === 'building' || r.state === 'testing';
+
+export interface StagingSummary { tone: 'info' | 'ok' | 'warn' | 'danger'; headline: string; lines: string[] }
+/** Plain-language outcome of a test copy for the person who runs the server. */
+export function stagingSummary(r: StagingRun): StagingSummary {
+  const rep = r.report ?? {};
+  if (r.state === 'building') return { tone: 'info', headline: 'Making a copy of the server and applying the change to it…', lines: [] };
+  if (r.state === 'testing') return { tone: 'info', headline: 'The copy is starting. Moss is watching it for problems…', lines: [] };
+  if (r.state === 'failed') return { tone: 'danger', headline: 'The test could not be completed', lines: [rep.error ?? rep.reasons?.[0] ?? 'Something went wrong while preparing the copy.'] };
+  const counts = `${rep.errors ?? 0} error${rep.errors === 1 ? '' : 's'} and ${rep.warnings ?? 0} warning${rep.warnings === 1 ? '' : 's'} in the log`;
+  if (r.state === 'healthy') {
+    const t = rep.ready_secs != null ? ` in ${rep.ready_secs} seconds` : '';
+    return { tone: 'ok', headline: `The copy started${t} and ran without problems`, lines: [counts[0].toUpperCase() + counts.slice(1) + '.'] };
+  }
+  return { tone: 'danger', headline: 'The copy has problems, so the change was not applied to your server', lines: [...(rep.reasons ?? []), counts[0].toUpperCase() + counts.slice(1) + '.'] };
+}
+
+export function packDiffCounts(d: PackDiff) {
+  return { added: d.files.added.length, removed: d.files.removed.length, updated: d.files.updated.length, held: d.files.held.length,
+    configNew: d.overrides.added.length, configUpdated: d.overrides.updated.length, kept: d.overrides.user_modified.length };
+}
+export const packChangeText = (c: PackChange) => (c.from && c.to ? `${c.from} → ${c.to}` : c.to ?? c.from ?? '');

@@ -26,7 +26,7 @@ pub(super) fn info(token: &str, p: &Pack, files: &[PackFile], unavailable: &[Una
     })
 }
 
-pub(super) async fn run(st: &St, user: &User, path: &FsPath, size: u64) -> ApiResult<Value> {
+pub(super) async fn run(st: &St, user: &User, path: &FsPath, size: u64, source: Option<store::Identity>) -> ApiResult<Value> {
     let sc = scan(path.to_path_buf()).await.map_err(|e| ApiError::bad("modpack.invalid", format!("{e:#}")))?;
     let mut warnings: Vec<String> = vec![];
     let (files, unavailable) = if sc.pack.format == "curseforge" {
@@ -43,7 +43,7 @@ pub(super) async fn run(st: &St, user: &User, path: &FsPath, size: u64) -> ApiRe
     if sc.pack.format == "curseforge" && sc.pack.cf_refs.len() > files.len() + unavailable.len() { warnings.push("Some referenced files were not returned by CurseForge.".into()); }
     let stats = (sc.overrides.len(), sc.overrides.iter().map(|o| o.size).sum::<u64>());
     let token = store::put(st, store::Entry { token: String::new(), path: path.to_path_buf(), user: user.id.clone(), created: std::time::Instant::now(), runtime: sc.pack.runtime().to_string(),
-        game_version: sc.pack.game_version.clone(), loader_version: sc.pack.loader_version.clone(), name: sc.pack.name.clone() });
+        game_version: sc.pack.game_version.clone(), loader_version: sc.pack.loader_version.clone(), name: sc.pack.name.clone(), source });
     Ok(info(&token, &sc.pack, &files, &unavailable, stats, size, &warnings))
 }
 

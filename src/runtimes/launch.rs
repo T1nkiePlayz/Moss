@@ -25,10 +25,21 @@ pub fn unix_args_path(s: &Srv) -> Option<String> {
     }
 }
 
+/// The jar the legacy Forge installer (1.12.2 to 1.16.5) leaves in the server directory.
+pub fn legacy_forge_jar(s: &Srv) -> Option<String> {
+    let v = s.loader_version.as_deref().filter(|v| !v.is_empty())?;
+    (s.runtime == "forge" && super::modded::legacy_forge_game(&s.game_version)).then(|| format!("forge-{}-{v}.jar", s.game_version))
+}
+
 /// The argv for a Minecraft server process, given the Java binary. `Err` explains what is missing.
 pub fn argv(java: &str, s: &Srv) -> Result<Vec<String>, String> {
     let mut a = vec![java.to_string()];
     match s.runtime.as_str() {
+        "forge" if super::modded::legacy_forge_game(&s.game_version) => {
+            let jar = legacy_forge_jar(s).ok_or_else(|| "forge has no recorded loader version; reinstall the server".to_string())?;
+            a.extend(jvm_flags(s));
+            a.extend(["-Dfile.encoding=UTF-8".into(), "-jar".into(), jar, "nogui".into()]);
+        }
         "forge" | "neoforge" => {
             let args = unix_args_path(s).ok_or_else(|| format!("{} has no recorded loader version; reinstall the server", s.runtime))?;
             a.extend(["@user_jvm_args.txt".into(), format!("@{args}"), "nogui".into()]);
@@ -55,7 +66,7 @@ pub fn user_jvm_args(s: &Srv) -> String {
 
 /// Write (or refresh) `user_jvm_args.txt` in the server directory. No-op for runtimes that do not read it.
 pub fn write_user_jvm_args(dir: &Path, s: &Srv) -> std::io::Result<()> {
-    if !matches!(s.runtime.as_str(), "forge" | "neoforge") { return Ok(()); }
+    if !matches!(s.runtime.as_str(), "forge" | "neoforge") || (s.runtime == "forge" && super::modded::legacy_forge_game(&s.game_version)) { return Ok(()); }
     crate::files::atomic_write(&dir.join("user_jvm_args.txt"), user_jvm_args(s).as_bytes())
 }
 
@@ -78,6 +89,28 @@ mod tests {
         let f = argv("/j/java", &srv("forge", "1.20.1", Some("47.2.0"), "balanced")).unwrap();
         assert_eq!(f, ["/j/java", "@user_jvm_args.txt", "@libraries/net/minecraftforge/forge/1.20.1-47.2.0/unix_args.txt", "nogui"]);
         assert!(argv("/j/java", &srv("forge", "1.20.1", None, "minimal")).is_err());
+    }
+
+    #[test]
+    fn legacy_forge_launches_the_forge_jar_with_plain_jvm_flags() {
+        let f = argv("/j/java8", &srv("forge", "1.12.2", Some("14.23.5.2860"), "minimal")).unwrap();
+        assert_eq!(f, ["/j/java8", "-Xms4096M", "-Xmx4096M", "-XX:+UseG1GC", "-Dfile.encoding=UTF-8", "-jar", "forge-1.12.2-14.23.5.2860.jar", "nogui"]);
+        let g = argv("/j/java8", &srv("forge", "1.16.5", Some("36.2.39"), "balanced")).unwrap();
+        assert!(g.contains(&"-Daikars.new.flags=true".to_string()) && g[g.len() - 3..] == ["-jar", "forge-1.16.5-36.2.39.jar", "nogui"]);
+        assert!(!g.iter().any(|a| a.starts_with('@')), "legacy Forge does not read argument files");
+        assert!(argv("/j/java8", &srv("forge", "1.12.2", None, "minimal")).is_err());
+        // 1.17 is the first modern version
+        assert!(argv("/j/java", &srv("forge", "1.17.1", Some("37.1.1"), "minimal")).unwrap().contains(&"@user_jvm_args.txt".to_string()));
+        assert_eq!(legacy_forge_jar(&srv("neoforge", "1.16.5", Some("1"), "minimal")), None);
+    }
+
+    #[test]
+    fn legacy_forge_does_not_get_a_user_jvm_args_file() {
+        let dir = std::env::temp_dir().join(format!("moss-jvm-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        write_user_jvm_args(&dir, &srv("forge", "1.16.5", Some("36.2.39"), "minimal")).unwrap();
+        assert!(!dir.join("user_jvm_args.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

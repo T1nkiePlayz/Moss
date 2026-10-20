@@ -32,7 +32,7 @@ pub(super) async fn receive_upload(st: &St, mut mp: Multipart) -> ApiResult<(std
 fn too_big(size: Option<u64>) -> bool { size.is_some_and(|s| s > MAX_PACK) }
 
 /// `{provider, project_id, version_id?}` -> download that pack version into `tmp/`.
-pub(super) async fn fetch_remote(st: &St, user: &User, body: &Value) -> ApiResult<(std::path::PathBuf, u64)> {
+pub(super) async fn fetch_remote(st: &St, user: &User, body: &Value) -> ApiResult<(std::path::PathBuf, u64, store::Identity)> {
     let prov = Prov::parse(body["provider"].as_str())?;
     let pid = body["project_id"].as_str().map(String::from).or_else(|| body["project_id"].as_u64().map(|n| n.to_string())).unwrap_or_default();
     let vid = body["version_id"].as_str().map(String::from).or_else(|| body["version_id"].as_u64().map(|n| n.to_string())).filter(|v| !v.is_empty());
@@ -41,12 +41,12 @@ pub(super) async fn fetch_remote(st: &St, user: &User, body: &Value) -> ApiResul
     let path = tmp_pack(st);
     let r = match prov { Prov::Modrinth => modrinth_pack(st, &pid, vid.as_deref(), &path).await, Prov::Curseforge => curseforge_pack(st, user, &pid, vid.as_deref(), &path).await };
     match r {
-        Ok(size) => Ok((path, size)),
+        Ok((size, version_id)) => Ok((path, size, store::Identity { provider: prov.as_str().into(), project_id: pid, version_id })),
         Err(e) => { let _ = tokio::fs::remove_file(&path).await; Err(match e.downcast_ref::<cf::CfError>() { Some(_) => upstream(e), None => ApiError::bad("modpack.fetch_failed", format!("{e:#}")) }) }
     }
 }
 
-async fn modrinth_pack(st: &St, pid: &str, vid: Option<&str>, dest: &std::path::Path) -> Result<u64> {
+async fn modrinth_pack(st: &St, pid: &str, vid: Option<&str>, dest: &std::path::Path) -> Result<(u64, String)> {
     let v = match vid {
         Some(v) => mr(st, &format!("/version/{v}"), &[]).await?,
         None => {
@@ -60,10 +60,10 @@ async fn modrinth_pack(st: &St, pid: &str, vid: Option<&str>, dest: &std::path::
     if too_big(f["size"].as_u64()) { bail!("the pack is larger than 512 MiB"); }
     let hash = f["hashes"]["sha512"].as_str().map(|h| Hash::Sha512(h.into())).or_else(|| f["hashes"]["sha1"].as_str().map(|h| Hash::Sha1(h.into())));
     download::fetch(&st.http, f["url"].as_str().unwrap_or_default(), dest, hash, &tokio_util::sync::CancellationToken::new(), |_| {}).await?;
-    Ok(tokio::fs::metadata(dest).await?.len())
+    Ok((tokio::fs::metadata(dest).await?.len(), v["id"].as_str().unwrap_or_default().to_string()))
 }
 
-async fn curseforge_pack(st: &St, user: &User, pid: &str, vid: Option<&str>, dest: &std::path::Path) -> Result<u64> {
+async fn curseforge_pack(st: &St, user: &User, pid: &str, vid: Option<&str>, dest: &std::path::Path) -> Result<(u64, String)> {
     let token = user.token.as_deref();
     if let (false, Some(why)) = cf::availability(st, token) { bail!("{why}"); }
     let f = match vid {
@@ -82,5 +82,5 @@ async fn curseforge_pack(st: &St, user: &User, pid: &str, vid: Option<&str>, des
     let (u, headers, extra_host) = cf::download_target(st, token, pid, &fid, f["downloadUrl"].as_str().unwrap_or_default())?;
     let _permit = st.cf_sem.acquire().await?;
     download::fetch_ext(cf::dl_client(), &u, dest, sha1, &tokio_util::sync::CancellationToken::new(), |_| {}, download::Opts { headers, extra_host }).await?;
-    Ok(tokio::fs::metadata(dest).await?.len())
+    Ok((tokio::fs::metadata(dest).await?.len(), fid))
 }

@@ -15,7 +15,7 @@ mod stop;
 pub use monitor::spawn_background;
 pub use reconcile::reconcile;
 pub use start::{send_command, start};
-pub use stop::{kill, restart, stop};
+pub use stop::{halt, kill, restart, stop};
 
 /// Detect the resource-limit backend once at startup (creates `moss-servers` in the delegated cgroup, if any).
 pub fn init_limits() {

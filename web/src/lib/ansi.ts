@@ -11,7 +11,7 @@ export interface Seg {
 export type Level = 'info' | 'warn' | 'error' | 'debug' | 'chat';
 
 const BASIC = ['#3b4a41', '#ff6b5e', '#9be37d', '#f2b04c', '#6aa3ff', '#d08cff', '#5cc8e8', '#d7e3db'];
-const BRIGHT = ['#6b7d72', '#ff8f85', '#b9f2a0', '#ffd079', '#93bdff', '#e2b0ff', '#8ee0f5', '#ffffff'];
+const BRIGHT = ['#8a9d92', '#ff8f85', '#b9f2a0', '#ffd079', '#93bdff', '#e2b0ff', '#8ee0f5', '#ffffff'];
 
 function c256(n: number): string | undefined {
   if (n < 0 || n > 255) return undefined;

@@ -159,7 +159,7 @@
   .ln { height: 20px; line-height: 20px; white-space: pre; padding: 0 14px; }
   .ln:hover { background: rgb(255 255 255 / .04); }
   .ln.warn { color: #f2b04c; background: rgb(242 176 76 / .05); } .ln.error { color: #ff7d71; background: rgb(255 107 94 / .08); }
-  .ln.debug { color: #6b7d72; } .ln.chat { color: #b9f2a0; }
+  .ln.debug { color: #8a9d92; } .ln.chat { color: #b9f2a0; }
   .msg { padding: 24px; text-align: center; color: var(--muted); }
   .jump { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); box-shadow: 0 8px 24px rgb(0 0 0 / .5); }
   .cmd { background: var(--s2); border: 1px solid var(--line2); border-radius: var(--r); padding: 4px 6px 4px 14px; }

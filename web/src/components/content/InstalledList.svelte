@@ -102,7 +102,7 @@
   .nm { display: flex; align-items: center; gap: 6px; max-width: 280px; }
   .nm b { min-width: 0; }
   .fn { max-width: 280px; }
-  tr.off .nm b, tr.off .fn, tr.off td:nth-child(n+4) { opacity: .5; }
+  tr.off .nm b, tr.off td:nth-child(n+4) { opacity: .9; } tr.off .nm b { text-decoration: line-through; text-decoration-thickness: 1px; }
   tr.off .nm b { text-decoration: line-through; text-decoration-color: var(--faint); }
   tr.picked { background: var(--a-soft); }
   .iss { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; background: none; border-radius: 6px; cursor: pointer; flex: none; padding: 0; }

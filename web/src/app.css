@@ -14,7 +14,7 @@
 :root, :root[data-theme='dark'] {
   --bg: #090d0b; --s1: #0f1512; --s2: #141c18; --s3: #1a241f;
   --line: rgb(255 255 255 / .08); --line2: rgb(255 255 255 / .14); --hl: rgb(255 255 255 / .05);
-  --text: #e6efe9; --muted: #8fa398; --faint: #66786d;
+  --text: #e6efe9; --muted: #8fa398; --faint: #82958a;
   --a1: #9be37d; --a2: #5fc46a; --a-ink: #06150a; --a-text: #9be37d; --a-soft: rgb(155 227 125 / .12); --a-glow: rgb(155 227 125 / .35);
   --warn: #f2b04c; --danger: #ff6b5e; --info: #5cc8e8; --ok: #9be37d;
   --warn-soft: rgb(242 176 76 / .12); --danger-soft: rgb(255 107 94 / .12); --info-soft: rgb(92 200 232 / .12);
@@ -25,9 +25,9 @@
   color-scheme: light;
   --bg: #f5f6f1; --s1: #fbfcf8; --s2: #ffffff; --s3: #edf0e6;
   --line: rgb(20 40 25 / .11); --line2: rgb(20 40 25 / .2); --hl: rgb(255 255 255 / .9);
-  --text: #14241a; --muted: #52665a; --faint: #7d8f83;
+  --text: #14241a; --muted: #52665a; --faint: #5c6e62;
   --a1: #5cb85a; --a2: #2f8f45; --a-ink: #ffffff; --a-text: #206b33; --a-soft: rgb(47 143 69 / .1); --a-glow: rgb(47 143 69 / .28);
-  --warn: #9a5b00; --danger: #c2321f; --info: #0a748f; --ok: #206b33;
+  --warn: #8a5000; --danger: #c2321f; --info: #075d75; --ok: #206b33;
   --warn-soft: rgb(154 91 0 / .1); --danger-soft: rgb(194 50 31 / .09); --info-soft: rgb(10 116 143 / .09);
   --shadow: 0 1px 0 var(--hl) inset, 0 6px 20px rgb(30 50 35 / .1);
   --overlay: rgb(20 36 26 / .4); --grain: .035;

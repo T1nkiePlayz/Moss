@@ -134,7 +134,8 @@
   <section class="card mt" aria-label="Console tail">
     <div class="card-title"><Icon name="terminal" size={14} />Console <span class="grow"></span><a class="btn sm" href={serverHref(s.id, 'console')} style="text-transform:none;letter-spacing:0">Open console<Icon name="chevron-right" size={13} /></a></div>
     {#if tail.length}
-      <div class="tail mono xs">{#each tail as l}<div class="l {levelOf(l)}"><AnsiLine line={l} /></div>{/each}</div>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -- keyboard users must be able to scroll this region -->
+      <div class="tail mono xs" tabindex="0" role="log" aria-label="Recent console output">{#each tail as l}<div class="l {levelOf(l)}"><AnsiLine line={l} /></div>{/each}</div>
     {:else}<p class="muted sm">No recent output.</p>{/if}
   </section>
 {/if}
@@ -159,6 +160,6 @@
   .sq { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .undo { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
   .undo li { display: flex; gap: 12px; align-items: center; padding: 10px 12px; background: var(--s1); border: 1px solid var(--line); border-radius: var(--r-sm); }
-  .tail { background: var(--bg); border-radius: 8px; padding: 10px 12px; overflow: auto; }
-  .l { white-space: pre; line-height: 1.6; } .l.warn { color: var(--warn); } .l.error { color: var(--danger); } .l.debug { color: var(--faint); }
+  .tail { background: #070a08; color: #d7e3db; border-radius: 8px; padding: 10px 12px; overflow: auto; }
+  .l { white-space: pre; line-height: 1.6; } .l.warn { color: #f2b04c; } .l.error { color: #ff7d71; } .l.debug { color: #8a9d92; }
 </style>

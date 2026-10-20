@@ -10,8 +10,9 @@ fn routes_from_source() -> BTreeSet<(String, String)> {
         // WebSocket upgrades and SSE are GET like any other route
         if path == "/healthz" { continue; } // lives outside /api/v1; documented in docs/api.md
         for v in ["get", "post", "put", "patch", "delete"] {
-            let call = if v == "delete" { ["delete(", "routing::delete("] } else { [&*format!("{v}("), &*format!("{v}(")] };
-            let found = verbs.split(|c: char| !c.is_alphanumeric() && c != ':' && c != '_' && c != '(').any(|tok| call.iter().any(|c| tok.starts_with(c)));
+            let pat = format!("{v}(");
+            // a verb call starts right after the opening of the chain, a `.` or a `::` (axum::routing::delete)
+            let found = verbs.match_indices(&pat).any(|(i, _)| i == 0 || matches!(verbs.as_bytes()[i - 1], b'.' | b':' | b' '));
             if found { out.insert((path.to_string(), v.to_string())); }
         }
     }

@@ -37,6 +37,7 @@ mod tokens;
 
 use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
 use {metrics::*, notifications::*, support::*};
+pub use servers::{create_server_from_value, free_port_for};
 
 type Q = Query<HashMap<String, String>>;
 
@@ -48,10 +49,19 @@ pub fn take_ticket(st: &St, t: Option<&String>) -> ApiResult<User> {
 }
 
 pub fn router(st: St) -> Router {
-    use crate::{backups, console, content, files, health, sched, undo};
+    use crate::{backups, blueprints, cfgfiles, console, content, files, health, importer, sched, search, undo, userdata};
     let api = Router::new()
         .route("/auth/config", get(auth_config))
         .route("/me", get(me))
+        .route("/me/preferences", get(userdata::prefs_get).put(userdata::prefs_put))
+        .route("/views", get(userdata::views_list).post(userdata::views_create))
+        .route("/views/{id}", axum::routing::delete(userdata::views_delete))
+        .route("/blueprints", get(blueprints::list).post(blueprints::save))
+        .route("/blueprints/import", post(blueprints::import))
+        .route("/blueprints/{id}", axum::routing::delete(blueprints::delete))
+        .route("/blueprints/{id}/export", get(blueprints::export))
+        .route("/blueprints/{id}/create", post(blueprints::create))
+        .route("/search", get(search::search))
         .route("/ticket", post(ticket))
         .route("/status", get(status))
         .route("/runtimes", get(runtimes_list))
@@ -60,6 +70,8 @@ pub fn router(st: St) -> Router {
         .route("/java/install", post(java_install))
         .route("/java/{major}", axum::routing::delete(java_delete))
         .route("/servers", get(servers_list).post(servers_create))
+        .route("/servers/import/inspect", post(importer::inspect))
+        .route("/servers/import", post(importer::start))
         .route("/servers/{id}", get(server_get).patch(server_patch).delete(server_delete))
         .route("/container/status", get(container_status))
         .route("/servers/{id}/container/pull", post(container_pull))
@@ -70,6 +82,9 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/timeline", get(server_timeline))
         .route("/servers/{id}/health", get(health::server_health))
         .route("/servers/{id}/properties", get(files::props_get).put(files::props_put))
+        .route("/servers/{id}/config", get(cfgfiles::list))
+        .route("/servers/{id}/config/{file}", get(cfgfiles::get).put(cfgfiles::put))
+        .route("/servers/{id}/config/{file}/diff", get(cfgfiles::diff))
         .route("/servers/{id}/console/backlog", get(console::backlog))
         .route("/servers/{id}/console", get(console::ws))
         .route("/servers/{id}/files", get(files::list).delete(files::delete))

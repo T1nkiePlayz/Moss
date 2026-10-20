@@ -83,7 +83,7 @@ pub async fn versions(st: &St, runtime: &str) -> Result<Value> {
     }).await
 }
 
-fn fallback_java(v: &str) -> u32 {
+pub fn fallback_java(v: &str) -> u32 {
     let nums: Vec<u32> = v.split(|c: char| !c.is_ascii_digit()).filter_map(|x| x.parse().ok()).collect();
     match (nums.first().copied().unwrap_or(1), nums.get(1).copied().unwrap_or(0), nums.get(2).copied().unwrap_or(0)) {
         (1, m, p) if m > 20 || (m == 20 && p >= 5) => 21,

@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 
 const axeSource = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const SERVER_TABS = ['', 'console', 'files', 'config', 'content', 'upgrade', 'backups', 'settings', 'access'];
-const PAGES = ['', 'servers', 'servers/new', 'backups', 'activity', 'users', 'settings'];
+const PAGES = ['', 'servers', 'servers/new', 'servers/import', 'backups', 'activity', 'users', 'settings'];
 
 async function audit(page: Page, label: string, scope?: string) {
   await page.addScriptTag({ path: axeSource });
@@ -81,6 +81,9 @@ test.describe('remote backups', () => {
     await page.getByRole('row').filter({ hasText: 'Remote only' }).first().getByRole('button', { name: 'Restore' }).click();
     await expect(page.getByText(/only stored on Home NAS/)).toBeVisible();
     await audit(page, 'restore dialog, remote-only');
+  });
+});
+
 async function openFabricContent(page: Page) {
   await page.goto('/');
   await page.locator('a[href^="#/servers/"]').first().waitFor();

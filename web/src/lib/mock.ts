@@ -3,6 +3,7 @@ import type * as A from './api';
 import { ApiError } from './api';
 import { handleRemote, NONE as NOT_REMOTE, seedRemote } from './mock-remote';
 import { extraRuntimes, handleContent, inspectModpack, itemsFromPack, NONE, seedContent, versionsFor } from './mock-content';
+import { handleOps, handleOpsGlobal, revertConfig } from './mock-ops';
 import { nextDailyRun, offsetName } from './tz';
 
 const uid = () => crypto.randomUUID();
@@ -306,7 +307,7 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
   if (M(/^\/backups\/([^/]+)$/) && method === 'DELETE') { const i = backups.findIndex((x) => x.id === m![1]); if (i >= 0) backups.splice(i, 1); return; }
   if (M(/^\/schedules\/([^/]+)\/run$/)) { log('schedule.run', 'schedule'); return; }
   if (M(/^\/schedules\/([^/]+)$/)) { const i = schedules.findIndex((x) => x.id === m![1]); if (method === 'DELETE') schedules.splice(i, 1); else Object.assign(schedules[i], b); return schedules[i]; }
-  if (M(/^\/undo\/([^/]+)\/revert$/)) { for (const l of Object.values(undo)) { const i = l.findIndex((x) => x.id === m![1]); if (i >= 0) { const [e] = l.splice(i, 1); log('undo.revert', e.title); } } return { ok: true }; }
+  if (M(/^\/undo\/([^/]+)\/revert$/)) { revertConfig({ uid, now, fs, pushUndo, log }, m![1]); for (const l of Object.values(undo)) { const i = l.findIndex((x) => x.id === m![1]); if (i >= 0) { const [e] = l.splice(i, 1); log('undo.revert', e.title); } } return { ok: true }; }
   if (p === '/users') { if (method === 'POST') { const u = { id: uid(), email: b.email, role: b.role, created_at: now() }; users.push(u); return u; } return users; }
   if (M(/^\/users\/([^/]+)$/)) { const i = users.findIndex((x) => x.id === m![1]); if (method === 'DELETE') users.splice(i, 1); else users[i].role = b.role; return; }
   if (p === '/settings') { if (method === 'PUT') Object.assign(settings, b); return settings; }
@@ -360,6 +361,10 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     if (sub === '/files/mkdir') { fs[s.id][b.path + '/'] = ''; return; }
     if (sub === '/files/rename') { for (const k of Object.keys(fs[s.id])) if (k === b.from || k.startsWith(b.from + '/')) { fs[s.id][b.to + k.slice(b.from.length)] = fs[s.id][k]; delete fs[s.id][k]; } return; }
     if (sub === '/files/upload') { const pth = qs.get('path') ?? ''; for (const f of (body as FormData).getAll('file') as File[]) fs[s.id][(pth ? pth + '/' : '') + f.name] = BIN.test(f.name) ? '\0'.repeat(Math.min(f.size, 5000)) : await f.text(); return; }
+    if (/^\/config(\/|$)/.test(sub)) {
+      const r = await handleOps({ uid, now, fs, pushUndo, log }, s, sub, method, b, qs);
+      if (r !== NONE) return r;
+    }
     if (/^\/(content|upgrade|modpacks|staging)(\/|$)/.test(sub)) {
       const r = await handleContent({ uid, now, ago, op: (...a) => startOp(...a), hits, cfHits, log, pushUndo, backups, content, emitServer }, s, sub, method, b);
       if (r !== NONE) return r;
@@ -610,6 +615,8 @@ export async function handle(method: string, rawPath: string, body: unknown): Pr
   const u = new URL(rawPath, 'http://x');
   const x = await handleX(method, u.pathname, u.searchParams, (body ?? {}) as Record<string, any>);
   if (x !== NOPE) { await sleep(60 + Math.random() * 100); return x; }
+  const og = await handleOpsGlobal({ uid, now, servers, backups, content, fs, call: (m, pp, bb) => handleBase(m, pp, bb), log }, method, u.pathname, u.searchParams, (body instanceof FormData ? {} : (body ?? {})) as Record<string, any>, body);
+  if (og !== NONE) { await sleep(60 + Math.random() * 100); return og; }
   const r = await handleBase(method, rawPath, body);
   if (u.pathname === '/status') (r as A.HostStatus).host.os = macos ? 'macOS' : 'Linux';
   return r;

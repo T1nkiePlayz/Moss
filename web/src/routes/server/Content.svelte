@@ -3,6 +3,7 @@
 </script>
 
 <script lang="ts">
+  import SavedViews from '../../components/SavedViews.svelte';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
   import States from '../../components/States.svelte';
@@ -271,6 +272,7 @@
     <select class="select" style="width:auto" aria-label="Sort" bind:value={sort}>
       <option value="relevance">Relevance</option><option value="downloads">Downloads</option><option value="updated">Recently updated</option><option value="follows">Follows</option>
     </select>
+    <SavedViews scope="content" filters={{ q }} {sort} onapply={(f, so) => { q = typeof f.q === 'string' ? f.q : ''; sort = ['relevance', 'downloads', 'updated', 'follows'].includes(so) ? so : 'relevance'; }} />
     {#if res}<span class="xs muted">Showing {res.compat.kind.replace('_', ' ')} for <b>{res.compat.loader}</b> · {res.compat.game_version}</span>{/if}
   </div>
   {#if provider === 'curseforge' && s.content_kind !== 'datapacks'}<p class="xs muted" style="margin:-4px 0 12px">Results from CurseForge. CurseForge does not say whether a mod runs on servers, so check the project page.</p>{/if}

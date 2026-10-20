@@ -14,7 +14,11 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0007_container", include_str!("migrations/0007_container.sql")),
     ("0008_remote_backups", include_str!("migrations/0008_remote_backups.sql")),
     ("0009_staging_packs", include_str!("migrations/0009_staging_packs.sql")),
+    ("0010_userdata", include_str!("migrations/0010_userdata.sql")),
 ];
+
+/// Number of migrations this build knows (the `user_version` of an up-to-date database).
+pub fn latest() -> usize { MIGRATIONS.len() }
 
 pub fn run(c: &Connection) -> rusqlite::Result<()> { run_with(c, MIGRATIONS) }
 

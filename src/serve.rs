@@ -21,6 +21,9 @@ pub async fn build_state(cfg: config::Config) -> anyhow::Result<state::St> {
 
 pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     cfg.validate()?;
+    // held until the process exits; `moss recover` uses it to tell that a controller is running
+    let lock = crate::lock::try_acquire(&cfg.data_dir)?.ok_or_else(|| anyhow::anyhow!("another Moss controller is already using {}", cfg.data_dir.display()))?;
+    std::mem::forget(lock);
     let st = build_state(cfg.clone()).await?;
     ops::recover(&st).await?;
     {

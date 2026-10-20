@@ -36,6 +36,8 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: Bundle-size budget (initial JavaScript, per-route chunks reported)
+        run: node ../scripts/bundle-budget.mjs
       - name: Install the browser for UI checks
         run: npx playwright install --with-deps chromium
       - name: UI checks (every page renders cleanly and passes axe)

@@ -4,7 +4,7 @@
   import Lazy from '../components/Lazy.svelte';
   import { api, apiOps, ApiError, errMsg, type JavaInstall, type Settings as S } from '../lib/api';
   import { confirmDialog, host, prefs, setPref, toast, toastError, trackOp, type Prefs } from '../lib/stores.svelte';
-  import { can } from '../lib/auth.svelte';
+  import { can, isAdmin } from '../lib/auth.svelte';
   import { duration } from '../lib/format';
 
   const themes: [Prefs['theme'], string, string[]][] = [
@@ -43,6 +43,8 @@
     if (!r.ok) return;
     try { await apiOps.removeJava(j.major); toast('info', `Removed Java ${j.major}`); void loadJava(); } catch (e) { jUse = jErrMsg(e); if (!jUse) toastError(e, 'Could not remove Java'); }
   }
+  const loadBlueprints = () => import('../components/settings/Blueprints.svelte');
+  const loadTheme = () => import('../components/settings/ThemeEditor.svelte');
   const loadNotif = () => import('../components/settings/Notifications.svelte');
   const loadTokens = () => import('../components/settings/Tokens.svelte');
   const loadDest = () => import('../components/settings/BackupDestinations.svelte');
@@ -75,6 +77,9 @@
       </div></div>
     </div>
   </section>
+
+  <Lazy load={loadTheme} />
+  {#if isAdmin()}<Lazy load={loadBlueprints} />{/if}
 
   <section class="card" aria-labelledby="in">
     <div class="card-title" id="in"><Icon name="sliders" size={14} />Instance</div>

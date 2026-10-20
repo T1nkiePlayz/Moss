@@ -3,6 +3,7 @@
   import ServerCard from '../components/ServerCard.svelte';
   import StatusBadge from '../components/StatusBadge.svelte';
   import States from '../components/States.svelte';
+  import SavedViews from '../components/SavedViews.svelte';
   import { servers, prefs, setPref, refreshServers } from '../lib/stores.svelte';
   import { power } from '../lib/actions';
   import { duration, pct, bytes } from '../lib/format';
@@ -23,10 +24,10 @@
 
 <div class="page-head">
   <div><h1>Servers</h1><p>{servers.list.length} total · {count('running')} running</p></div>
-  <a class="btn primary" href="#/servers/new"><Icon name="plus" size={16} />New server</a>
+  <div class="row g6"><a class="btn" href="#/servers/import"><Icon name="download" size={16} />Import</a><a class="btn primary" href="#/servers/new"><Icon name="plus" size={16} />New server</a></div>
 </div>
 
-<div class="row wrap" style="margin-bottom:16px">
+<div class="row wrap" style="margin-bottom:10px">
   <div class="grow" style="max-width:340px;position:relative;min-width:200px">
     <input class="input" style="padding-left:34px" type="search" placeholder="Search servers…" aria-label="Search servers" bind:value={q} />
     <span class="ico"><Icon name="search" size={15} /></span>
@@ -42,6 +43,8 @@
     <button class="btn icon sm {prefs.serversView === 'table' ? '' : 'ghost'}" aria-pressed={prefs.serversView === 'table'} aria-label="Table view" onclick={() => setPref('serversView', 'table')}><Icon name="list" size={15} /></button>
   </div>
 </div>
+
+<div style="margin-bottom:16px"><SavedViews scope="servers" filters={{ q, filter }} onapply={(f) => { q = typeof f.q === 'string' ? f.q : ''; filter = (['all', 'running', 'stopped', 'attention'].includes(f.filter as string) ? f.filter : 'all') as typeof filter; }} /></div>
 
 {#if !servers.loaded}
   <div class="grid cols-auto">{#each [1, 2, 3, 4] as _}<div class="skel" style="height:190px"></div>{/each}</div>

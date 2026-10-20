@@ -1,4 +1,4 @@
 node_modules
 dist
 *.local
-test-results
+test-results/

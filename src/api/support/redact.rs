@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 /// Human-readable list of what is removed (shown by the bundle preview).
 pub const REDACTIONS: &[&str] = &[
     "JWT access tokens", "API tokens (moss_pat_…) and Bearer credentials", "passwords, secrets and API keys in key=value form",
-    "webhook URLs", "long hexadecimal and base64-like secrets", "e-mail addresses (replaced by a short hash)",
+    "webhook URLs", "backup destination access keys and secrets", "long hexadecimal and base64-like secrets", "e-mail addresses (replaced by a short hash)",
 ];
 
 struct Rules { webhook: Regex, jwt: Regex, pat: Regex, bearer: Regex, kv: Regex, email: Regex, hex: Regex, b64: Regex }

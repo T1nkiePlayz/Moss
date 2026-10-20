@@ -54,4 +54,30 @@ test('server settings show the isolation section, and a clear message when no en
   await expect(page.getByText('No container engine')).toBeVisible();
   await expect(page.getByText(/Neither Docker nor Podman was found/).first()).toBeVisible();
   await audit(page, 'settings without an engine');
+test.describe('remote backups', () => {
+  test('destinations: add form, test result and per-server choice are accessible', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto('/#/settings');
+    await expect(page.getByText('Backup destinations', { exact: true })).toBeVisible();
+    await expect(page.getByText('Home NAS').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Test', exact: true }).first().click();
+    await expect(page.getByText('Everything worked')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: /Destination for/ }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Add destination' }).click();
+    await page.getByRole('radio', { name: /S3-compatible/ }).click();
+    await page.getByRole('button', { name: 'Add destination' }).last().click();
+    await expect(page.getByText('Enter the service address', { exact: false })).toBeVisible();
+    await audit(page, 'add destination dialog');
+    expect(errors).toEqual([]);
+  });
+
+  test('restore dialog explains a remote-only backup', async ({ page }) => {
+    await page.goto('/#/backups');
+    await expect(page.getByText('Remote only').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download from remote' }).first()).toBeVisible();
+    await page.getByRole('row').filter({ hasText: 'Remote only' }).first().getByRole('button', { name: 'Restore' }).click();
+    await expect(page.getByText(/only stored on Home NAS/)).toBeVisible();
+    await audit(page, 'restore dialog, remote-only');
+  });
 });

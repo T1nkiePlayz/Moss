@@ -136,8 +136,8 @@ where
             }
         }, true, true);
         ctx.st.ops.lock().unwrap().tokens.remove(&ctx.id);
-        if let Err(e) = &res && !cancelled && kind != "backup.create" {
-            // backup creation raises its own, more specific `backup_failed` notification
+        if let Err(e) = &res && !cancelled && !matches!(kind.as_str(), "backup.create" | "backup.upload") {
+            // backup creation and uploads raise their own, more specific `backup_failed` notification
             crate::notify::operation_failed(&ctx.st, &title, &format!("{e:#}"), server_id.as_deref()).await;
         }
     });

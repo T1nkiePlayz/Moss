@@ -1,13 +1,14 @@
 //! Restoring a backup, either in place (safety backup, staged extraction, then a directory swap or, with `only`,
 //! a swap of just the named top-level entries; the previous contents are kept) or as a brand-new server on a free port.
-use super::{archive::{extract_archive, verify_archive_scan}, create::archive_path, find, pre_change_forced, swap::{swap_selected, validate_only}};
+use super::{archive::{extract_archive, verify_archive_scan}, find, pre_change_forced, remote::jobs::ensure_local, swap::{swap_full, swap_selected, validate_only}};
 use crate::{auth::User, error::{ApiError, ApiResult}, ops, server, state::St};
 use anyhow::anyhow;
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-#[derive(Deserialize)] pub struct RestoreReq { mode: String, only: Option<Vec<String>> }
+#[derive(Deserialize)] pub struct RestoreReq { mode: String, only: Option<Vec<String>>, /// in-place only: extract to a staging directory and wait for an explicit promote
+    staged: Option<bool> }
 pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, Json(r): Json<RestoreReq>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (sid, sha, sname, rt, gv) = find(&st, &user, &bid, "backup.manage").await?;
     let existing = server::get(&st, &sid).await.ok();
@@ -20,13 +21,17 @@ pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, 
         let s = existing.as_ref().ok_or_else(|| ApiError::conflict("server.gone", "the original server no longer exists; restore as a new server"))?;
         if crate::lifecycle::process_alive(s) { return Err(ApiError::conflict("server.running", "stop the server before restoring in place")); }
     } else { user.require_admin()?; }
+    if r.staged == Some(true) {
+        if !in_place { return Err(ApiError::bad("validation", "staged restores are for in-place restores").field("staged", "not allowed with new_server")); }
+        return super::staged::start(&st, &user, &bid, existing.unwrap(), sha, r.only).await;
+    }
     let actor = user.actor();
     let b = bid.clone();
     let only = r.only.clone();
     let op = ops::spawn_op(&st, "backup.restore", format!("Restore {sname}"), Some(&sid.clone()), true, move |ctx| async move {
         let st = ctx.st.clone();
+        let p = ensure_local(&ctx, &st, &b).await?;
         ctx.stage("Verifying archive before touching anything");
-        let p = archive_path(&st, &sid, &b);
         let (p2, sha2) = (p.clone(), sha.clone());
         let (_, names) = tokio::task::spawn_blocking(move || verify_archive_scan(&p2, &sha2)).await??;
         if let Some(missing) = only.iter().flatten().find(|n| !names.contains(*n)) { return Err(anyhow!("\"{missing}\" is not in this backup")); }
@@ -48,10 +53,8 @@ pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, 
                 let _ = tokio::fs::remove_dir_all(&stage).await;
                 r?;
             } else {
-                tokio::fs::create_dir_all(kept.parent().unwrap()).await?;
-                tokio::fs::rename(&dir, &kept).await?;
-                if let Err(e) = tokio::fs::rename(&stage, &dir).await { let _ = tokio::fs::rename(&kept, &dir).await; return Err(e.into()); }
-                let _ = tokio::fs::rename(kept.join(".moss"), dir.join(".moss")).await;
+                let (stage2, dir2, kept2) = (stage.clone(), dir.clone(), kept.clone());
+                tokio::task::spawn_blocking(move || swap_full(&stage2, &dir2, &kept2)).await??;
             }
             ctx.log(format!("previous contents kept at {}", kept.display()));
             st.audit(&actor, "backup.restore", &s.name, &only.as_ref().map_or("in place".to_string(), |o| format!("in place: {}", o.join(", "))), Some(&s.id)).await;

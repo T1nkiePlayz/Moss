@@ -69,6 +69,9 @@ async fn backup_inner(ctx: &OpCtx, st: &St, s: &Srv, kind: &str, note: &str, kee
             st.db.call(move |c| c.execute("UPDATE backups SET status='ok', size=?, sha256=?, files=?, consistent=?, worlds=? WHERE id=?", rusqlite::params![size as i64, sha2, files as i64, consistent, w, i3])).await?;
             ctx.log(format!("{} files, {} MiB, sha256 {}", files, size >> 20, &sha[..16]));
             st.timeline(&s.id, "backup", kind).await;
+            if kind != "pre-change" { // safety backups are short-lived and stay local
+                match super::remote::jobs::queue_upload(st, s, &id).await { Ok(Some(_)) => ctx.log("copying to the remote destination in a separate operation"), Ok(None) => {} Err(e) => ctx.log(format!("could not start the remote copy: {e:#}")) }
+            }
             if kind == "scheduled" { prune(st, &s.id, "scheduled", keep.unwrap_or(0)).await; }
             if kind == "pre-change" { prune(st, &s.id, "pre-change", super::pre_change::KEEP).await; }
             Ok(id)
@@ -86,10 +89,17 @@ async fn prune(st: &St, sid: &str, kind: &str, keep: i64) {
     let keep = if keep > 0 { keep } else { st.setting("backup_keep", "7").await.parse().unwrap_or(7) }.max(1);
     let (s2, k2) = (sid.to_string(), kind.to_string());
     let victims: Vec<String> = st.db.call(move |c| {
-        let mut q = c.prepare("SELECT id FROM backups WHERE server_id=?1 AND kind=?3 AND locked=0 AND status IN ('ok','failed') AND id <> COALESCE((SELECT id FROM backups WHERE server_id=?1 AND status='ok' ORDER BY created_at DESC LIMIT 1), '') ORDER BY created_at DESC LIMIT -1 OFFSET ?2")?;
+        let mut q = c.prepare("SELECT id FROM backups WHERE server_id=?1 AND kind=?3 AND locked=0 AND local_present=1 AND status IN ('ok','failed') AND id <> COALESCE((SELECT id FROM backups WHERE server_id=?1 AND status='ok' ORDER BY created_at DESC LIMIT 1), '') ORDER BY created_at DESC LIMIT -1 OFFSET ?2")?;
         q.query_map(rusqlite::params![s2, keep, k2], |r| r.get(0))?.collect()
     }).await.unwrap_or_default();
-    for v in victims { let _ = remove_backup(st, sid, &v).await; }
+    for v in victims { retire_local(st, sid, &v).await; }
+}
+
+/// Retention for local copies: a backup that is safely on a remote destination only loses its local file.
+async fn retire_local(st: &St, sid: &str, id: &str) {
+    let i = id.to_string();
+    let stored = st.db.call(move |c| c.query_row("SELECT remote='stored' FROM backups WHERE id=?", [i], |r| r.get::<_, bool>(0))).await.unwrap_or(false);
+    if stored { super::remote::jobs::drop_local(st, sid, id).await; } else { let _ = remove_backup(st, sid, id).await; }
 }
 
 /// Delete an archive and its row. Locked backups are refused.

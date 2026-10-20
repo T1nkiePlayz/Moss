@@ -3,6 +3,7 @@
   import RestoreModal from './RestoreModal.svelte';
   import { api, apiOps, download, backupDownloadPath, type Backup } from '../lib/api';
   import { isPreChange, canDeleteBackup, deleteHint } from '../lib/backupPreview';
+  import { canCopyToRemote, isRemoteOnly, remoteBadge } from '../lib/remote';
   import { bytes, relTime, dateTime } from '../lib/format';
   import { confirmDialog, serverById, toast, toastError, trackOp } from '../lib/stores.svelte';
   import { can } from '../lib/auth.svelte';
@@ -29,6 +30,12 @@
     }
     try { await apiOps.patchBackup(b.id, { locked: !b.locked }); toast('info', b.locked ? 'Backup unlocked' : 'Backup locked', { body: b.locked ? undefined : 'It will never be pruned or deleted.', timeout: 2600 }); onchange(); } catch (e) { toastError(e, 'Could not change the lock'); }
   }
+  async function toRemote(b: Backup) {
+    try { trackOp((await apiOps.uploadBackup(b.id)).operation); toast('info', 'Copy started'); onchange(); } catch (e) { toastError(e, 'Could not start the copy'); }
+  }
+  async function fromRemote(b: Backup) {
+    try { trackOp((await apiOps.fetchBackup(b.id)).operation); toast('info', 'Download started', { body: `Fetching from ${b.remote_destination ?? 'the destination'} and checking its checksum.` }); } catch (e) { toastError(e, 'Could not start the download'); }
+  }
   const dl = (b: Backup) => download(backupDownloadPath(b.id), `backup-${b.id.slice(0, 8)}.zip`).catch((e) => toastError(e, 'Download failed'));
 </script>
 
@@ -45,11 +52,13 @@
           <td>{#if isPreChange(b)}<span class="badge info" title="Taken automatically before a change such as a restore, update or import. Only the newest 3 are kept."><Icon name="shield" size={12} />Pre-change</span><div class="xs muted">Safety copy</div>{:else}<span class="badge">{b.kind}</span>{/if}{#if !b.consistent}<span class="badge warn" style="margin-left:4px" title="Taken while the server was running without a save-all pause">Crash-consistent</span>{/if}</td>
           <td class="num">{bytes(b.size)}</td>
           <td class="ck"><code class="xs" title={b.sha256}>{b.sha256.slice(0, 10)}…</code></td>
-          <td><div class="stack"><span class="badge {tone}">{#if tone === 'ok'}<Icon name="check" size={12} />{/if}{lab}</span>{#if b.locked}<span class="badge warn"><Icon name="lock" size={12} />Locked</span>{/if}</div></td>
+          <td><div class="stack"><span class="badge {tone}">{#if tone === 'ok'}<Icon name="check" size={12} />{/if}{lab}</span>{#if b.locked}<span class="badge warn"><Icon name="lock" size={12} />Locked</span>{/if}{#if remoteBadge(b)}{@const rb = remoteBadge(b)!}<span class="badge {rb.tone}" title={rb.title}><Icon name="upload" size={12} />{rb.label}</span>{/if}</div>{#if b.remote === 'failed' && b.remote_error}<div class="xs muted ellipsis" style="max-width:200px" title={b.remote_error}>{b.remote_error}</div>{/if}</td>
           <td class="num"><span class="row g4" style="justify-content:flex-end">
             <button class="btn ghost icon sm" aria-label="Verify backup" title="Verify checksum" disabled={!manage || b.status !== 'ok'} onclick={() => verify(b)}><Icon name="shield" size={14} /></button>
             <button class="btn sm" disabled={!manage || b.status !== 'ok'} onclick={() => (restoring = b)}><Icon name="history" size={13} />Restore</button>
-            <button class="btn ghost icon sm" aria-label="Download backup" disabled={b.status !== 'ok'} onclick={() => dl(b)}><Icon name="download" size={14} /></button>
+            {#if isRemoteOnly(b)}<button class="btn sm" disabled={!manage || b.status !== 'ok'} title="This backup is only at the destination. Download it to this machine." onclick={() => fromRemote(b)}><Icon name="download" size={13} />Download from remote</button>
+            {:else}<button class="btn ghost icon sm" aria-label="Download backup" disabled={b.status !== 'ok'} onclick={() => dl(b)}><Icon name="download" size={14} /></button>{/if}
+            {#if canCopyToRemote(b)}<button class="btn ghost icon sm" aria-label={b.remote === 'failed' ? 'Retry copy to remote' : 'Copy to remote'} title={b.remote === 'failed' ? 'Retry copying to the destination' : 'Copy to the destination'} disabled={!manage} onclick={() => toRemote(b)}><Icon name="upload" size={14} /></button>{/if}
             <button class="btn ghost icon sm" aria-label={b.locked ? 'Unlock backup' : 'Lock backup'} aria-pressed={!!b.locked} title={b.locked ? 'Locked: never pruned or deleted. Click to unlock.' : 'Lock to protect from pruning and deletion'} disabled={!manage} onclick={() => lock(b)}><Icon name={b.locked ? 'lock' : 'unlock'} size={14} /></button>
             <button class="btn ghost icon sm" class:locked={!canDeleteBackup(b)} aria-label={b.locked ? 'Delete backup (locked, unlock first)' : 'Delete backup'} aria-disabled={!canDeleteBackup(b) || !manage} title={deleteHint(b)} disabled={!manage} onclick={() => del(b)}><Icon name="trash" size={14} /></button>
           </span></td>

@@ -2,8 +2,9 @@
   import Icon from '../../components/Icon.svelte';
   import States from '../../components/States.svelte';
   import BackupList from '../../components/BackupList.svelte';
+  import StagedModal from '../../components/StagedModal.svelte';
   import TimezoneSelect from '../../components/TimezoneSelect.svelte';
-  import { api, apiOps, errMsg, type Backup, type Schedule, type Server } from '../../lib/api';
+  import { api, apiOps, errMsg, type Backup, type Schedule, type Server, type ServerDestination, type StagedRestore } from '../../lib/api';
   import { backupNow } from '../../lib/actions';
   import { confirmDialog, onOp, toast, toastError } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';
@@ -19,9 +20,16 @@
   let sErr = $state('');
 
   async function load() { err = ''; try { list = await api.backups(s.id); } catch (e) { err = errMsg(e); } }
+  let dest = $state<ServerDestination | null>(null);
+  let pending = $state<StagedRestore[]>([]);
+  let reviewing = $state('');
+  async function loadRemote() {
+    dest = await apiOps.serverDestination(s.id).catch(() => null);
+    pending = (await apiOps.stagedRestores(s.id).catch(() => [])).filter((x) => x.status !== 'promoted');
+  }
   async function loadSched() { sErr = ''; try { sched = await api.schedules(s.id); } catch (e) { sErr = errMsg(e); } }
-  $effect(() => { s.id; list = sched = null; load(); loadSched(); });
-  $effect(() => onOp((o) => { if (o.server_id === s.id && o.kind.startsWith('backup') && o.state !== 'running' && o.state !== 'queued') load(); }));
+  $effect(() => { s.id; list = sched = null; load(); loadSched(); loadRemote(); });
+  $effect(() => onOp((o) => { if (o.server_id === s.id && o.kind.startsWith('backup') && o.state !== 'running' && o.state !== 'queued') { load(); loadRemote(); } }));
 
   async function create(e: Event) { e.preventDefault(); await backupNow(s.id, note.trim() || undefined); note = ''; }
 
@@ -68,6 +76,12 @@
     </form>
   {/if}
 </div>
+
+{#if dest}<p class="muted sm" style="margin:-8px 0 14px">{dest.effective ? `Finished backups are also copied to ${dest.effective.name}.` : 'Backups stay on this machine only. Add a destination in Settings to copy them elsewhere.'}</p>{/if}
+{#each pending as x (x.id)}
+  <div class="banner info" style="margin-bottom:12px"><Icon name="info" size={16} /><div class="grow">{x.status === 'failed' ? 'A restore could not be prepared.' : 'A restore is waiting for your review.'} Nothing on the server has changed yet.</div><button class="btn sm" onclick={() => (reviewing = x.id)}>Review</button></div>
+{/each}
+{#if reviewing}<StagedModal id={reviewing} onclose={() => { reviewing = ''; void loadRemote(); }} />{/if}
 
 {#if err}<States kind="error" text={err} retry={load} />
 {:else if !list}<States kind="loading" rows={3} />

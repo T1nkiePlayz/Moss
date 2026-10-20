@@ -7305,6 +7305,107 @@
           }
         ]
       }
+    },
+    "/blueprints/{id}/share": {
+      "get": {
+        "tags": [
+          "blueprints"
+        ],
+        "summary": "Get a share code for a blueprint (moss1_ + base64url, with checksum)",
+        "x-permission": "admin",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "length": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "length"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/blueprints/import-code": {
+      "post": {
+        "tags": [
+          "blueprints"
+        ],
+        "summary": "Import a blueprint from a share code (strictly validated)",
+        "x-permission": "admin",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Any"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

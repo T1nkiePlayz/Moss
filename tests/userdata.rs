@@ -89,8 +89,23 @@ async fn prefs_views_and_blueprints() {
     assert_eq!(imp.status(), 201);
     assert_eq!(c.post(format!("{api}/blueprints/import")).body("not json").send().await.unwrap().status(), 400);
     assert_eq!(c.post(format!("{api}/blueprints/import")).body(ex.replace("moss-blueprint", "other")).send().await.unwrap().status(), 400);
+    // share codes: copy, import, and refusals
+    let sh: Value = c.get(format!("{api}/blueprints/{bid}/share")).send().await.unwrap().json().await.unwrap();
+    let code = sh["code"].as_str().unwrap().to_string();
+    assert!(code.starts_with("moss1_") && sh["length"].as_u64() == Some(code.len() as u64));
+    for leak in ["hunter2", "25999", "rcon", "level-seed"] { assert!(!code.contains(leak)); }
+    let imp = c.post(format!("{api}/blueprints/import-code")).json(&json!({"code": format!("  {code}\n")})).send().await.unwrap();
+    assert_eq!(imp.status(), 201);
+    let imp: Value = imp.json().await.unwrap();
+    assert_eq!((imp["name"].as_str(), imp["content"].as_i64()), (Some("Friends template"), Some(1)));
+    let cut = c.post(format!("{api}/blueprints/import-code")).json(&json!({"code": &code[..code.len() - 4]})).send().await.unwrap();
+    assert_eq!(cut.status(), 400);
+    let cut: Value = cut.json().await.unwrap();
+    assert!(cut["error"]["message"].as_str().unwrap().contains("share code"), "{cut}");
+    assert_eq!(c.post(format!("{api}/blueprints/import-code")).json(&json!({"code": "nope"})).send().await.unwrap().status(), 400);
+    assert_eq!(c.get(format!("{api}/blueprints/nope/share")).send().await.unwrap().status(), 404);
     let list: Value = c.get(format!("{api}/blueprints")).send().await.unwrap().json().await.unwrap();
-    assert_eq!(list.as_array().unwrap().len(), 2);
+    assert_eq!(list.as_array().unwrap().len(), 3);
     assert_eq!(c.post(format!("{api}/blueprints/{bid}/create")).json(&json!({"name": "", "accept_eula": true})).send().await.unwrap().status(), 400);
     assert_eq!(c.post(format!("{api}/blueprints/{bid}/create")).json(&json!({"name": "New", "accept_eula": false})).send().await.unwrap().status(), 400, "EULA still required");
     assert_eq!(c.delete(format!("{api}/blueprints/{bid}")).send().await.unwrap().status(), 204);

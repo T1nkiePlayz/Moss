@@ -242,6 +242,7 @@ Structured editors for `paper-global.yml`, `paper-world-defaults.yml`, per-world
 A blueprint holds runtime, versions, memory, flags, `server.properties` (without port, world and secret-looking keys), the content list (provider and project id only) and schedules. Never worlds, player data or secrets.
 - `GET /blueprints` -> `[{id,name,runtime,game_version,loader_version,memory_mb,properties:n,content:n,schedules:n,created_by,created_at}]`
 - `POST /blueprints {server_id,name}` -> 201 summary · `POST /blueprints/import` (body: the exported JSON, at most 256 KB) -> 201 summary · `GET /blueprints/{id}/export` -> the JSON document (`{format:"moss-blueprint",version:1,...}`) · `DELETE /blueprints/{id}` -> 204
+- Share codes: `GET /blueprints/{id}/share` -> `{code,length}` (`moss1_` + base64url of a version byte, a 4-byte checksum and the deflated blueprint; at most 48 KiB) · `POST /blueprints/import-code {code}` -> 201 summary. Decoding verifies the checksum, caps the unpacked size, then applies the same cleaning as a file import plus stricter rules: content items must be Modrinth (8 characters) or CurseForge (numeric) project ids, and no value may be an absolute path, a `..` path or a script. A damaged or cut-off code returns `blueprint.invalid` with a plain-language reason.
 - `POST /blueprints/{id}/create {name,port?,accept_eula}` -> 202 `{server,operation,blueprint:{id,skipped_schedules}}`; the install operation then applies the properties and installs the content.
 
 ### Import an existing server (admin)

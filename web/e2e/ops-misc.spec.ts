@@ -115,6 +115,36 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(page.getByRole('heading', { name: /Setting things up|Server ready/ })).toBeVisible();
     });
 
+    test('Blueprints: share code copy, paste, refusal and use on the New server page', async ({ page, context }) => {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+      await page.goto('/#/servers/srv-survival-smp/settings');
+      await page.getByLabel('Blueprint name').fill('Shared recipe');
+      await page.getByRole('button', { name: 'Save blueprint' }).click();
+      await expect(page.getByText('Saved blueprint “Shared recipe”')).toBeVisible();
+      await page.goto('/#/settings');
+      const card = page.getByRole('region', { name: 'Server blueprints' });
+      await card.getByRole('button', { name: 'Copy share code for Shared recipe' }).click();
+      await expect(page.getByText(/Share code for .* copied|Copy the code from the box/)).toBeVisible();
+      const box = card.getByLabel('Share code', { exact: true });
+      let code = '';
+      if (await box.isVisible().catch(() => false)) code = await box.inputValue();
+      else code = await page.evaluate(() => navigator.clipboard.readText());
+      expect(code.startsWith('moss1_')).toBe(true);
+      await card.getByText('Import a blueprint or share code').click();
+      await card.getByLabel('Or paste its JSON or a share code').fill(code.slice(0, -4) + '!!!!');
+      await card.getByRole('button', { name: 'Import', exact: true }).click();
+      await expect(card.getByRole('alert')).toContainText('share code');
+      await card.getByLabel('Or paste its JSON or a share code').fill('  ' + code + '\n');
+      await card.getByRole('button', { name: 'Import', exact: true }).click();
+      await expect(card.getByRole('cell', { name: 'Shared recipe', exact: true })).toHaveCount(2);
+      await audit(page, 'settings with share code');
+      await page.goto('/#/servers/new');
+      await page.getByRole('button', { name: 'Use a blueprint' }).click();
+      await page.getByLabel('Or paste a share code').fill(code);
+      await page.getByRole('button', { name: 'Use code' }).click();
+      await expect(page.getByLabel('Name for the new server')).toHaveValue('Shared recipe');
+    });
+
     test('Command palette finds files and shows the groups', async ({ page }) => {
       await page.goto('/');
       await page.locator('a[href^="#/servers/"]').first().waitFor();

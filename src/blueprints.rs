@@ -6,6 +6,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 const FORMAT: &str = "moss-blueprint";
+pub mod share;
+
 const MAX_JSON: usize = 256 * 1024;
 
 /// Property keys that are never saved or applied: network binding, world identity, and anything that looks like a secret.

@@ -265,7 +265,8 @@ impl Soak {
 
     async fn restore(&mut self, i: usize) {
         let id = self.servers[i].0.clone();
-        if self.servers[i].2 == Want::Running { self.action(i, "stop").await; self.api.wait_state(&id, "stopped", 60, "before restore").await; }
+        if self.servers[i].2 == Want::Running { self.action(i, "stop").await; }
+        self.api.wait_state(&id, "stopped", 60, "before restore").await; // an earlier stop may still be finishing
         let mut list = self.api.get(&format!("/servers/{id}/backups")).await.unwrap();
         if list.as_array().is_none_or(|l| l.is_empty()) { self.backup_and_verify(i).await; list = self.api.get(&format!("/servers/{id}/backups")).await.unwrap(); }
         let ok: Vec<_> = list.as_array().unwrap().iter().filter(|b| b["status"] == "ok").collect();

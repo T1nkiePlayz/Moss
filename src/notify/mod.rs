@@ -76,6 +76,9 @@ pub async fn restart_failed(st: &St, s: &Srv, why: &str) {
 pub async fn backup_failed(st: &St, s: &Srv, why: &str) {
     send(st, "backup_failed", "warn", &format!("Backup of {} failed", s.name), why, Some(&s.id)).await;
 }
+pub async fn remote_backup_failed(st: &St, s: &Srv, destination: &str, why: &str) {
+    send(st, "backup_failed", "warn", &format!("Remote copy of {} failed", s.name), &format!("Could not copy the backup to {destination}: {why}"), Some(&s.id)).await;
+}
 pub async fn operation_failed(st: &St, title: &str, why: &str, server_id: Option<&str>) {
     send(st, "operation_failed", "warn", &format!("{title} failed"), why, server_id).await;
 }

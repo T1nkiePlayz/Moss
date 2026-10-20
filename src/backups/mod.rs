@@ -10,6 +10,7 @@ mod archive;
 mod create;
 mod pre_change;
 mod preview;
+pub mod remote;
 mod restore;
 mod swap;
 

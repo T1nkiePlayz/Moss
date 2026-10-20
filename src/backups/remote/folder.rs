@@ -1,0 +1,90 @@
+//! Folder destination: a directory the administrator chose (a mounted NAS or USB disk). Objects are copied to a
+//! `.part` file, flushed, and renamed into place, so a half-copied backup never looks complete.
+use super::{ObjInfo, Xfer};
+use anyhow::{Result, bail};
+use sha2::{Digest, Sha256};
+use std::{io::{Read, Write}, path::{Path, PathBuf}};
+
+pub const SUBDIR: &str = "moss-backups";
+
+pub struct Folder { root: PathBuf }
+
+/// Keys are `<server-id>/<file>`: plain components only.
+pub fn safe_key(key: &str) -> Result<()> {
+    if key.is_empty() || key.split('/').any(|c| c.is_empty() || c == "." || c == ".." || c.contains(['\\', '\0'])) { bail!("invalid object name"); }
+    Ok(())
+}
+
+fn hash_file(p: &Path) -> Result<String> {
+    let mut f = std::fs::File::open(p)?;
+    let (mut h, mut b) = (Sha256::new(), vec![0u8; 1 << 20]);
+    loop { let n = f.read(&mut b)?; if n == 0 { break; } h.update(&b[..n]); }
+    Ok(hex::encode(h.finalize()))
+}
+
+impl Folder {
+    pub fn new(path: &str) -> Self { Self { root: Path::new(path).join(SUBDIR) } }
+    fn path(&self, key: &str) -> Result<PathBuf> { safe_key(key)?; Ok(self.root.join(key)) }
+
+    pub async fn put(&self, src: &Path, key: &str, x: &Xfer) -> Result<()> {
+        let (dest, src, x) = (self.path(key)?, src.to_path_buf(), x.clone());
+        tokio::task::spawn_blocking(move || copy(&src, &dest, &x).map(|_| ())).await?
+    }
+    pub async fn head(&self, key: &str) -> Result<Option<ObjInfo>> {
+        let p = self.path(key)?;
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || match std::fs::metadata(&p) {
+            Ok(m) if m.is_file() => Ok(Some(ObjInfo { key, size: m.len(), etag: None, sha256: Some(hash_file(&p)?), kms: false })),
+            Ok(_) => Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }).await?
+    }
+    pub async fn get(&self, key: &str, dest: &Path, x: &Xfer) -> Result<(String, u64)> {
+        let (src, dest, x) = (self.path(key)?, dest.to_path_buf(), x.clone());
+        tokio::task::spawn_blocking(move || copy(&src, &dest, &x)).await?
+    }
+    pub async fn list(&self, prefix: &str) -> Result<Vec<ObjInfo>> {
+        let root = self.root.clone();
+        let prefix = prefix.to_string();
+        tokio::task::spawn_blocking(move || {
+            let mut out = vec![];
+            let Ok(top) = std::fs::read_dir(&root) else { return Ok(out) };
+            for d in top.flatten().filter(|d| d.file_type().is_ok_and(|t| t.is_dir())) {
+                for f in std::fs::read_dir(d.path())?.flatten().filter(|f| f.file_type().is_ok_and(|t| t.is_file())) {
+                    let key = format!("{}/{}", d.file_name().to_string_lossy(), f.file_name().to_string_lossy());
+                    if key.starts_with(&prefix) && !key.ends_with(".part") { out.push(ObjInfo { key, size: f.metadata()?.len(), etag: None, sha256: None, kms: false }); }
+                }
+            }
+            Ok(out)
+        }).await?
+    }
+    pub async fn delete(&self, key: &str) -> Result<()> {
+        match tokio::fs::remove_file(self.path(key)?).await { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.into()) }
+    }
+}
+
+/// Copy `src` to `dest` through a `.part` file; returns the SHA-256 and size of what was written.
+fn copy(src: &Path, dest: &Path, x: &Xfer) -> Result<(String, u64)> {
+    if let Some(d) = dest.parent() { std::fs::create_dir_all(d)?; }
+    let part = dest.with_file_name(format!("{}.part", dest.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()));
+    let r: Result<(String, u64)> = (|| {
+        let (mut i, mut o) = (std::fs::File::open(src)?, std::fs::File::create(&part)?);
+        let (mut h, mut b, mut n) = (Sha256::new(), vec![0u8; 1 << 20], 0u64);
+        loop {
+            if x.token.is_cancelled() { bail!("cancelled"); }
+            let k = i.read(&mut b)?;
+            if k == 0 { break; }
+            o.write_all(&b[..k])?;
+            h.update(&b[..k]);
+            n += k as u64;
+            x.add(k as u64);
+        }
+        o.sync_all()?;
+        Ok((hex::encode(h.finalize()), n))
+    })();
+    match r {
+        Ok(v) => { std::fs::rename(&part, dest)?; Ok(v) }
+        Err(e) => { let _ = std::fs::remove_file(&part); Err(e) }
+    }
+}

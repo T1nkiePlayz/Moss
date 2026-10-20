@@ -40,6 +40,9 @@ pub struct Config {
     /// Allow notification webhooks that resolve to private, loopback or link-local addresses (default: refuse, to prevent SSRF).
     #[arg(long, env = "MOSS_ALLOW_PRIVATE_WEBHOOKS", default_value_t = false, action = clap::ArgAction::Set)]
     pub allow_private_webhooks: bool,
+    /// Allow remote backup destinations (S3 endpoints) that resolve to private or loopback addresses, such as a MinIO on your LAN (default: refuse, to prevent SSRF).
+    #[arg(long, env = "MOSS_ALLOW_PRIVATE_BACKUP_HOSTS", default_value_t = false, action = clap::ArgAction::Set)]
+    pub allow_private_backup_hosts: bool,
     /// MFA policy: `off`, `admins` (owner/admin accounts need an aal2 session) or `all`.
     #[arg(long, env = "MOSS_REQUIRE_MFA", default_value = "off")]
     pub require_mfa: String,

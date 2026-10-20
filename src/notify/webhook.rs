@@ -57,19 +57,22 @@ pub fn build_payload(url: &reqwest::Url, event: &str, severity: &str, title: &st
     }
 }
 
-/// Resolve the host once and return the single address to connect to.
-async fn pinned_addr(u: &reqwest::Url, allow_private: bool) -> Result<SocketAddr> {
-    let host = u.host_str().ok_or_else(|| anyhow!("webhook URL has no host"))?;
-    let port = u.port_or_known_default().unwrap_or(443);
+/// Resolve the host once and return the single address to connect to. `opt_in` names the setting that allows private targets.
+pub async fn resolve_pinned(host: &str, port: u16, allow_private: bool, opt_in: &str) -> Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = match host.trim_matches(['[', ']']).parse::<IpAddr>() {
         Ok(ip) => vec![SocketAddr::new(ip, port)],
         Err(_) => tokio::time::timeout(TIMEOUT, tokio::net::lookup_host((host, port))).await.map_err(|_| anyhow!("DNS lookup for {host} timed out"))?.map_err(|_| anyhow!("could not resolve {host}"))?.collect(),
     };
     if addrs.is_empty() { bail!("could not resolve {host}"); }
     if !allow_private && let Some(bad) = addrs.iter().find(|a| !is_public_ip(a.ip())) {
-        bail!("{host} resolves to a non-public address ({}); set MOSS_ALLOW_PRIVATE_WEBHOOKS=true to allow this", bad.ip());
+        bail!("{host} resolves to a non-public address ({}); set {opt_in}=true to allow this", bad.ip());
     }
     Ok(addrs[0])
+}
+
+async fn pinned_addr(u: &reqwest::Url, allow_private: bool) -> Result<SocketAddr> {
+    let host = u.host_str().ok_or_else(|| anyhow!("webhook URL has no host"))?;
+    resolve_pinned(host, u.port_or_known_default().unwrap_or(443), allow_private, "MOSS_ALLOW_PRIVATE_WEBHOOKS").await
 }
 
 /// One delivery attempt. Errors never contain the URL.

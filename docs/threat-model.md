@@ -1,6 +1,6 @@
 # Threat model
 
-Audience: people deploying or reviewing Moss. This document describes what Moss defends, against whom, and what it does not defend. It describes the code as it is; where a mitigation does not exist it says so. See also the *Security model* section of the [README](../README.md) and [architecture.md](architecture.md).
+Audience: people deploying or reviewing Moss. This document describes what Moss defends, against whom, and what it does not defend. It describes the code as it is; where a mitigation does not exist it says so. The [internal security review](security-review.md) lists findings and accepted risks. See also the *Security model* section of the [README](../README.md) and [architecture.md](architecture.md).
 
 ## Summary
 
@@ -75,7 +75,7 @@ STRIDE categories: S spoofing, T tampering, R repudiation, I information disclos
 | Missing second factor | S | `MOSS_REQUIRE_MFA` (off, admins, all) checks the `aal2` claim (`src/auth/mfa.rs`) | Default is off. API tokens bypass MFA by design |
 | Dev auth mode exposed | E | `Config::validate` refuses dev mode on any non-loopback bind (`src/config.rs`); a startup warning is logged | Any local process or user on the host, or a reverse proxy on the same host forwarding to loopback, gets full owner access. Never put a proxy in front of dev mode |
 | Cross-server access (IDOR) | E | Every handler goes through `server_for` / `authz` with a named permission; invisible servers return not found (`src/api/mod.rs`, `src/auth/mod.rs`) | Authorisation is per handler; a new route that forgets it would be open. Covered by review and tests, not by structure |
-| Stream tokens in URLs leaking via logs or history | I | WebSocket and SSE use single-use tickets valid 30 s, capped at 2000 outstanding; the ticket carries the user, and the event stream filters by server visibility (`src/api/session.rs`, `src/api/activity.rs`, `src/console.rs`) | A ticket is a bearer credential for 30 s; an observer of the URL within that window and before the legitimate client connects can use it. No Origin check on the WebSocket upgrade was found in `src/console.rs` |
+| Stream tokens in URLs leaking via logs or history; cross-site stream hijack | I | WebSocket and SSE use single-use tickets valid 30 s, same-host `Origin` required, capped at 2000 outstanding; the ticket carries the user, and the event stream filters by server visibility (`src/api/session.rs`, `src/api/activity.rs`, `src/console.rs`) | A ticket is a bearer credential for 30 s; an observer of the URL within that window and before the legitimate client connects can use it. The WebSocket upgrade and the event stream reject a cross-origin `Origin` (`src/api/origin.rs`) before the ticket is consumed; requests without `Origin` are allowed |
 | XSS or clickjacking in the UI | T, I | CSP (`default-src 'self'`, `script-src 'self'`, `frame-ancestors 'none'`), `nosniff`, `no-referrer`, `X-Frame-Options: DENY` (`src/api/assets.rs`, `src/api/mod.rs`); console and file content rendered as text | `style-src` allows `'unsafe-inline'`; `connect-src` allows any `ws:`/`wss:` host |
 | Repudiation of actions | R | Audit log for console commands and file uploads, among others (`st.audit`); sensitive console commands redacted by default (`src/console.rs`) | Audit rows live in the same database an admin can reach; no tamper evidence. Game-side actions by players are not audited |
 | Request flooding | D | 512 MiB body limit (`src/api/mod.rs`); auth-failure throttle; ticket cap | No general per-user rate limit, no request concurrency limit. Rely on the reverse proxy |
@@ -126,14 +126,14 @@ STRIDE categories: S spoofing, T tampering, R repudiation, I information disclos
 
 ## Explicitly not protected
 
-- **Container or user isolation.** No Docker, no per-server OS user, no namespaces, no seccomp. Container isolation is on the roadmap.
+- **Isolation in process mode.** No per-server OS user, no namespaces, no seccomp. Optional container isolation exists (see [architecture.md](architecture.md)) and shares the host kernel.
 - **A compromised Moss OS user.** Everything Moss holds is readable by anything running as that user.
 - **TLS.** Moss serves plain HTTP. You must provide a TLS reverse proxy for any non-loopback use, and the proxy must set the headers `trust_proxy` expects.
 - **Dev auth mode on a shared host.** It is loopback only, but loopback is reachable by every local user and process.
 - **Supabase compromise.** Anyone who can mint valid Supabase tokens for your project and whose email is invited or owner gets in; the project itself is the root of identity.
 - **Supply chain of mods and plugins.** Moss reads jars and checks compatibility and hashes, but does not scan for malware.
 - **Availability under abuse.** Throttling is limited to failed authentication and tickets.
-- **Network egress control.** Game servers can reach any address the host can.
+- **Network egress control** unless you opt in: process-mode servers can reach any address the host can, and container servers on the default `open` network can too. The container `game-only` network (Docker only) blocks outbound connections to the internet; the host and other containers on the same bridge stay reachable.
 
 ## Recommendations for deployers
 
@@ -142,5 +142,5 @@ STRIDE categories: S spoofing, T tampering, R repudiation, I information disclos
 3. Never use `MOSS_AUTH=dev` anywhere except a single-user machine.
 4. Enable `MOSS_REQUIRE_MFA` for admins at least.
 5. Grant `manager` and admin only to people you would trust with a shell as the Moss user.
-6. Keep `<data>` permissions at 0700 and back up the database separately from game data.
+6. Keep `<data>` permissions at 0700 (Moss creates it that way when it does not exist) and back up the database separately from game data.
 7. Add host-level controls (firewall egress, separate hosts per trust level) if you need more than the above.

@@ -26,9 +26,26 @@ Tokens are verified locally. Projects using the new **asymmetric JWT signing key
 ## 3. Who gets in
 
 - Emails in `MOSS_OWNER_EMAILS` become **owner** on first verified sign-in.
-- If that variable is empty and no owner exists yet, the **first verified account to sign in becomes owner** (a warning is logged at startup). Set the variable to avoid a race on a freshly exposed instance.
-- Everyone else must be **invited** from *Users* in the panel (admin or owner) before signing in; their grants are linked to the account on first verified sign-in. Without an invite a signed-in user sees "not invited" and has no access.
+- If that variable is empty and no owner exists yet, Moss creates a **setup token**: 32 random characters written to `<data-dir>/setup-token` (mode 0600) and announced in the startup log. Nobody becomes owner automatically. Sign in, and while setup is pending the panel asks for the token (`POST /api/v1/setup/claim`). Read it on the host (`cat <data-dir>/setup-token`). Wrong guesses are limited to 5 a minute per account; on success the owner is created atomically (only one claimant can win) and the file is deleted. The token is kept across restarts until it is used; delete the file and restart to rotate it. `GET /auth/config` reports `setup_required`.
+- Everyone else must be **invited** from *Users* in the panel (admin or owner) before signing in; their grants are linked to the account on first verified sign-in. Without an invite a signed-in user sees "not invited" and has no access. Set the instance setting `access_message` (for example "Ask Sam in #minecraft for an invite") and the login screen shows it (`access_message` in `GET /auth/config`).
 - Roles: `owner` (everything, can create admins), `admin` (users, servers, settings), `user` (only servers they were granted: manager, operator or viewer).
+
+## 4. Multi-factor authentication
+
+`MOSS_REQUIRE_MFA=off|admins|all` (default `off`). Users enrol a factor in Supabase (**Authentication → Multi-Factor** must be enabled; TOTP works out of the box) and sign in at assurance level `aal2`. Moss reads the `aal` claim of the already verified JWT: when the policy applies to the account (`admins` = owner and admin roles) and the session is not `aal2`, every endpoint answers 403 `auth.mfa_required` (body fields `aal` and `required`), except `GET /auth/config` and `GET /me`; `/me` reports `mfa: {required, satisfied}` so the UI can prompt. Claiming ownership also needs `aal2` when the policy would apply to an owner. API tokens are non-interactive and not subject to the gate (creating one needs an interactive session that passed it). Dev mode ignores the policy.
+
+## 5. API tokens
+
+Signed-in users create personal tokens (`POST /api/v1/tokens {name, scope: "read"|"full", expires_in_days?}`), for scripts and CI. A token looks like `moss_pat_` plus 40 random characters and is shown once; Moss stores only its SHA-256 and the first 8 characters. Send it as `Authorization: Bearer moss_pat_...`.
+
+- It acts as its owner with their **current** role and grants: demoting or removing the user takes effect immediately.
+- `read` tokens may only use `GET`/`HEAD` (403 `auth.token_scope`); `full` tokens can do whatever the owner can, except that no token can create or revoke tokens or manage users and server access (403 `auth.token_forbidden`).
+- At most 25 active tokens per user; expired tokens stop working at once; `DELETE /api/v1/tokens/{id}` revokes (admins can list all with `?all=1`).
+- The activity log records `you@example.com (token <name>)`; `last_used` is updated at most once a minute.
+
+## 6. Throttling and reverse proxies
+
+More than 30 failed credential checks a minute (invalid JWT, unknown or expired API token) from one client address get 429 `auth.throttled` with `Retry-After`. The address is the socket peer. Behind a reverse proxy every request would look like the proxy, so set `MOSS_TRUST_PROXY=true` **only** when a proxy you control sets `X-Forwarded-For` (Moss uses the right-most entry, the one your proxy appended); otherwise clients could spoof their address. Limits are kept in memory and reset on restart.
 
 ## Local development without Supabase
 

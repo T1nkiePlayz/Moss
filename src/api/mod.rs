@@ -29,9 +29,11 @@ mod reinstall;
 mod servers;
 mod session;
 mod settings;
+mod setup;
 mod support;
+mod tokens;
 
-use access::*; use activity::*; use assets::static_files; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*;
+use access::*; use activity::*; use assets::static_files; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
 use {metrics::*, notifications::*, support::*};
 
 type Q = Query<HashMap<String, String>>;
@@ -112,6 +114,9 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/metrics", get(server_metrics))
         .route("/metrics/host", get(host_metrics))
         .route("/support-bundle", get(support_bundle))
+        .route("/setup/claim", post(setup_claim))
+        .route("/tokens", get(tokens_list).post(tokens_create))
+        .route("/tokens/{id}", axum::routing::delete(tokens_delete))
         .route("/settings", get(settings_get).put(settings_put))
         .route("/events", get(events))
         .fallback(|| async { ApiError::not_found("endpoint") });

@@ -1,13 +1,23 @@
 //! Authentication (Supabase JWT or dev mode) and RBAC: the `User` extractor, permission bundles, `authz` and `visible_servers`.
 //! Global roles: owner/admin/user. Per-server grants map to permission bundles. Token checks are in `jwt`, account provisioning in `provision`.
 use crate::{error::{ApiError, ApiResult}, state::St};
-use axum::{extract::FromRequestParts, http::request::Parts};
 use serde::Serialize;
 
+mod error;
+mod extract;
 mod jwt;
+mod mfa;
 mod provision;
+pub mod secret;
+pub mod setup;
+mod throttle;
+pub mod tokens;
 
-pub use provision::drop_cached;
+pub use error::AuthError;
+pub use mfa::Mode as MfaMode;
+pub use extract::{Claimant, MfaExempt};
+pub use provision::{drop_all, drop_cached};
+pub use throttle::Guard;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct User {
@@ -17,6 +27,12 @@ pub struct User {
     /// The caller's Supabase access token, kept only to forward to the CurseForge edge function.
     #[serde(skip)]
     pub token: Option<String>,
+    /// Name of the API token that authenticated this request (`None` for interactive sessions).
+    #[serde(skip)]
+    pub via_token: Option<String>,
+    /// The `aal` claim of the session token (`None` for API tokens and absent claims).
+    #[serde(skip)]
+    pub aal: Option<String>,
 }
 
 pub const ALL_PERMS: &[&str] = &[
@@ -35,6 +51,13 @@ pub fn bundle_perms(bundle: &str) -> &'static [&'static str] {
 
 impl User {
     pub fn is_admin(&self) -> bool { self.role == "owner" || self.role == "admin" }
+    /// Name recorded in the activity log: the e-mail, plus the token name for API-token requests.
+    pub fn actor(&self) -> String {
+        match &self.via_token { Some(t) => format!("{} (token {t})", self.email), None => self.email.clone() }
+    }
+    /// Is this caller subject to the MFA policy, and have they met it? API tokens are non-interactive and count as satisfied.
+    pub fn mfa_required(&self, mode: mfa::Mode) -> bool { mfa::required(mode, &self.role) }
+    pub fn mfa_satisfied(&self) -> bool { self.via_token.is_some() || mfa::aal2(self.aal.as_deref()) }
     pub fn require_admin(&self) -> ApiResult<()> {
         if self.is_admin() { Ok(()) } else { Err(ApiError::forbidden("administrator access required")) }
     }
@@ -65,20 +88,6 @@ pub async fn visible_servers(st: &St, user: &User) -> ApiResult<Option<Vec<Strin
     }).await?))
 }
 
-impl FromRequestParts<St> for User {
-    type Rejection = ApiError;
-    async fn from_request_parts(parts: &mut Parts, st: &St) -> Result<Self, ApiError> {
-        if st.cfg.dev() {
-            return Ok(User { id: "dev".into(), email: "dev@localhost".into(), role: "owner".into(), token: None });
-        }
-        let token = parts.headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;
-        let claims = jwt::verify(st, token).await?;
-        let mut user = provision::provision(st, claims).await?;
-        user.token = Some(token.to_string());
-        Ok(user)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +97,17 @@ mod tests {
         assert!(bundle_perms("operator").contains(&"server.power") && !bundle_perms("operator").contains(&"files.write"));
         assert!(!bundle_perms("manager").contains(&"server.delete") && !bundle_perms("manager").contains(&"admin.users"));
         assert!(bundle_perms("nonsense").is_empty());
+    }
+    #[test]
+    fn actor_names_the_token() {
+        let mut u = User { id: "1".into(), email: "a@b.c".into(), role: "user".into(), token: None, via_token: None, aal: None };
+        assert_eq!(u.actor(), "a@b.c");
+        u.via_token = Some("ci".into());
+        assert_eq!(u.actor(), "a@b.c (token ci)");
+        assert!(u.mfa_satisfied());
+        u.via_token = None;
+        assert!(!u.mfa_satisfied());
+        u.aal = Some("aal2".into());
+        assert!(u.mfa_satisfied());
     }
 }

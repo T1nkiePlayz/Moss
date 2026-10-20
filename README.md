@@ -232,7 +232,21 @@ One axum process: SQLite for state, a persisted operation engine with per-server
 
 ## Roadmap
 
-Container runtime backend (Docker/Podman) with resource limits · Forge/NeoForge · event-driven workflows · remote backup destinations · staged updates with a readiness gate · multi-node · public status pages · long-term metrics. The detailed plan lives in [docs/PLAN.md](docs/PLAN.md).
+Milestones follow [docs/PLAN.md §27](docs/PLAN.md). They are gates, not dates. ✅ done · 🟡 partly done · ⬜ not started.
+
+| Milestone | Status | What is left |
+|---|---|---|
+| **M0 Foundations and spikes** | 🟡 | Written spike results (kill -9 mid-operation reconciliation test, console flood/backpressure test, cgroup v2 metrics), ADRs and `docs/threat-model.md`, a written Modrinth terms review (CurseForge's is in [docs/curseforge.md](docs/curseforge.md)). |
+| **M1 "Hello, server"** | 🟡 | Per-server resource limits beyond the JVM heap, a recovery CLI (re-link the owner, reset a stuck operation), the `FakeRuntime` conformance suite as a shared test harness, a first-run page that explains Supabase setup. |
+| **M2 "Plugins"** | 🟡 | Paper config editors (`paper-global.yml`, `spigot.yml`) with history, a visible compatibility-confidence badge, honouring the *Back up before risky changes* setting for content installs (today only undo snapshots are taken), provider-outage tests. |
+| **M3 "Don't lose data"** | 🟡 | Restore preview and compare before promoting, backup locks (keep forever), world-aware catalogue, DST-aware schedules (today a fixed UTC offset), in-app notification inbox, support bundle with preview and redaction, an upgrade test from the previous release. |
+| **M4 "Mods and packs"** | 🟡 | NeoForge and Forge/Quilt installers in a sandbox, `.mrpack` import with overrides and an unavailable-file report, pinning and pack diff, staged updates with a health-gated promotion. Fabric, Velocity and CurseForge are in. |
+| **M5 "Polish"** | 🟡 | Theme editor and import/export, saved views, cross-product search, accessibility and visual-regression suites, blueprints and collections, directory import, config diffs, desktop shell (Tauri), performance budgets with recorded baselines. Four themes and the command palette are in. |
+| **M6 "Open it up" and 1.0** | ⬜ | OpenAPI spec and freeze, webhooks, TOTP/MFA, sandboxed UI extensions and safe mode, external security review and dependency audit, soak tests (upgrade, restore, crash, provider outage), a published supported-runtime matrix, signed checksums. |
+
+**Suggested order:** finish M2 and M3 gaps first (the setting that does nothing, restore preview, notifications, support bundle), then container isolation and M4 (modded runtimes), then M5 polish, then M6 hardening for 1.0.
+
+**After 1.0:** event workflows, multi-node, remote backup destinations, backend extensions and SDK, player analytics, other games and importers, public status pages, long-term metrics.
 
 ## Documentation index
 

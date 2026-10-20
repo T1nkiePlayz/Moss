@@ -70,15 +70,18 @@ pub async fn effective(st: &St, server_id: &str) -> Result<Option<Dest>> {
     }).await
 }
 
-/// Open a driver for a destination (resolving and pinning the host for S3).
-pub async fn open(st: &St, d: &Dest) -> Result<Store> {
-    match &d.cfg {
+/// Open a driver for a saved destination (loading its credentials).
+pub async fn open(st: &St, d: &Dest) -> Result<Store> { connect(st, &d.cfg, secrets::get(&st.cfg.data_dir, &d.id)).await }
+
+/// Open a driver for a configuration (resolving and pinning the host for S3).
+pub async fn connect(st: &St, cfg: &DestConfig, creds: Option<secrets::Creds>) -> Result<Store> {
+    match cfg {
         DestConfig::Folder { path } => {
             if !std::path::Path::new(path).is_dir() { return Err(anyhow!("the folder {path} is not available; is the disk mounted?")); }
             Ok(Store::Folder(Folder::new(path)))
         }
         DestConfig::S3 { endpoint, region, bucket, prefix, path_style } => {
-            let c = secrets::get(&st.cfg.data_dir, &d.id).filter(|c| !c.access_key.is_empty() && !c.secret_key.is_empty()).ok_or_else(|| anyhow!("no access key and secret key are saved for this destination"))?;
+            let c = creds.filter(|c| !c.access_key.is_empty() && !c.secret_key.is_empty()).ok_or_else(|| anyhow!("no access key and secret key are saved for this destination"))?;
             let cfg = S3Cfg { endpoint: endpoint.clone(), region: region.clone(), bucket: bucket.clone(), prefix: prefix.clone(), path_style: *path_style };
             Ok(Store::S3(Box::new(S3::connect(cfg, c.access_key, c.secret_key, st.cfg.allow_private_backup_hosts).await?)))
         }

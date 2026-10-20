@@ -12,6 +12,7 @@ mod pre_change;
 mod preview;
 pub mod remote;
 mod restore;
+pub mod staged;
 mod swap;
 
 #[allow(unused_imports)] // pre_change* are the entry points other packages call
@@ -26,9 +27,11 @@ fn row_json(r: &rusqlite::Row) -> rusqlite::Result<Value> {
     Ok(json!({"id": r.get::<_, String>(0)?, "server_id": r.get::<_, String>(1)?, "created_at": r.get::<_, String>(2)?, "size": r.get::<_, i64>(3)?, "sha256": r.get::<_, String>(4)?,
         "status": r.get::<_, String>(5)?, "verified_at": r.get::<_, Option<String>>(6)?, "note": r.get::<_, String>(7)?, "kind": r.get::<_, String>(8)?,
         "consistent": r.get::<_, bool>(9)?, "files": r.get::<_, i64>(10)?, "server_name": r.get::<_, String>(11)?,
-        "locked": r.get::<_, bool>(12)?, "worlds": serde_json::from_str::<Vec<String>>(&r.get::<_, String>(13)?).unwrap_or_default()}))
+        "locked": r.get::<_, bool>(12)?, "worlds": serde_json::from_str::<Vec<String>>(&r.get::<_, String>(13)?).unwrap_or_default(),
+        "remote": r.get::<_, String>(14)?, "remote_error": r.get::<_, Option<String>>(15)?, "remote_at": r.get::<_, Option<String>>(16)?, "local_present": r.get::<_, bool>(17)?,
+        "remote_destination": r.get::<_, Option<String>>(18)?}))
 }
-const SEL: &str = "SELECT id,server_id,created_at,size,sha256,status,verified_at,note,kind,consistent,files,server_name,locked,worlds FROM backups";
+const SEL: &str = "SELECT id,server_id,created_at,size,sha256,status,verified_at,note,kind,consistent,files,server_name,locked,worlds,remote,remote_error,remote_at,local_present,(SELECT name FROM backup_destinations d WHERE d.id=remote_dest) FROM backups";
 
 // ---------- API ----------
 pub async fn list(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<Json<Value>> {
@@ -58,7 +61,7 @@ pub async fn create(State(st): State<St>, user: User, Path(id): Path<String>, bo
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }
 
-async fn find(st: &St, user: &User, bid: &str, perm: &str) -> ApiResult<(String, String, String, String, String)> {
+pub(crate) async fn find(st: &St, user: &User, bid: &str, perm: &str) -> ApiResult<(String, String, String, String, String)> {
     let b = bid.to_string();
     let r: Option<(String, String, String, String, String)> = st.db.call(move |c| c.query_row("SELECT server_id,sha256,server_name,runtime,game_version FROM backups WHERE id=?", [b], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await?;
     let r = r.ok_or_else(|| ApiError::not_found("backup"))?;
@@ -70,8 +73,8 @@ pub async fn verify(State(st): State<St>, user: User, Path(bid): Path<String>) -
     let (sid, sha, ..) = find(&st, &user, &bid, "backup.manage").await?;
     let b = bid.clone();
     let op = ops::spawn_op(&st, "backup.verify", "Verify backup", Some(&sid.clone()), false, move |ctx| async move {
+        let p = remote::jobs::ensure_local(&ctx, &ctx.st, &b).await?;
         ctx.stage("Reading archive and checking SHA-256");
-        let p = archive_path(&ctx.st, &sid, &b);
         let n = tokio::task::spawn_blocking(move || verify_archive(&p, &sha)).await??;
         ctx.log(format!("{n} entries verified, all paths safe"));
         let b2 = b.clone();
@@ -100,13 +103,18 @@ pub async fn delete(State(st): State<St>, user: User, Path(bid): Path<String>) -
     if st.db.call(move |c| c.query_row("SELECT locked FROM backups WHERE id=?", [b], |r| r.get::<_, bool>(0))).await? {
         return Err(ApiError::conflict("backup.locked", "this backup is locked; unlock it before deleting"));
     }
+    remote::jobs::delete_remote(&st, &bid).await.map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "backup.remote_delete_failed", format!("could not delete the remote copy, so nothing was deleted: {e:#}")))?;
     remove_backup(&st, &sid, &bid).await?;
     st.audit(&user.actor(), "backup.delete", &bid, "", Some(&sid)).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// The error for actions that need the archive on this machine when only the remote copy is left.
+pub fn remote_only() -> ApiError { ApiError::conflict("backup.remote_only", "this backup is only stored on the remote destination; download it from there first") }
+
 pub async fn download(State(st): State<St>, user: User, Path(bid): Path<String>) -> ApiResult<Response> {
     let (sid, ..) = find(&st, &user, &bid, "backup.manage").await?;
+    if !remote::jobs::row(&st, &bid).await?.local { return Err(remote_only()); }
     let f = tokio::fs::File::open(archive_path(&st, &sid, &bid)).await?;
     let len = f.metadata().await?.len();
     let mut r = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(f)).into_response();

@@ -18,7 +18,8 @@ fn cap(mut v: Vec<u8>) -> Vec<u8> {
 
 async fn collect(st: &St, user: &User) -> ApiResult<Vec<(String, Vec<u8>)>> {
     let webhook = st.setting("notify_webhook_url", "").await;
-    let lits = [webhook.as_str()];
+    let secrets = crate::backups::remote::secrets::all_values(&st.cfg.data_dir);
+    let lits: Vec<&str> = std::iter::once(webhook.as_str()).chain(secrets.iter().map(String::as_str)).collect();
     let red = |s: &str| redact_text(s, &lits).into_bytes();
     let pretty = |v: &Value| serde_json::to_string_pretty(v).unwrap_or_default();
     let mut out: Vec<(String, Vec<u8>)> = vec![];
@@ -41,9 +42,13 @@ async fn collect(st: &St, user: &User) -> ApiResult<Vec<(String, Vec<u8>)>> {
     let cfg = json!({"bind": c.bind, "port": c.port, "data_dir": c.data_dir, "auth": c.auth, "supabase_url": c.supabase_url, "supabase_anon_key": secret(&c.supabase_anon_key),
         "supabase_jwt_secret": secret(&c.supabase_jwt_secret), "curseforge_api_key": secret(&c.curseforge_api_key), "curseforge_api_url": c.curseforge_api_url,
         "curseforge_proxy": c.curseforge_proxy, "owner_emails": c.owner_email_list().iter().map(|e| redact::hash_email(e)).collect::<Vec<_>>(),
-        "require_verified_email": c.require_verified_email, "allow_private_webhooks": c.allow_private_webhooks, "dev_runtimes": c.dev_runtimes,
+        "require_verified_email": c.require_verified_email, "allow_private_webhooks": c.allow_private_webhooks, "allow_private_backup_hosts": c.allow_private_backup_hosts, "dev_runtimes": c.dev_runtimes,
         "settings": settings_json(st, false).await});
     out.push(("config.json".into(), red(&pretty(&cfg))));
+
+    // destinations without credentials (those are only ever reported as set / not set)
+    let dests: Vec<Value> = crate::backups::remote::dest::list(st).await.unwrap_or_default().iter().map(|d| d.json(st)).collect();
+    out.push(("backup-destinations.json".into(), red(&pretty(&Value::Array(dests)))));
 
     let servers = server::list(st).await?;
     out.push(("servers.json".into(), red(&pretty(&Value::Array(servers.iter().map(|s| server::view(s, st)).collect())))));

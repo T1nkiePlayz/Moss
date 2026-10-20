@@ -22,6 +22,55 @@ fn sample(v: &mut Vec<String>, s: &str) { if v.len() < SAMPLES { v.push(s.to_str
 fn fingerprint(s: &str) -> u64 { let mut h = std::collections::hash_map::DefaultHasher::new(); s.hash(&mut h); h.finish() }
 fn mtime_secs(m: &std::fs::Metadata) -> Option<u64> { m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs()) }
 
+/// Files in the live directory that the restored set does not contain (counted as removed), plus the live totals.
+fn scan_removed(c: &mut Compare, cur: &FsPath, seen: &HashSet<u64>, wanted: &dyn Fn(&str) -> bool) -> Result<()> {
+    let mut stack = vec![(cur.to_path_buf(), String::new())];
+    while let Some((dir, prefix)) = stack.pop() {
+        for e in std::fs::read_dir(&dir)?.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if prefix.is_empty() && (EXCLUDE_TOP.contains(&name.as_str()) || !wanted(&name)) { continue; }
+            let rel = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+            let Ok(t) = e.file_type() else { continue };
+            if t.is_dir() { stack.push((e.path(), rel)); }
+            else if t.is_file() {
+                c.cur_files += 1;
+                c.cur_size += e.metadata().map(|m| m.len()).unwrap_or(0);
+                if !seen.contains(&fingerprint(&rel)) { c.removed += 1; sample(&mut c.removed_s, &rel); }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Blocking: compare an extracted staging directory with the live server directory (what promoting it would change),
+/// limited to the top-level names in `only`. Same counters and samples as `compare`.
+pub fn compare_dir(stage: &FsPath, current: &FsPath, only: Option<&[String]>) -> Result<Compare> {
+    let mut c = Compare::default();
+    let mut seen: HashSet<u64> = HashSet::new();
+    let wanted = |top: &str| only.is_none_or(|o| o.iter().any(|n| n == top));
+    let mut stack = vec![(stage.to_path_buf(), String::new())];
+    while let Some((dir, prefix)) = stack.pop() {
+        for e in std::fs::read_dir(&dir)?.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let rel = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+            if prefix.is_empty() { c.names.insert(name.clone()); if !wanted(&name) { continue; } }
+            let Ok(t) = e.file_type() else { continue };
+            if t.is_dir() { stack.push((e.path(), rel)); continue; }
+            if !t.is_file() { continue; }
+            let m = e.metadata()?;
+            c.files += 1;
+            c.size += m.len();
+            seen.insert(fingerprint(&rel));
+            match std::fs::symlink_metadata(current.join(&rel)) {
+                Ok(l) if l.is_file() => { if l.len() == m.len() && mtime_secs(&l) == mtime_secs(&m) { c.unchanged += 1; } else { c.changed += 1; sample(&mut c.changed_s, &rel); } }
+                _ => { c.added += 1; sample(&mut c.added_s, &rel); }
+            }
+        }
+    }
+    scan_removed(&mut c, current, &seen, &wanted)?;
+    Ok(c)
+}
+
 /// Blocking: compare `archive` with `current` (when given), limited to the top-level names in `only`.
 pub fn compare(archive: &FsPath, current: Option<&FsPath>, only: Option<&[String]>) -> Result<Compare> {
     let mut c = Compare::default();
@@ -48,23 +97,7 @@ pub fn compare(archive: &FsPath, current: Option<&FsPath>, only: Option<&[String
             _ => { c.added += 1; sample(&mut c.added_s, &rel); }
         }
     }
-    if let Some(cur) = current {
-        let mut stack = vec![(cur.to_path_buf(), String::new())];
-        while let Some((dir, prefix)) = stack.pop() {
-            for e in std::fs::read_dir(&dir)?.flatten() {
-                let name = e.file_name().to_string_lossy().to_string();
-                if prefix.is_empty() && (EXCLUDE_TOP.contains(&name.as_str()) || !wanted(&name)) { continue; }
-                let rel = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
-                let Ok(t) = e.file_type() else { continue };
-                if t.is_dir() { stack.push((e.path(), rel)); }
-                else if t.is_file() {
-                    c.cur_files += 1;
-                    c.cur_size += e.metadata().map(|m| m.len()).unwrap_or(0);
-                    if !seen.contains(&fingerprint(&rel)) { c.removed += 1; sample(&mut c.removed_s, &rel); }
-                }
-            }
-        }
-    }
+    if let Some(cur) = current { scan_removed(&mut c, cur, &seen, &wanted)?; }
     Ok(c)
 }
 
@@ -83,6 +116,7 @@ pub async fn preview(State(st): State<St>, user: User, Path(bid): Path<String>, 
     let b = bid.clone();
     let (created_at, status, consistent, worlds): (String, String, bool, String) = st.db.call(move |c| c.query_row("SELECT created_at,status,consistent,worlds FROM backups WHERE id=?", [b], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))).await?;
     if status != "ok" { return Err(ApiError::conflict("backup.unusable", "this backup did not complete")); }
+    if !super::remote::jobs::row(&st, &bid).await?.local { return Err(super::remote_only()); }
     let (path, cur, only) = (archive_path(&st, &sid, &bid), existing.as_ref().filter(|_| in_place).map(|s| s.dir(&st)), r.only.clone());
     let c = tokio::task::spawn_blocking(move || compare(&path, cur.as_deref(), only.as_deref())).await.map_err(|e| anyhow::anyhow!(e))?.map_err(|e| ApiError::conflict("backup.unreadable", format!("could not read the archive: {e:#}")))?;
     if let Some(missing) = r.only.iter().flatten().find(|n| !c.names.contains(*n)) { return Err(ApiError::bad("validation", format!("\"{missing}\" is not in this backup")).field("only", "not in the archive")); }
@@ -131,6 +165,28 @@ mod tests {
         // new-server mode has no current directory
         let n = compare(&out, None, None).unwrap();
         assert_eq!((n.files, n.cur_files, n.removed), (4, 0, 0));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn staging_directory_compares_like_the_archive() {
+        let base = std::env::temp_dir().join(format!("moss-prevdir-{}", uuid::Uuid::new_v4()));
+        let (live, stage) = (base.join("live"), base.join("stage"));
+        for d in [live.join("world"), live.join("logs"), stage.join("world")] { std::fs::create_dir_all(d).unwrap(); }
+        std::fs::write(stage.join("world/level.dat"), "same").unwrap();
+        std::fs::write(stage.join("server.properties"), "from backup").unwrap();
+        std::fs::write(stage.join("only-in-backup.txt"), "x").unwrap();
+        std::fs::write(live.join("world/level.dat"), "same").unwrap();
+        std::fs::write(live.join("server.properties"), "changed later!").unwrap();
+        std::fs::write(live.join("new-since.txt"), "y").unwrap();
+        std::fs::write(live.join("logs/latest.log"), "ignored").unwrap();
+        let t = std::fs::metadata(stage.join("world/level.dat")).unwrap().modified().unwrap();
+        std::fs::File::options().write(true).open(live.join("world/level.dat")).unwrap().set_modified(t).unwrap();
+        let c = compare_dir(&stage, &live, None).unwrap();
+        assert_eq!((c.files, c.added, c.changed, c.unchanged, c.removed), (3, 1, 1, 1, 1));
+        assert_eq!((c.added_s, c.changed_s, c.removed_s), (vec!["only-in-backup.txt".to_string()], vec!["server.properties".to_string()], vec!["new-since.txt".to_string()]));
+        let w = compare_dir(&stage, &live, Some(&["world".to_string()])).unwrap();
+        assert_eq!((w.files, w.unchanged, w.removed, w.cur_files), (1, 1, 0, 1));
         let _ = std::fs::remove_dir_all(&base);
     }
 

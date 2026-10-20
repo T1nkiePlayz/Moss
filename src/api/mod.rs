@@ -21,6 +21,7 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 mod access;
 mod activity;
 mod assets;
+mod backup_destinations;
 mod java;
 mod limits;
 mod metrics;
@@ -33,7 +34,7 @@ mod setup;
 mod support;
 mod tokens;
 
-use access::*; use activity::*; use assets::static_files; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
+use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
 use {metrics::*, notifications::*, support::*};
 
 type Q = Query<HashMap<String, String>>;
@@ -99,6 +100,16 @@ pub fn router(st: St) -> Router {
         .route("/backups/{id}/verify", post(backups::verify))
         .route("/backups/{id}/restore", post(backups::restore))
         .route("/backups/{id}/download", get(backups::download))
+        .route("/backups/{id}/upload", post(backups::remote::api::upload))
+        .route("/backups/{id}/fetch", post(backups::remote::api::fetch))
+        .route("/backup-destinations", get(dest_list).post(dest_create))
+        .route("/backup-destinations/test", post(dest_test_new))
+        .route("/backup-destinations/{id}", patch(dest_patch).delete(dest_delete))
+        .route("/backup-destinations/{id}/test", post(dest_test))
+        .route("/servers/{id}/backup-destination", get(server_dest_get).put(server_dest_put))
+        .route("/servers/{id}/staged-restores", get(backups::staged::list))
+        .route("/staged-restores/{id}", get(backups::staged::get).delete(backups::staged::discard))
+        .route("/staged-restores/{id}/promote", post(backups::staged::promote))
         .route("/servers/{id}/schedules", get(sched::list).post(sched::create))
         .route("/timezones", get(sched::timezones))
         .route("/schedules/{id}", patch(sched::patch).delete(sched::delete))

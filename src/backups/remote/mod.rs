@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use std::{path::Path, sync::{Arc, atomic::{AtomicU64, Ordering}}};
 use tokio_util::sync::CancellationToken;
 
+pub mod api;
 pub mod dest;
 pub mod folder;
 pub mod jobs;

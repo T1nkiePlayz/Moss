@@ -3,6 +3,7 @@
   import States from '../components/States.svelte';
   import OpCard from '../components/OpCard.svelte';
   import Lazy from '../components/Lazy.svelte';
+  import BlueprintStart from '../components/BlueprintStart.svelte';
   import { api, ApiError, errMsg, type Runtime, type Versions, type JavaInstall, type ModpackInspect } from '../lib/api';
   import { host, ops, trackOp, toastError } from '../lib/stores.svelte';
   import { bytes } from '../lib/format';
@@ -144,6 +145,7 @@
   {#if rtErr}<States kind="error" text={rtErr} retry={loadRt} />
   {:else if !runtimes}<States kind="loading" rows={3} />
   {:else}
+    <BlueprintStart oncreated={(r) => { trackOp(r.operation); created = { opId: r.operation.id, serverId: r.server.id }; step = 4; }} />
     <h3 class="cat">Start from a modpack</h3>
     <div class="grid cols-auto" style="--gap:12px">
       <button class="card hover rt" onclick={startPack}>

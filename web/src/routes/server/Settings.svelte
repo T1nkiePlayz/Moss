@@ -4,7 +4,7 @@
   import { canReinstall, reinstall } from '../../lib/lifecycle';
   import { api, ApiError, type Server } from '../../lib/api';
   import { confirmDialog, toast, toastError } from '../../lib/stores.svelte';
-  import { can } from '../../lib/auth.svelte';
+  import { can, isAdmin } from '../../lib/auth.svelte';
   import { navigate } from '../../lib/router.svelte';
 
   let { server: s }: { server: Server } = $props();
@@ -32,6 +32,14 @@
       toastError(er, 'Could not save');
     }
     saving = false;
+  }
+
+  let bpName = $state('');
+  let bpBusy = $state(false);
+  async function saveBlueprint() {
+    bpBusy = true;
+    try { const b = await api.saveBlueprint(s.id, bpName.trim() || `${s.name} blueprint`); toast('success', `Saved blueprint “${b.name}”`, { body: 'Find it under Settings, or start a new server from it.' }); bpName = ''; } catch (er) { toastError(er, 'Could not save the blueprint'); }
+    bpBusy = false;
   }
 
   async function del() {
@@ -84,6 +92,14 @@
 </form>
 
 <div style="margin-top:var(--gap)"><LimitsForm server={s} /></div>
+
+{#if isAdmin()}
+  <section class="card" style="margin-top:24px">
+    <div class="card-title"><Icon name="package" size={14} />Save as blueprint</div>
+    <p class="sm muted" style="margin:0 0 10px">Keep this server's runtime, version, memory, settings, content and schedules as a recipe for new servers. The world, seed, port and anything secret are left out.</p>
+    <div class="row g6 wrap"><label class="sr" for="bpname">Blueprint name</label><input id="bpname" class="input" style="max-width:280px" maxlength="60" placeholder="{s.name} blueprint" bind:value={bpName} /><button class="btn" disabled={bpBusy} onclick={saveBlueprint}>{bpBusy ? 'Saving…' : 'Save blueprint'}</button></div>
+  </section>
+{/if}
 
 {#if canDelete || showReinstall}
   <section class="card danger-zone" style="margin-top:24px">

@@ -480,7 +480,7 @@ export interface Schedule { tz?: string }
 export type AuditMode = 'redacted' | 'all' | 'off';
 export interface Settings { notify_webhook_url?: string; notify_events?: string[]; audit_console_commands?: AuditMode; access_message?: string }
 
-export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security';
+export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security' | 'webhook_disabled';
 export type Severity = 'info' | 'warn' | 'critical';
 export interface AppNotification { id: string; time: string; kind: NotificationKind; severity: Severity; title: string; body: string; server_id: string | null; read: boolean }
 export interface NotificationList { items: AppNotification[]; unread: number }
@@ -499,7 +499,21 @@ export interface MetricSample { t: number; cpu_avg: number; cpu_max: number; mem
 export interface MetricSeries { range: MetricRange; step_s: number; samples: MetricSample[] }
 export interface SupportPreview { files: { name: string; size: number }[]; redactions: string[] }
 
+export interface Webhook { id: string; name: string; url: string; events: string[]; server_ids: string[]; enabled: boolean; disabled_reason: string | null; consecutive_failures: number; secret: 'set' | 'not set' | string; pending: number; last_delivery: { state: string; at: string; status_code: number | null } | null; created_at: string }
+export interface WebhookEventType { type: string; description: string }
+export interface WebhookList { items: Webhook[]; event_types: WebhookEventType[] }
+export interface WebhookDelivery { id: string; event_id: string; type: string; test: boolean; state: 'pending' | 'delivered' | 'dead'; attempts: number; max_attempts: number; created_at: string; finished_at: string | null; next_attempt_at: string | null; status_code: number | null; latency_ms: number | null; response: string | null; error: string | null }
+export interface WebhookInput { name?: string; url?: string; events?: string[]; server_ids?: string[]; enabled?: boolean }
+
 export const apiOps = {
+  webhooks: () => get<WebhookList>('/webhooks', { ttl: 0 }),
+  addWebhook: (b: WebhookInput) => send<Webhook>('POST', '/webhooks', b),
+  patchWebhook: (id: string, b: WebhookInput) => send<Webhook>('PATCH', `/webhooks/${e(id)}`, b),
+  removeWebhook: (id: string) => send('DELETE', `/webhooks/${e(id)}`),
+  rotateWebhookSecret: (id: string) => send<{ secret: string }>('POST', `/webhooks/${e(id)}/rotate-secret`),
+  testWebhookEndpoint: (id: string) => send<{ delivery: WebhookDelivery }>('POST', `/webhooks/${e(id)}/test`),
+  webhookDeliveries: (id: string) => get<{ items: WebhookDelivery[] }>(`/webhooks/${e(id)}/deliveries`, { ttl: 0 }),
+  retryWebhookDelivery: (id: string, did: string) => send<{ delivery: WebhookDelivery }>('POST', `/webhooks/${e(id)}/deliveries/${e(did)}/retry`),
   claimSetup: (token: string) => send<{ role: Role }>('POST', '/setup/claim', { token }),
   notifications: (o: { unread?: boolean; limit?: number } = {}) => get<NotificationList>(`/notifications${q({ unread: o.unread ? 1 : undefined, limit: o.limit ?? 50 })}`),
   markRead: (b: { ids?: string[]; all?: boolean }) => send('POST', '/notifications/read', b),

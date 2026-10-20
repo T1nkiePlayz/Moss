@@ -48,6 +48,7 @@
   const loadNotif = () => import('../components/settings/Notifications.svelte');
   const loadTokens = () => import('../components/settings/Tokens.svelte');
   const loadDest = () => import('../components/settings/BackupDestinations.svelte');
+  const loadHooks = () => import('../components/settings/Webhooks.svelte');
   const loadBundle = () => import('../components/settings/SupportBundle.svelte');
 </script>
 
@@ -101,6 +102,7 @@
 
   {#if canAdmin}<Lazy load={loadNotif} />{/if}
   {#if canAdmin}<Lazy load={loadDest} />{/if}
+  {#if canAdmin}<Lazy load={loadHooks} />{/if}
 
   <section class="card" aria-labelledby="jv">
     <div class="card-title" id="jv"><Icon name="package" size={14} />Java installs</div>

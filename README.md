@@ -347,7 +347,7 @@ CI (`.github/workflows/ci.yml`) runs the UI type-check, tests, build and page ch
 
 ## Releasing
 
-Push a tag such as `v0.2.0`. `.github/workflows/release.yml` syncs the version into the manifests, builds the UI once, builds the Linux x86-64, macOS Apple silicon and macOS Intel binaries, packages `moss-<tag>-<os>-<arch>.tar.gz` (binary, service files, `.env`, example config), writes `SHA256SUMS.txt`, creates a GitHub **build attestation** for each tarball, generates a Homebrew formula with the real checksums, attaches `install.sh`, and opens a **draft** release whose notes are the tagged commit's message. Tags with a `-` (for example `v0.2.0-rc1`) become pre-releases.
+Push a tag such as `v0.2.0`. `.github/workflows/release.yml` syncs the version into the manifests, builds the UI once, builds the Linux x86-64, macOS Apple silicon and macOS Intel binaries, packages `moss-<tag>-<os>-<arch>.tar.gz` (binary, service files, `.env`, example config), writes `SHA256SUMS.txt`, creates a GitHub **build attestation** for each tarball (public repositories only), generates a Homebrew formula with the real checksums, attaches `install.sh`, and opens a **draft** release whose notes are the tagged commit's message. Tags with a `-` (for example `v0.2.0-rc1`) become pre-releases.
 
 ## License
 

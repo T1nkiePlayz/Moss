@@ -47,6 +47,15 @@ assert.equal((await call('/v1/mods/5')).cache, 'no-store');
 assert.ok(upstreamKeys.length > 0 && upstreamKeys.every((k) => k === 'testkey'));
 await pause(1100);
 
+// batch lookups used by modpack import and identify
+const post = (path: string, body: unknown) => call(path, { method: 'POST', body: JSON.stringify(body) });
+assert.equal((await post('/v1/mods/files', { fileIds: [1, 2] })).status, 200);
+assert.equal((await post('/v1/mods/files', { fileIds: Array.from({ length: 101 }, (_, i) => i + 1) })).status, 400);
+assert.equal((await post('/v1/fingerprints/432', { fingerprints: [0, 4294967295] })).status, 200);
+assert.equal((await post('/v1/fingerprints/432', { fingerprints: [-1] })).status, 400);
+assert.equal((await post('/v1/fingerprints/999', { fingerprints: [1] })).status, 404);
+await pause(1100);
+
 // downloads: distribution-disabled files are refused, only the CDN host is contacted, bytes are streamed
 assert.equal((await call('/download/5/7')).status, 403);
 assert.equal((await call('/download/5/8')).status, 502);

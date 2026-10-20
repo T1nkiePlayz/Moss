@@ -15,6 +15,7 @@
 // Routes (relative to /functions/v1/curseforge), mirroring the CurseForge API:
 //   GET  /v1/mods/search            GET /v1/mods/{id}            GET /v1/mods/{id}/files
 //   GET  /v1/mods/{id}/files/{fid}  POST /v1/mods {modIds}       GET /download/{id}/{fid}
+//   POST /v1/mods/files {fileIds}   POST /v1/fingerprints/432 {fingerprints}
 //   GET  /health                    (no key use; reports whether the secret is configured)
 
 const API = 'https://api.curseforge.com';
@@ -201,6 +202,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const ids = Array.isArray(body?.modIds) ? body.modIds : null;
       if (!ids || ids.length === 0 || ids.length > 50 || !ids.every((n: unknown) => Number.isInteger(n) && (n as number) > 0 && (n as number) < 2 ** 31)) return err(400, 'bad_request', 'modIds must be 1 to 50 positive integers.');
       return await relay(await upstream(key, '/v1/mods', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ modIds: ids, filterPcOnly: true }) }));
+    }
+    if (req.method === 'POST' && path === '/v1/mods/files') {
+      const body = await req.json().catch(() => null);
+      const ids = Array.isArray(body?.fileIds) ? body.fileIds : null;
+      if (!ids || ids.length === 0 || ids.length > 100 || !ids.every((n: unknown) => Number.isInteger(n) && (n as number) > 0 && (n as number) < 2 ** 31)) return err(400, 'bad_request', 'fileIds must be 1 to 100 positive integers.');
+      return await relay(await upstream(key, '/v1/mods/files', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fileIds: ids }) }));
+    }
+    if (req.method === 'POST' && path === `/v1/fingerprints/${GAME_ID}`) {
+      const body = await req.json().catch(() => null);
+      const fps = Array.isArray(body?.fingerprints) ? body.fingerprints : null;
+      if (!fps || fps.length === 0 || fps.length > 200 || !fps.every((n: unknown) => Number.isInteger(n) && (n as number) >= 0 && (n as number) < 2 ** 32)) return err(400, 'bad_request', 'fingerprints must be 1 to 200 unsigned 32-bit integers.');
+      return await relay(await upstream(key, `/v1/fingerprints/${GAME_ID}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fingerprints: fps }) }));
     }
     if (req.method === 'GET' && (m = path.match(/^\/v1\/mods\/(\d{1,10})$/))) return await relay(await upstream(key, `/v1/mods/${m[1]}`));
     if (req.method === 'GET' && (m = path.match(/^\/v1\/mods\/(\d{1,10})\/files$/))) {

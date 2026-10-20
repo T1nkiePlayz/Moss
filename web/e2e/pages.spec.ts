@@ -54,6 +54,8 @@ test('server settings show the isolation section, and a clear message when no en
   await expect(page.getByText('No container engine')).toBeVisible();
   await expect(page.getByText(/Neither Docker nor Podman was found/).first()).toBeVisible();
   await audit(page, 'settings without an engine');
+});
+
 test.describe('remote backups', () => {
   test('destinations: add form, test result and per-server choice are accessible', async ({ page }) => {
     const errors: string[] = [];

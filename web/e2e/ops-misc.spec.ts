@@ -15,6 +15,7 @@ async function audit(page: Page, label: string) {
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`${scheme} theme`, () => {
     test.use({ colorScheme: scheme });
+    test.setTimeout(20000);
 
     test('Settings: custom colours are checked for contrast, applied, exported and reset', async ({ page }) => {
       await page.goto('/#/settings');
@@ -53,18 +54,18 @@ for (const scheme of ['light', 'dark'] as const) {
 
     test('Servers: a search and filter can be saved as a view and reapplied', async ({ page }) => {
       await page.goto('/#/servers');
-      await page.getByRole('button', { name: 'Running now' }).click();
+      await page.getByRole('button', { name: 'Running now', exact: true }).click();
       await expect(page.getByRole('button', { name: 'Running', exact: false }).first()).toBeVisible();
       await page.getByLabel('Search servers').fill('survival');
       await page.getByRole('button', { name: 'Save view' }).click();
       await page.getByLabel('Name for this view').fill('Survival only');
       await page.getByRole('button', { name: 'Save', exact: true }).click();
-      await expect(page.getByRole('button', { name: 'Survival only' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Survival only', exact: true })).toBeVisible();
       await page.getByLabel('Search servers').fill('');
-      await page.getByRole('button', { name: 'Survival only' }).click();
+      await page.getByRole('button', { name: 'Survival only', exact: true }).click();
       await expect(page.getByLabel('Search servers')).toHaveValue('survival');
       await page.getByRole('button', { name: 'Remove view Survival only' }).click();
-      await expect(page.getByRole('button', { name: 'Survival only' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Survival only', exact: true })).toHaveCount(0);
       await audit(page, 'servers with saved views');
     });
 
@@ -78,7 +79,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await audit(page, 'import review');
       const go = page.getByRole('button', { name: 'Import server' });
       await expect(go).toBeDisabled(); // EULA not accepted
-      await page.getByLabel('Port').fill('25812');
+      await page.getByLabel('Port').fill('25565');
       await page.getByRole('checkbox').check();
       await go.click();
       await expect(page.getByRole('alert').filter({ hasText: 'already used' })).toBeVisible();
@@ -102,7 +103,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(page.getByText('Saved blueprint “My survival recipe”')).toBeVisible();
       await page.goto('/#/settings');
       const card = page.getByRole('region', { name: 'Server blueprints' });
-      await expect(card.getByRole('cell', { name: 'My survival recipe' })).toBeVisible();
+      await expect(card.getByRole('cell', { name: 'My survival recipe', exact: true })).toBeVisible();
       await audit(page, 'settings with blueprints');
       await page.goto('/#/servers/new');
       await page.getByRole('button', { name: 'Use a blueprint' }).click();
@@ -116,6 +117,7 @@ for (const scheme of ['light', 'dark'] as const) {
 
     test('Command palette finds files and shows the groups', async ({ page }) => {
       await page.goto('/');
+      await page.locator('a[href^="#/servers/"]').first().waitFor();
       await page.keyboard.press('Control+k');
       const box = page.getByRole('combobox', { name: 'Search' });
       await box.fill('server.prop');

@@ -113,5 +113,6 @@
   .found dt { font-size: var(--fs-xs); color: var(--muted); }
   .found dd { margin: 2px 0 0; font-weight: 550; }
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+  .eula a { text-decoration: underline; }
   .eula { align-items: flex-start; padding: 12px; background: var(--s2); border-radius: var(--r-sm); border: 1px solid var(--line); }
 </style>

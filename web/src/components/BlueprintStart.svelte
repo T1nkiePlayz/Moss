@@ -35,7 +35,7 @@
         {#if bp}<span class="hint">{bp.properties} settings, {bp.content} content items, {bp.schedules} schedules. Needs {bp.memory_mb} MB.</span>{/if}
       </div>
       <div class="field"><label for="bpn">Name for the new server</label><input id="bpn" class="input" maxlength="48" bind:value={name} /></div>
-      <label class="row g6"><input type="checkbox" class="check" bind:checked={eula} /><span class="sm">I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">Minecraft EULA</a>. This acceptance is recorded and audited.</span></label>
+      <label class="row g6"><input type="checkbox" class="check" bind:checked={eula} /><span class="sm">I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener" style="text-decoration:underline">Minecraft EULA</a>. This acceptance is recorded and audited.</span></label>
       {#if err}<div class="banner danger" role="alert"><Icon name="alert" size={16} /><span>{err}</span></div>{/if}
       <div class="row end"><button class="btn" onclick={() => (open = false)}>Cancel</button><button class="btn primary" disabled={busy || !bp || !name.trim() || !eula} onclick={go}>{busy ? 'Creating…' : 'Create from blueprint'}</button></div>
     {/if}

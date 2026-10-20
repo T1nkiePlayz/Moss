@@ -32,7 +32,7 @@
 
 <div class="row g6 wrap" role="group" aria-label="Saved views">
   {#each views as v (v.id)}
-    <span class="chip view" aria-pressed={active === v.id}>
+    <span class="chip view" class:on={active === v.id}>
       <button class="vbtn" aria-pressed={active === v.id} onclick={() => apply(v)}>{v.name}</button>
       <button class="x" aria-label="Remove view {v.name}" onclick={() => remove(v)}><Icon name="x" size={12} /></button>
     </span>
@@ -50,6 +50,7 @@
 
 <style>
   .view { padding: 0; gap: 0; }
+  .view.on { border-color: var(--a1); background: var(--a-soft); }
   .vbtn { all: unset; cursor: pointer; padding: 5px 4px 5px 12px; border-radius: 99px 0 0 99px; }
   .vbtn:focus-visible, .x:focus-visible { outline: 2px solid var(--a1); outline-offset: 1px; }
   .x { all: unset; cursor: pointer; padding: 5px 9px 5px 4px; display: grid; place-items: center; color: var(--muted); border-radius: 0 99px 99px 0; }

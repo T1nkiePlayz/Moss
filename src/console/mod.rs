@@ -4,6 +4,9 @@ use axum::{extract::{Path, Query, State, ws::{Message, WebSocket, WebSocketUpgra
 use std::{collections::VecDeque, io::{Read, Seek, SeekFrom}, path::Path as FsPath, sync::{Arc, Mutex}};
 use tokio::sync::broadcast;
 
+mod lines;
+#[cfg(test)] mod flood_tests;
+
 const RING: usize = 1500;
 
 pub struct Hub {
@@ -82,7 +85,7 @@ pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool
     let st = st.clone();
     tokio::spawn(async move {
         let mut off = if from_end { std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0) } else { 0 };
-        let mut partial = String::new();
+        let mut split = lines::LineSplitter::default();
         let mut idle_after_exit = 0;
         let mut idle_polls = 0u32;
         loop {
@@ -102,20 +105,16 @@ pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool
             if !chunk.is_empty() {
                 idle_after_exit = 0;
                 idle_polls = 0;
-                partial.push_str(&String::from_utf8_lossy(&chunk));
-                while let Some(i) = partial.find('\n') {
-                    let line: String = partial.drain(..=i).collect();
-                    let line = line.trim_end_matches(['\n', '\r']).to_string();
+                split.feed(&chunk, |line| {
                     if crate::lifecycle::looks_ready(&line) { crate::lifecycle::mark_ready(&st, &id); }
                     push(&h, line);
-                }
-                if partial.len() > 64 * 1024 { let l = std::mem::take(&mut partial); push(&h, l); }
+                });
                 continue;
             }
             let alive = st.live.lock().unwrap().get(&id).is_some_and(|l| l.alive);
             if !alive {
                 idle_after_exit += 1;
-                if idle_after_exit > 5 { if !partial.is_empty() { push(&h, std::mem::take(&mut partial)); } break; }
+                if idle_after_exit > 5 { split.flush(|l| push(&h, l)); break; }
             }
             idle_polls = idle_polls.saturating_add(1);
             tokio::time::sleep(std::time::Duration::from_millis(next_poll_ms(alive, idle_polls))).await;
@@ -142,20 +141,51 @@ pub async fn ws(State(st): State<St>, Path(id): Path<String>, Query(q): Query<st
     Ok(up.max_message_size(16 * 1024).on_upgrade(move |sock| handle(st, s, user, can_write, sock)))
 }
 
+/// Where a viewer's frames go. A WebSocket in production; tests use sinks that stall.
+pub trait Sink { fn send(&mut self, text: String) -> impl std::future::Future<Output = bool> + Send; }
+impl Sink for WebSocket { async fn send(&mut self, text: String) -> bool { WebSocket::send(self, Message::Text(text.into())).await.is_ok() } }
+
+/// A viewer that cannot take a frame within this long is dropped (its socket buffer is full: the browser is gone or frozen).
+pub const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Falling behind the broadcast buffer this many times within `LAG_WINDOW` also drops the viewer.
+const MAX_LAGS: usize = 5;
+const LAG_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+
+pub async fn send_frame<S: Sink>(sink: &mut S, text: String, timeout: std::time::Duration) -> bool {
+    tokio::time::timeout(timeout, sink.send(text)).await.unwrap_or(false)
+}
+
+fn line_frame(l: &str) -> String { serde_json::json!({"t":"line","d":l}).to_string() }
+
+/// Handles one message from the hub for one viewer. False = stop serving this viewer (it is told why when it can still listen).
+pub async fn relay<S: Sink>(m: Result<(u64, String), broadcast::error::RecvError>, last: u64, sink: &mut S, lags: &mut std::collections::VecDeque<std::time::Instant>, timeout: std::time::Duration) -> bool {
+    match m {
+        Ok((seq, l)) => seq <= last || send_frame(sink, line_frame(&l), timeout).await,
+        Err(broadcast::error::RecvError::Lagged(n)) => {
+            let now = std::time::Instant::now();
+            lags.push_back(now);
+            while lags.front().is_some_and(|t| now.duration_since(*t) > LAG_WINDOW) { lags.pop_front(); }
+            if lags.len() >= MAX_LAGS {
+                let _ = send_frame(sink, line_frame("\x1b[31m[moss] disconnected: this connection cannot keep up with the console output. Reload the page to reconnect.\x1b[0m"), std::time::Duration::from_millis(500)).await;
+                return false;
+            }
+            send_frame(sink, line_frame(&format!("\x1b[33m[moss] {n} lines skipped (slow connection)\x1b[0m")), timeout).await
+        }
+        Err(_) => false,
+    }
+}
+
 async fn handle(st: St, s: crate::server::Srv, user: User, can_write: bool, mut sock: WebSocket) {
     let h = prime(&st, &s.id, &s.moss_dir(&st).join("console.log"));
     // The UI loads history from /console/backlog; the socket only carries lines produced after it connects.
     let (mut rx, last) = { let r = h.ring.lock().unwrap(); (h.tx.subscribe(), r.0) };
     let mut bus = st.bus.subscribe();
+    let mut lags = std::collections::VecDeque::new();
     loop {
         tokio::select! {
-            m = rx.recv() => match m {
-                Ok((seq, l)) => { if seq > last && sock.send(Message::Text(serde_json::json!({"t":"line","d":l}).to_string().into())).await.is_err() { break; } }
-                Err(broadcast::error::RecvError::Lagged(n)) => { let _ = sock.send(Message::Text(serde_json::json!({"t":"line","d":format!("\x1b[33m[moss] {n} lines skipped (slow connection)\x1b[0m")}).to_string().into())).await; }
-                Err(_) => break,
-            },
+            m = rx.recv() => if !relay(m, last, &mut sock, &mut lags, SEND_TIMEOUT).await { break; },
             e = bus.recv() => if let Ok(e) = e && e.kind == "server" && e.data["id"] == s.id.as_str()
-                && sock.send(Message::Text(serde_json::json!({"t":"state","d":e.data["state"]}).to_string().into())).await.is_err() { break; },
+                && !send_frame(&mut sock, serde_json::json!({"t":"state","d":e.data["state"]}).to_string(), SEND_TIMEOUT).await { break; },
             m = sock.recv() => match m {
                 Some(Ok(Message::Text(t))) => {
                     let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else { continue };

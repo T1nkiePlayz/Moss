@@ -42,7 +42,7 @@ MOSS_AUTH=dev moss serve          # no sign-in, loopback only: for trying it out
 moss doctor                       # checks data directory, port, Java and sign-in settings
 ```
 
-For real use, sign-in works out of the box: the release includes the sign-in settings in `.env`. Open the panel, sign in, and enter the setup token Moss wrote to `<data dir>/setup-token` to become the owner. To pin the owner by e-mail instead, copy `moss.env.example` and set `MOSS_OWNER_EMAILS`.
+For real use, sign-in works out of the box: the release includes the sign-in settings in `.env` (the launchd steps below copy it). Open the panel, sign in, and enter the setup token Moss wrote to `<data dir>/setup-token` to become the owner. To pin the owner by e-mail instead, add `MOSS_OWNER_EMAILS=you@example.com` to that file.
 
 ### launchd
 
@@ -52,7 +52,7 @@ directory, logs in `~/Library/Logs/Moss`, settings sourced from `~/Library/Appli
 ```sh
 mkdir -p ~/Library/LaunchAgents ~/Library/Logs/Moss "$HOME/Library/Application Support/Moss"
 sed "s#REPLACE_ME_HOME#$HOME#g" io.moss.controller.plist > ~/Library/LaunchAgents/io.moss.controller.plist
-cp moss.env.example "$HOME/Library/Application Support/Moss/moss.env"   # edit it
+cp .env "$HOME/Library/Application Support/Moss/moss.env"   # the shipped sign-in settings; add options from moss.env.example
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.moss.controller.plist
 launchctl kickstart -k gui/$(id -u)/io.moss.controller     # restart
 launchctl bootout gui/$(id -u)/io.moss.controller           # stop

@@ -22,34 +22,19 @@
 </p>
 
 > [!WARNING]
-> **Early development.** Moss runs real servers today, but storage formats and APIs may change between versions, and there is **no container isolation yet**: servers run as the same OS user as Moss. On Linux Moss can cap memory, CPU and processes per server with cgroups, which is not a security boundary (see [Security model](#security-model)). Keep your own backups, and do not expose Moss to the internet without a TLS reverse proxy.
+> **Early development.** Moss runs real servers today, but storage formats and APIs may change between versions, and servers run as the same OS user as Moss unless you switch a server to **container isolation** (Docker or Podman). Container mode was verified in tests against a stand-in for the engine, so treat it as new. Keep backups of anything you care about, and do not expose Moss to the internet without a TLS reverse proxy.
 
 ## Table of contents
 
-- [Overview](#overview)
-- [What makes Moss different](#what-makes-moss-different)
-- [Features](#features)
-- [Screenshots](#screenshots)
-- [Quick start](#quick-start)
-- [Sign-in with Supabase](#sign-in-with-supabase)
-- [Configuration](#configuration)
-- [Runtimes](#runtimes)
-- [Mods and compatibility](#mods-and-compatibility)
-- [Security model](#security-model)
-- [How it works](#how-it-works)
-- [Platform support](#platform-support)
-- [Current limitations](#current-limitations)
-- [Roadmap](#roadmap)
-- [Documentation index](#documentation-index)
-- [Development](#development)
-- [Releasing](#releasing)
-- [License](#license)
+- [Overview](#overview) · [Features](#features) · [Quick start](#quick-start) · [Sign-in](#sign-in) · [Configuration](#configuration)
+- [Runtimes](#runtimes) · [Mods and compatibility](#mods-and-compatibility) · [Security model](#security-model) · [Platform support](#platform-support)
+- [Current limitations](#current-limitations) · [Roadmap](#roadmap) · [Documentation](#documentation)
 
 ## Overview
 
-Moss installs, runs, watches, updates and backs up game servers on a machine you own. It is a single Rust binary that embeds its web UI, keeps state in SQLite, needs no Docker and no hosted backend, and uses Supabase **only** to sign people in.
+Moss installs, runs, watches, updates and backs up game servers on a machine you own. It is a single Rust binary that embeds its web UI, keeps state in SQLite, needs no Docker (container isolation is optional) and no hosted backend, and uses Supabase **only** to sign people in.
 
-- **Fast and small.** One binary, a Svelte UI with no UI framework (about 12 KB of JavaScript on first load, gzipped), live state over Server-Sent Events and WebSockets, no polling storms. Idle cost is a few tens of MB.
+- **Fast and small.** One binary, a Svelte UI with no UI framework (about 52 KB of JavaScript on first load, gzipped), live state over Server-Sent Events and WebSockets, no polling storms. Idle cost is a few tens of MB.
 - **Local first.** Server files, worlds, console logs and backups never leave your machine. The controller works offline except for downloads and the content catalogues.
 - **Honest about compatibility.** Plugins for Paper-family servers, mods for Fabric, Quilt, Forge and NeoForge, proxy plugins for Velocity, datapacks for Vanilla. Moss reads every jar, checks dependencies, versions and loaders, and tells you what is wrong before the server does.
 - **Recoverable.** Every change Moss makes can be undone, risky changes take a safety backup first, backups are checksummed and verifiable, and restores never delete what they replace.
@@ -70,27 +55,29 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 ## Features
 
-**Servers** · Vanilla, Paper, Purpur, Folia, Fabric, Quilt, Forge, NeoForge and Velocity from official metadata with checksum verification where upstream publishes one · start / graceful stop / restart / force stop with escalation · crash detection with exponential backoff and a crash-loop breaker · autostart · per-server memory, flags profile, port and (Linux) hard limits for memory, CPU and processes · reinstall and repair (keeping data) · EULA acceptance is an explicit, audited step.
+**Servers** · Vanilla, Paper, Purpur, Folia, Fabric, Quilt, Forge, NeoForge and Velocity from official metadata, checksum-verified where upstream publishes one · start, graceful stop, restart, force stop with escalation · crash detection with backoff and a crash-loop breaker · autostart · per-server memory, flags profile and port · **import an existing server** from a folder, zip or tar.zst · **blueprints** to create new servers from a saved recipe · EULA acceptance is an explicit, audited step.
 
-**Console** · live WebSocket console shared by any number of viewers, ANSI colours rendered as text never HTML, command history, bounded buffers, survives controller restarts. Sensitive commands (`/login`, `/register`, `rcon`…) are redacted in the audit log by default.
+**Isolation and limits** · optional **container mode** (Docker or Podman): one mounted folder, no capabilities, read-only root, memory/CPU/process limits, Java provided by the image · on Linux, cgroup limits without containers · servers survive controller restarts in both modes.
 
-**Files & config** · browse, upload, download, edit, rename, delete, confined to the server directory (no `..`, no symlink escapes) · form-based `server.properties` editor · atomic writes · undo.
+**Console** · live WebSocket console shared by any number of viewers, command history, bounded buffers, survives controller restarts · sensitive commands are redacted in the activity log.
 
-**Content (Modrinth and CurseForge)** · search filtered by runtime, loader and game version · dependency resolution · installed inventory with metadata read from the jars (name, version, authors, loader, environment) · enable/disable files · identify unknown files by hash so they can be updated · compatibility panel · update-all with a reviewed plan, pinning, one undo snapshot · removal keeps plugin data.
+**Files and config** · browse, upload, download, edit, rename, delete, confined to the server folder · form-based `server.properties` · **structured editors with history and diffs for Paper, Spigot, Bukkit, Purpur and Velocity config files** (comments kept, raw editor always available) · undo for every save.
 
-**Modpacks** · import `.mrpack` and CurseForge packs (uploaded or by Modrinth/CurseForge project) into a new or existing server, with overrides, server-side filtering, hash-verified downloads and a report of files that cannot be fetched; export a server's content as `.mrpack`.
+**Content (Modrinth and CurseForge)** · search filtered by runtime, loader and game version · dependency resolution · inventory read from the jars · enable/disable · identify unknown files by hash · compatibility panel · update-all with a reviewed plan and pinning · **staged updates on a test copy** with health-gated promotion.
 
-**Version upgrades** · plan and run a Minecraft/loader upgrade with Java and server-jar checks, per-mod status, update/disable/keep strategy, pre-change backup and rollback.
+**Modpacks** · import `.mrpack` and CurseForge packs into a new or existing server, export `.mrpack`, **update to a newer pack version with a diff**, pin a pack version.
 
-**Backups & schedules** · manual and scheduled backups, retention that never removes your last good one, locks, world-aware listing, verification, restore preview, restore as a new server / in place / selected worlds · schedules for backup, start, stop, restart and console commands, on an interval or daily at a local time in an IANA time zone (daylight-saving aware) · missed runs execute once.
+**Version upgrades** · plan and run a Minecraft/loader upgrade with per-mod verdicts, backup and rollback; optionally try it on a copy first.
 
-**Operations & notifications** · every long job is a persisted operation with stage, progress, log tail, cancellation and a live feed; interrupted work is marked, never lost · in-app notification inbox (crash, crash loop, failed backup, low disk, failed operation) and an optional Discord or generic webhook (HTTPS only, SSRF-safe).
+**Backups** · manual and scheduled, checksummed `tar.zst`, verify, lock, world-aware listing, restore as a new server, in place or per world · **restore preview, or restore to a staging folder and promote after comparing** · **remote destinations**: a folder (for example a NAS mount) or any S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, MinIO), with upload retries, checksums and remote retention.
 
-**Monitoring** · live CPU, memory and players, plus long-term history (1 h, 24 h, 7 d, 30 d) per server and for the host · support bundle with secrets redacted.
+**Schedules, operations, notifications** · backup, start, stop, restart and console-command schedules in an IANA time zone (daylight-saving aware) · every long job is a persisted, cancellable operation · in-app inbox plus optional Discord or generic webhook (HTTPS, SSRF-safe).
 
-**Access** · Supabase sign-in, roles (`owner`, `admin`, `user`) and per-server grants (`manager`, `operator`, `viewer`) enforced on every request, WebSocket and event stream · invite-only · one-time setup token to claim ownership · optional MFA requirement for admins · personal API tokens for scripts · login throttling · full activity log.
+**Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · support bundle with secrets redacted.
 
-**Interface** · dark, light, system and high-contrast themes, accent and density options, reduced motion, keyboard-first, responsive down to a phone, axe-checked in CI.
+**Interface** · dark, light, system and high-contrast themes with a **theme editor** (live preview, contrast checker, import/export) · accent and density options · saved views for lists · command palette that searches servers, backups, content and files (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>) · keyboard first, responsive, axe-checked in CI.
+
+**Access and recovery** · roles and per-server grants enforced everywhere · personal API tokens · login throttling · optional MFA requirement · activity log · **`moss recover`** command line for locked-out owners, stuck operations and integrity checks.
 
 ## Screenshots
 
@@ -137,7 +124,7 @@ Open the panel, create a server, accept the EULA, and (if you have no Java insta
 sudo useradd --system --home /var/lib/moss --create-home --shell /usr/sbin/nologin moss
 sudo install -m 0755 moss /usr/local/bin/moss
 sudo install -d -m 0750 -o root -g moss /etc/moss
-sudo install -m 0640 -o root -g moss moss.env.example /etc/moss/moss.env   # edit: Supabase + owner email
+sudo install -m 0640 -o root -g moss .env /etc/moss/moss.env   # sign-in settings; add options from moss.env.example if you like
 sudo install -m 0644 moss.service /etc/systemd/system/moss.service
 sudo systemctl enable --now moss
 ```
@@ -162,7 +149,7 @@ WebSockets and Server-Sent Events work through Caddy as is. For nginx, disable r
 
 `moss doctor` checks the data directory, disk, ports, Java, auth and CurseForge configuration.
 
-### From source
+### From source (to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md))
 
 Requires Rust (stable) and Node.js (LTS).
 
@@ -172,20 +159,14 @@ git clone https://github.com/T1nkiePlayz/Moss && cd Moss
 cargo build --release                      # → target/release/moss
 ```
 
-## Sign-in with Supabase
+## Sign-in
 
-Moss uses [Supabase Auth](https://supabase.com/docs/guides/auth) to prove who someone is; Moss itself decides what they may do. The browser only ever receives the public project URL and publishable key; tokens are verified locally against your project's signing keys (JWKS). Step-by-step setup (providers, redirect URLs, owners, invites, setup token, MFA, API tokens) is in **[docs/supabase.md](docs/supabase.md)**.
+Moss uses [Supabase Auth](https://supabase.com/docs/guides/auth) only to prove who someone is; Moss itself decides what they may do. Sign-in works out of the box: releases include the public sign-in settings in `.env`. Open the panel, create an account or sign in with a provider, and enter the one-time setup token Moss wrote to `<data dir>/setup-token` to become the owner. Anyone else needs an invite from the owner, even though the sign-in service itself is open.
 
-```bash
-export SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-export SUPABASE_ANON_KEY=YOUR-PUBLISHABLE-KEY
-export MOSS_OWNER_EMAILS=you@example.com
-./moss serve
-```
-
-Nobody gets in without being the owner or being invited, even if sign-ups are open on your Supabase project. Without `MOSS_OWNER_EMAILS`, Moss writes a one-time token to `<data dir>/setup-token` and the first person to enter it on the setup screen becomes owner.
-
-The repository's `.env` already holds this project's public `SUPABASE_URL` and publishable key, and Moss loads `.env` then `.env.local` from its working directory (real environment variables win). Fork it for your own instance by replacing those two values; keep secrets and `MOSS_OWNER_EMAILS` in the gitignored `.env.local`.
+- Roles: `owner`, `admin`, `user`, plus per-server grants (`manager`, `operator`, `viewer`).
+- Pin the owner by e-mail with `MOSS_OWNER_EMAILS`, require two-factor sign-in with `MOSS_REQUIRE_MFA`, and create personal API tokens in **Settings**.
+- Locked out? [docs/recovery.md](docs/recovery.md) explains `moss recover`.
+- To use your own Supabase project, set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in `.env.local` (secrets and `MOSS_OWNER_EMAILS` belong there, never in `.env`).
 
 ## Configuration
 
@@ -196,7 +177,7 @@ Flags and environment variables (flags win):
 | `MOSS_BIND` / `MOSS_PORT` | `127.0.0.1` / `8420` | Listener. Keep loopback unless a TLS proxy fronts it. |
 | `MOSS_DATA_DIR` | `./moss-data` | Database, servers, backups, managed Java, cache. |
 | `MOSS_AUTH` | `supabase` | `supabase` or `dev` (no login, loopback only). |
-| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | – | Your project URL and publishable key. |
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | shipped `.env` | Only to use your own sign-in project instead of the default. |
 | `SUPABASE_JWT_SECRET` | – | Only for legacy HS256-signed projects. |
 | `MOSS_OWNER_EMAILS` | – | Comma-separated emails that become owner on first verified sign-in. |
 | `MOSS_REQUIRE_VERIFIED_EMAIL` | `true` | Require a verified email before matching owner/invite. |
@@ -204,8 +185,11 @@ Flags and environment variables (flags win):
 | `MOSS_TRUST_PROXY` | `false` | Read the client address from `X-Forwarded-For` (only behind a proxy). |
 | `MOSS_ALLOW_PRIVATE_WEBHOOKS` | `false` | Let notification webhooks resolve to private addresses (still HTTPS only). |
 | `MOSS_ALLOW_PRIVATE_BACKUP_HOSTS` | `false` | Let an S3 backup destination resolve to a private or loopback address (a MinIO on your LAN). Plain `http` is then accepted for loopback only. |
-| `CURSEFORGE_API_KEY` | – | Your own CurseForge key for direct access (secret; `.env.local`). Without it Moss uses the Supabase edge function, see [docs/curseforge.md](docs/curseforge.md). |
-| `MOSS_CURSEFORGE_PROXY` | auto | Edge function URL, or `off` to disable CurseForge. |
+| `CURSEFORGE_API_KEY` | – | Your own CurseForge key for direct access (secret; `.env.local`). Without it Moss uses the built-in relay, see [docs/curseforge.md](docs/curseforge.md). |
+| `MOSS_CURSEFORGE_PROXY` | auto | Relay URL, or `off` to disable CurseForge. |
+| `MOSS_CONTAINER_ENGINE` | auto | `docker` or `podman` to force an engine for container isolation. |
+| `MOSS_STAGING_PORT_RANGE` | `30000-30999` | Ports used by test copies in staged updates. |
+| `MOSS_ALLOW_PRIVATE_BACKUP_HOSTS` | `false` | Let a backup destination resolve to a private address. |
 | `MOSS_CURSEFORGE_API_URL` | `https://api.curseforge.com` | API base for direct mode (https, or loopback for tests). |
 | `MOSS_DEV_RUNTIMES` | `false` | Expose the simulated server runtime (demos, tests). |
 | `RUST_LOG` | `moss=info` | Log filter. |
@@ -223,7 +207,7 @@ Data layout: `moss.sqlite`, `servers/<id>/` (game files; Moss metadata in `.moss
 | Fabric | Stable | Mods | Server-side and both-side mods only |
 | Quilt | Stable | Mods | Official installer, Fabric mods work too |
 | NeoForge | Stable | Mods | Official installer; Minecraft 1.20.2+ |
-| Forge | Experimental | Mods | Official installer; Minecraft 1.17+ (older versions use a different launch scheme) |
+| Forge | Experimental | Mods | Official installer; Minecraft 1.12.2 and newer (Java 8 for 1.16.5 and older) |
 | Velocity | Stable | Proxy plugins | |
 | Custom command | Experimental | – | Admin-only; explicit argv, reduced management |
 | Simulated | Dev only | – | Fake server for demos and tests |
@@ -243,7 +227,10 @@ What Moss does for mods and plugins, so you do not have to learn it from a crash
 - **Upgrade Minecraft** with a per-mod verdict (ok, update available, no build for that version, unknown) before touching the server.
 - **Modpacks** in and out, with a report of anything that could not be fetched (usually CurseForge authors who disabled third-party downloads; Moss never works around that).
 
-Provider notes: CurseForge needs an API key and is rate limited and uncached by design, see [docs/curseforge.md](docs/curseforge.md).
+- **Try it on a copy first.** Staged updates clone the server, apply the change on a test port, watch it start, and only offer *Promote* if it ran cleanly.
+- **Modpack updates** show a diff (added, removed, updated, config files you edited are never overwritten) and can be pinned to a version.
+
+CurseForge works without any setup and is deliberately rate limited and uncached, see [docs/curseforge.md](docs/curseforge.md).
 
 ## Security model
 
@@ -257,10 +244,10 @@ Moss is designed so that signing in is not the only line of defence. Read this s
 - **Files confined to the server.** Path normalisation plus a symlink check on every component; `.moss/` is unreachable; uploads are never served inline.
 - **Hardened downloads and archives.** HTTPS-only host allow-list re-checked on redirects, size caps, checksum verification, atomic placement; archives and modpacks reject traversal, links and devices; project links from authors are only passed on as http(s).
 - **Webhooks are SSRF-safe.** HTTPS only, no redirects, the resolved address must be public.
-- **CurseForge key never leaves the server side.** The edge function confirms a real signed-in user with Supabase Auth before using it.
+- **The CurseForge key never reaches your machine.** The relay confirms a real signed-in user before using it.
 - **Single-use stream tickets** instead of tokens in URLs; strict CSP; `nosniff`, no-referrer, no framing.
 - **No shell exposure.** The UI cannot run commands on the host. Game processes are launched from an argument array. The one exception is the **admin-only Custom runtime**, which by definition runs an administrator-supplied command as the Moss user; grant admin accordingly.
-- **No isolation yet (important).** Game servers, and any plugin or mod they load, run as the same OS user as Moss with that user's file access. The Forge/NeoForge/Quilt installers are third-party code run the same way. Run Moss as a dedicated unprivileged user (the shipped systemd unit does, with sandboxing), and treat plugins and mods as code you are trusting. Linux cgroup limits cap memory, CPU and process counts per server but do not isolate files or the network. Container isolation is on the roadmap.
+- **Isolation is opt-in.** By default, game servers and the plugins and mods they load run as the same OS user as Moss. Switch a server to **container isolation** (Settings → Isolation, needs Docker or Podman) to run it with one mounted folder, no capabilities, a read-only root, and memory, CPU and process limits. It does not restrict outbound network access. On Linux, cgroup limits are available without containers but do not isolate files or the network. Run Moss as a dedicated unprivileged user (the shipped systemd unit does), and treat plugins and mods as code you are trusting. The full analysis is in [docs/threat-model.md](docs/threat-model.md).
 
 Report security issues privately through GitHub's *Report a vulnerability* on this repository.
 
@@ -275,7 +262,8 @@ One axum process: SQLite for state (numbered migrations), a persisted operation 
 | Servers, console, files, backups, schedules, content | ✅ | ✅ |
 | Survive controller restart | ✅ | ✅ |
 | Managed Temurin Java | ✅ | ✅ |
-| Per-server memory/CPU/process limits | ✅ cgroup v2 (delegated) | ➖ JVM heap only |
+| Per-server memory/CPU/process limits | ✅ cgroup v2 (delegated), or container mode | ➖ JVM heap only, or container mode |
+| Container isolation (Docker/Podman) | ✅ | 🟡 untested with Docker Desktop |
 | Host CPU and memory gauges | `/proc` | `libproc`, `sysctl`, `vm_stat`, `ps` |
 | Service files | systemd unit, AUR `PKGBUILD` | launchd plist, Homebrew formula |
 
@@ -283,72 +271,44 @@ macOS binaries are built in CI and are ad-hoc signed, not notarised; see [docs/m
 
 ## Current limitations
 
-- No container backend: no file or network isolation between servers and the host (resource limits are Linux cgroups only).
-- Content comes from Modrinth and CurseForge only. CurseForge needs a key, cannot say whether a mod is server-safe, and never downloads files whose authors disabled third-party distribution.
-- Forge before Minecraft 1.17 is not supported; non-Minecraft games are not supported.
-- One node. Backups are kept locally and can also be copied to a folder or an S3-compatible bucket (see Settings, Backups). Only the in-process fake S3 and folders were exercised in tests; real AWS, Backblaze B2 and Cloudflare R2 were not.
+- Container mode does not restrict outbound network access, does not publish UDP plugin ports, and has only been tested against a stand-in for Docker and Podman. It is offered for Minecraft servers only.
+- CurseForge cannot say whether a mod is server-safe and never downloads files whose authors disabled third-party distribution.
+- Non-Minecraft games are not supported. Forge before 1.12.2 is not supported.
+- One node. Safety backups taken before risky changes stay local; scheduled and manual backups can go to a remote destination.
 - Long-term metrics are hourly roll-ups kept 90 days.
-- If the host reboots, running servers stop (as always); Moss restarts the ones that were running when it comes back, or that have *autostart* set.
-- No staging-server health gate for updates yet.
+- Remote destinations were tested against a simulated S3 service; please report quirks with a specific provider.
+- If the host reboots, running servers stop; Moss restarts the ones that were running or have *autostart* set.
+- The first page load is about 52 KB of JavaScript (gzipped), above the 40 KB goal.
 
 ## Roadmap
 
-Milestones follow [docs/PLAN.md §27](docs/PLAN.md). They are gates, not dates. ✅ done · 🟡 partly done · ⬜ not started.
+Milestones are gates, not dates. ✅ done · 🟡 partly done.
 
-| Milestone | Status | What is left |
-|---|---|---|
-| **M0 Foundations and spikes** | 🟡 | ADRs and `docs/threat-model.md`; written spike results (kill -9 mid-operation reconciliation, console flood/backpressure); a written Modrinth terms review (CurseForge's is in [docs/curseforge.md](docs/curseforge.md)). |
-| **M1 "Hello, server"** | ✅ | Recovery CLI (re-link the owner, reset a stuck operation); the simulated runtime as a shared conformance suite. |
-| **M2 "Plugins"** | ✅ | Paper config editors (`paper-global.yml`, `spigot.yml`) with history; provider-outage tests. |
-| **M3 "Don't lose data"** | ✅ | An upgrade test from the previous release; promote-after-compare restore flow; remote backup destinations (folder, S3-compatible). |
-| **M4 "Mods and packs"** | 🟡 | Pack diff and pack-version pinning, staged updates with a health-gated promotion, sandboxed installers, pre-1.17 Forge. Fabric, Quilt, Forge, NeoForge, Velocity, `.mrpack`/CurseForge packs, CurseForge and the upgrade assistant are in. |
-| **M5 "Polish"** | 🟡 | Theme editor and import/export, saved views, cross-product search, visual-regression suite, blueprints and collections, directory import, config diffs, desktop shell (Tauri), performance budgets. Four themes, the command palette and an axe page suite are in. |
-| **M6 "Open it up" and 1.0** | 🟡 | OpenAPI freeze and compatibility policy, event webhooks beyond notifications, sandboxed UI extensions and safe mode, external security review and dependency audit, soak tests (upgrade, restore, crash, provider outage), a published supported-runtime matrix, signed checksums. The OpenAPI document, MFA policy and API tokens are in. |
+| Milestone | Status | Done | Still to do |
+|---|---|---|---|
+| **M0 Foundations** | ✅ | Threat model, design decisions ([docs/adr](docs/adr)), kill-and-reattach tests | Written console-flood spike results |
+| **M1 Hello, server** | ✅ | Lifecycle, console, files, recovery CLI | |
+| **M2 Plugins** | ✅ | Modrinth and CurseForge, Paper-family config editors, outage tests | |
+| **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | |
+| **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode | Network restrictions for containers |
+| **M5 Polish** | 🟡 | Four themes plus editor, saved views, blueprints, import, search, axe suite | Visual-regression suite, blueprint sharing, desktop shell (Tauri), a smaller first load |
+| **M6 Open it up and 1.0** | 🟡 | OpenAPI document, MFA policy, API tokens | OpenAPI freeze, external security review, soak tests, signed checksums, event webhooks |
 
-**Next:** container isolation (Docker/Podman) with real resource and network limits, then staged updates with health-gated promotion, and the polish items above.
+**Next:** container network limits and UDP ports, smaller first load, and feedback from real remote-storage providers.
 
-**After 1.0:** event workflows, multi-node, backend extensions and SDK, player analytics, other games and importers, public status pages.
+**After 1.0:** event workflows, multi-node, extensions and SDK, player analytics, other games, public status pages.
 
-## Documentation index
+## Documentation
 
 | Doc | What it covers |
 |---|---|
-| [docs/supabase.md](docs/supabase.md) | Auth setup, owners, setup token, MFA, API tokens, roles |
-| [docs/curseforge.md](docs/curseforge.md) | CurseForge setup, edge function, limits and terms |
+| [docs/curseforge.md](docs/curseforge.md) | How CurseForge works in Moss, limits, using your own key |
 | [docs/macos.md](docs/macos.md) | Running Moss on macOS |
-| [docs/architecture.md](docs/architecture.md) | Process model, operations, safety rules |
+| [docs/recovery.md](docs/recovery.md) | `moss recover`: locked-out owner, stuck jobs, integrity |
+| [docs/threat-model.md](docs/threat-model.md) | What Moss defends against and what it does not |
+| [docs/architecture.md](docs/architecture.md) · [docs/adr](docs/adr) | How it works and why |
 | [docs/api.md](docs/api.md) · [docs/openapi.json](docs/openapi.json) | HTTP API reference |
-| [docs/PLAN.md](docs/PLAN.md) | Product and engineering plan |
-| [web/README.md](web/README.md) | Frontend structure and mock mode |
-
-## Development
-
-```bash
-# backend (needs web/dist to exist; an empty directory is enough for unit tests)
-mkdir -p web/dist
-cargo clippy --all-targets -- -D warnings && cargo test   # includes the end-to-end and OpenAPI coverage tests
-
-# run against a simulated server, no login, no Java needed
-MOSS_AUTH=dev MOSS_DEV_RUNTIMES=true MOSS_DATA_DIR=/tmp/moss-dev cargo run -- serve
-
-# frontend with hot reload (proxies /api to :8420), or fully mocked
-cd web && npm ci
-npm run dev
-npm run dev:mock
-npm run check && npm test && npm run build
-npx playwright install chromium && npm run test:ui          # every page renders cleanly and passes axe
-
-# the CurseForge edge function (Node 22.18+)
-node supabase/functions/curseforge/index.test.mts
-```
-
-Layout: `src/` (Rust: `api/`, `auth/`, `lifecycle/`, `content/`, `backups/`, `platform/`, `runtimes/`, `installer/`, `providers/`, `notify/`, `jars/`, `db/` with numbered migrations, plus `console`, `ops`, `files`, `undo`, `sched`, `health`, `java`, `download`, `history`), `web/` (Svelte UI), `supabase/` (edge function), `docs/`, `packaging/`, `scripts/`, `tests/`.
-
-CI (`.github/workflows/ci.yml`) runs the UI type-check, tests, build and page checks, the edge function test, and backend clippy (`-D warnings`) and tests on Linux, plus clippy and tests on macOS.
-
-## Releasing
-
-Push a tag such as `v0.2.0`. `.github/workflows/release.yml` syncs the version into the manifests, builds the UI once, builds the Linux x86-64, macOS Apple silicon and macOS Intel binaries, packages `moss-<tag>-<os>-<arch>.tar.gz` (binary, service files, `.env`, example config), writes `SHA256SUMS.txt`, creates a GitHub **build attestation** for each tarball (public repositories only), generates a Homebrew formula with the real checksums, attaches `install.sh`, and opens a **draft** release whose notes are the tagged commit's message. Tags with a `-` (for example `v0.2.0-rc1`) become pre-releases.
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing and releasing |
 
 ## License
 

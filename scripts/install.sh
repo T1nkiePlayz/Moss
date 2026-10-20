@@ -158,7 +158,7 @@ say "Next steps"
 say "  Try it without sign-in (loopback only):   MOSS_AUTH=dev $DEST/moss serve"
 say "  Check the environment:                    $DEST/moss doctor"
 if [ "$OS" = linux ]; then
-  say "  Run as a service: the tarball ships moss.service and moss.env.example (see the README, Production-style install)."
+  say "  Run as a service: the tarball ships moss.service, .env and moss.env.example (see the README, Linux: production-style install)."
 else
   say "  Run at login: the tarball ships io.moss.controller.plist; see docs/macos.md (launchd), or use Homebrew's moss.rb."
   say "  If macOS blocks the binary: xattr -d com.apple.quarantine $DEST/moss"

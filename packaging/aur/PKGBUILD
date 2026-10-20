@@ -40,7 +40,7 @@ package() {
   install -Dm755 target/release/moss "$pkgdir/usr/bin/moss"
   install -Dm644 packaging/moss.service "$pkgdir/usr/lib/systemd/system/moss.service"
   sed -i 's#/usr/local/bin/moss#/usr/bin/moss#' "$pkgdir/usr/lib/systemd/system/moss.service"
-  install -Dm640 packaging/moss.env.example "$pkgdir/etc/moss/moss.env"
+  install -Dm640 .env "$pkgdir/etc/moss/moss.env"
   install -Dm644 packaging/moss.sysusers "$pkgdir/usr/lib/sysusers.d/moss.conf"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"

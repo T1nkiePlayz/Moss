@@ -27,6 +27,9 @@ pub(super) async fn free_port(_st: &St, preferred: i64, used: &[i64]) -> i64 {
     }
 }
 
+/// Next free TCP port at or after `preferred` that no Moss server uses and nothing is listening on.
+pub async fn free_port_for(st: &St, preferred: i64, used: &[i64]) -> i64 { free_port(st, preferred, used).await }
+
 pub(super) async fn servers_create(State(st): State<St>, user: User, Json(r): Json<CreateReq>) -> ApiResult<(StatusCode, Json<Value>)> { create_server(st, user, r).await }
 
 /// Creates a server from a JSON request body built inside Moss (blueprints, imports).

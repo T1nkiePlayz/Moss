@@ -35,7 +35,7 @@ mod tokens;
 
 use access::*; use activity::*; use assets::static_files; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
 use {metrics::*, notifications::*, support::*};
-pub use servers::create_server_from_value;
+pub use servers::{create_server_from_value, free_port_for};
 
 type Q = Query<HashMap<String, String>>;
 
@@ -47,7 +47,7 @@ pub fn take_ticket(st: &St, t: Option<&String>) -> ApiResult<User> {
 }
 
 pub fn router(st: St) -> Router {
-    use crate::{backups, blueprints, cfgfiles, console, content, files, health, sched, undo, userdata};
+    use crate::{backups, blueprints, cfgfiles, console, content, files, health, importer, sched, undo, userdata};
     let api = Router::new()
         .route("/auth/config", get(auth_config))
         .route("/me", get(me))
@@ -67,6 +67,8 @@ pub fn router(st: St) -> Router {
         .route("/java/install", post(java_install))
         .route("/java/{major}", axum::routing::delete(java_delete))
         .route("/servers", get(servers_list).post(servers_create))
+        .route("/servers/import/inspect", post(importer::inspect))
+        .route("/servers/import", post(importer::start))
         .route("/servers/{id}", get(server_get).patch(server_patch).delete(server_delete))
         .route("/servers/{id}/actions/reinstall", post(server_reinstall))
         .route("/servers/{id}/actions/{action}", post(server_action))

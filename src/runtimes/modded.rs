@@ -14,6 +14,27 @@ pub const QUILT_META: &str = "https://meta.quiltmc.org/v3/versions";
 
 pub fn is_modded(runtime: &str) -> bool { matches!(runtime, "forge" | "neoforge" | "quilt") }
 
+/// Oldest Minecraft minor version Moss offers for Forge (1.12.2); everything before 1.17 uses the legacy launch scheme.
+const LEGACY_MIN_MINOR: u64 = 12;
+const MODERN_MINOR: u64 = 17;
+
+/// Forge for Minecraft 1.12.2 to 1.16.5: launched with `java -jar forge-<mc>-<build>.jar` (no `@unix_args.txt`), on Java 8.
+pub fn legacy_forge_game(game: &str) -> bool { let n = vkey(game); n.len() >= 2 && n[0] == 1 && n[1] < MODERN_MINOR }
+
+/// Java major for the legacy Forge range. 1.16.5 also runs on Java 11 and 16 with newer builds, but Java 8 is the safe choice.
+pub const LEGACY_JAVA: u32 = 8;
+
+/// Adds `legacy: true` and an explanatory `note` to the Forge versions that use the legacy scheme.
+pub fn annotate_legacy(j: &mut Value) {
+    for v in j["versions"].as_array_mut().into_iter().flatten() {
+        let Some(id) = v["id"].as_str().map(String::from) else { continue };
+        if legacy_forge_game(&id) {
+            v["legacy"] = json!(true);
+            v["note"] = json!(if id == "1.16.5" { "Legacy Forge, runs on Java 8 (1.16.5 builds also run on Java 11 and 16, but Moss uses Java 8)." } else { "Legacy Forge, runs on Java 8." });
+        }
+    }
+}
+
 /// One loader build for a Minecraft version; `recommended` marks the build Moss suggests.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoaderVer { pub id: String, pub recommended: bool }
@@ -79,7 +100,7 @@ pub fn parse_forge(promos: &Value, metadata_xml: &str) -> Catalogue {
     let (rec, latest) = (promo("-recommended"), promo("-latest"));
     let mut add = |mc: &str, fv: &str| {
         let ok = fv.chars().all(|c| c.is_ascii_digit() || c == '.') && vkey(fv).len() >= 3;
-        if plain_mc(mc) && vkey(mc)[1] >= 17 && ok { map.entry(mc.to_string()).or_default().push(fv.to_string()); }
+        if plain_mc(mc) && vkey(mc)[1] >= LEGACY_MIN_MINOR && ok { map.entry(mc.to_string()).or_default().push(fv.to_string()); }
     };
     for v in metadata_versions(metadata_xml) { if let Some((mc, fv)) = v.split_once('-') { add(mc, fv); } }
     for (mc, fv) in rec.iter().chain(latest.iter()) { add(mc, fv); }
@@ -162,7 +183,8 @@ pub async fn resolve(st: &St, runtime: &str, game: &str, loader: Option<&str>) -
         _ => installer_url(runtime, game, &lv).ok_or_else(|| anyhow!("unknown runtime"))?,
     };
     let hash = side_hash(st, &url).await;
-    Ok(Resolved { url, hash, java_major: java_for_game(st, game).await, loader_version: Some(lv) })
+    let java_major = if runtime == "forge" && legacy_forge_game(game) { LEGACY_JAVA } else { java_for_game(st, game).await };
+    Ok(Resolved { url, hash, java_major, loader_version: Some(lv) })
 }
 
 #[cfg(test)]

@@ -91,7 +91,7 @@ pub async fn install(ctx: &OpCtx, st: &St, s: &Srv, r: &Resolved, dir: &Path) ->
 }
 
 fn verify(dir: &Path, s: &Srv) -> Result<()> {
-    let want = if s.runtime == "quilt" { Some("quilt-server-launch.jar".to_string()) } else { launch::unix_args_path(s) };
+    let want = if s.runtime == "quilt" { Some("quilt-server-launch.jar".to_string()) } else { launch::legacy_forge_jar(s).or_else(|| launch::unix_args_path(s)) };
     match want { Some(w) if dir.join(&w).is_file() => Ok(()), Some(w) => bail!("the installer finished but did not create {w}"), None => bail!("no loader version recorded") }
 }
 
@@ -102,7 +102,8 @@ fn owned_names(dir: &Path, runtime: &str) -> Vec<String> {
         "quilt" => ["quilt-server-launch.jar", "libraries", "server", "installer.log"].map(String::from).into(),
         _ => vec!["server.jar".into()],
     };
-    v.extend(top_level(dir).into_iter().filter(|n| n.starts_with("minecraft_server.") && n.ends_with(".jar")));
+    // legacy Forge (1.12.2 to 1.16.5) leaves its launch jar and the vanilla server jar at the top level
+    v.extend(top_level(dir).into_iter().filter(|n| n.ends_with(".jar") && (n.starts_with("minecraft_server.") || (runtime == "forge" && n.starts_with("forge-")))));
     v
 }
 

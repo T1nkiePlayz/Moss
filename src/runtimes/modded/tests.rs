@@ -24,19 +24,36 @@ fn neoforge_catalogue_orders_and_recommends_stable() {
     assert_eq!(ids(&c[2].2), ["20.2.86", "20.2.3-beta"]);
 }
 
-const FORGE_XML: &str = "<metadata><versioning><versions><version>1.7.10-10.13.4.1614</version><version>1.16.5-36.2.42</version><version>1.17.1-37.1.1</version><version>1.20.1-47.2.0</version><version>1.20.1-47.3.0</version><version>1.20.1-47.3.10</version><version>1.12.2-14.23.5.2860-1.12.2</version></versions></versioning></metadata>";
+const FORGE_XML: &str = "<metadata><versioning><versions><version>1.7.10-10.13.4.1614</version><version>1.16.5-36.2.42</version><version>1.17.1-37.1.1</version><version>1.20.1-47.2.0</version><version>1.20.1-47.3.0</version><version>1.20.1-47.3.10</version><version>1.12.2-14.23.5.2860</version><version>1.12.2-14.23.5.2847-1.12.2</version></versions></versioning></metadata>";
 
 #[test]
 fn forge_catalogue_filters_old_versions_and_uses_promotions() {
     let promos = json!({"homepage": "x", "promos": {"1.20.1-latest": "47.3.10", "1.20.1-recommended": "47.2.0", "1.17.1-latest": "37.1.1", "1.16.5-recommended": "36.2.39", "1.21-latest": "51.0.1"}});
     let c = parse_forge(&promos, FORGE_XML);
-    assert_eq!(c.iter().map(|(m, _, _)| m.as_str()).collect::<Vec<_>>(), ["1.21", "1.20.1", "1.17.1"]);
+    assert_eq!(c.iter().map(|(m, _, _)| m.as_str()).collect::<Vec<_>>(), ["1.21", "1.20.1", "1.17.1", "1.16.5", "1.12.2"]);
     let (_, _, l) = &c[1];
     assert_eq!(ids(l), ["47.3.10", "47.3.0", "47.2.0"]);
     assert_eq!(l.iter().find(|x| x.recommended).unwrap().id, "47.2.0");
     // no recommended promotion: the "latest" one is recommended
     assert_eq!(c[2].2.iter().find(|x| x.recommended).unwrap().id, "37.1.1");
     assert_eq!(c[0].2[0].id, "51.0.1");
+    // legacy range: 1.7.10 stays out, 1.12.2 and 1.16.5 are in
+    assert_eq!(ids(&c[3].2), ["36.2.42", "36.2.39"]);
+    assert_eq!(c[3].2.iter().find(|x| x.recommended).unwrap().id, "36.2.39");
+    assert_eq!(ids(&c[4].2), ["14.23.5.2860"]);
+}
+
+#[test]
+fn legacy_forge_is_detected_annotated_and_uses_java_8() {
+    for g in ["1.12.2", "1.14.4", "1.16.5"] { assert!(legacy_forge_game(g), "{g}"); }
+    for g in ["1.17", "1.17.1", "1.20.1", "26.1"] { assert!(!legacy_forge_game(g), "{g}"); }
+    assert_eq!(LEGACY_JAVA, 8);
+    let mut j = to_json(&parse_forge(&json!({"promos": {}}), FORGE_XML));
+    annotate_legacy(&mut j);
+    let by = |id: &str| j["versions"].as_array().unwrap().iter().find(|v| v["id"] == id).unwrap().clone();
+    assert_eq!(by("1.12.2")["legacy"], true);
+    assert!(by("1.16.5")["note"].as_str().unwrap().contains("Java 11 and 16"));
+    assert!(by("1.20.1").get("legacy").is_none());
 }
 
 #[test]

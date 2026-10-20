@@ -308,6 +308,38 @@
             "items": {
               "type": "string"
             }
+          },
+          "remote": {
+            "type": "string",
+            "enum": [
+              "none",
+              "uploading",
+              "stored",
+              "failed"
+            ]
+          },
+          "remote_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remote_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remote_destination": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "name of the destination holding the remote copy"
+          },
+          "local_present": {
+            "type": "boolean",
+            "description": "false when only the remote copy remains; preview and download then answer 409 backup.remote_only until it is fetched"
           }
         },
         "additionalProperties": true
@@ -775,6 +807,179 @@
       },
       "Any": {
         "type": "object",
+        "additionalProperties": true
+      },
+      "BackupDestination": {
+        "type": "object",
+        "description": "A place backups are copied to. Credentials are write-only: access_key and secret_key read back as \"set\" or \"not set\".",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "folder",
+              "s3"
+            ]
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "keep_local": {
+            "type": "integer",
+            "description": "0 keeps every local copy; N keeps the newest N local archives once their remote copy is verified"
+          },
+          "keep_remote": {
+            "type": "integer",
+            "description": "newest remote copies to keep (at least 1; locked backups and the newest good copy are never removed)"
+          },
+          "path": {
+            "type": "string",
+            "description": "folder only"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "path_style": {
+            "type": "boolean"
+          },
+          "access_key": {
+            "type": "string",
+            "enum": [
+              "set",
+              "not set"
+            ]
+          },
+          "secret_key": {
+            "type": "string",
+            "enum": [
+              "set",
+              "not set"
+            ]
+          },
+          "stored_backups": {
+            "type": "integer",
+            "description": "list only: backups currently stored here"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "DestinationTest": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "StagedRestore": {
+        "type": "object",
+        "description": "A restore extracted next to the live server and waiting for an explicit promote. Detail (checks, diff) is present once status is ready.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "backup_id": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": "string"
+          },
+          "only": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "ready",
+              "failed",
+              "promoting",
+              "promoted"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "can_promote": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "blocking": {
+                  "type": "boolean"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "diff": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
         "additionalProperties": true
       }
     }
@@ -3433,7 +3638,7 @@
         "tags": [
           "backups"
         ],
-        "summary": "Restore as a new server or in place",
+        "summary": "Restore as a new server or in place. Body: mode, only?, staged? (in place only: extract and compare first, answers {operation, staged_id})",
         "x-permission": "backup.manage",
         "responses": {
           "202": {
@@ -4515,6 +4720,624 @@
             }
           }
         }
+      }
+    },
+    "/backups/{id}/upload": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Copy a local backup to the server's destination (also the retry after a failure)",
+        "x-permission": "backup.manage",
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/backups/{id}/fetch": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Download the remote copy of a remote-only backup and verify its checksum",
+        "x-permission": "backup.manage",
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/backup-destinations": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "List backup destinations",
+        "x-permission": "admin.settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BackupDestination"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Add a destination (kind folder or s3; S3 needs access_key and secret_key)",
+        "x-permission": "admin.settings",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupDestination"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Any"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backup-destinations/test": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Test settings that are not saved yet: write, read back, list and delete a small file",
+        "x-permission": "admin.settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationTest"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Any"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backup-destinations/{id}": {
+      "patch": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Edit a destination; omitted credentials are kept",
+        "x-permission": "admin.settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupDestination"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Any"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Remove a destination (409 destination.in_use unless force=true)",
+        "x-permission": "admin.settings",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ]
+      }
+    },
+    "/backup-destinations/{id}/test": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Test a saved destination",
+        "x-permission": "admin.settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationTest"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/servers/{id}/backup-destination": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Which destination this server's backups use",
+        "x-permission": "backup.manage",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "destination_id": {
+                      "type": "string",
+                      "description": "default, none, or a destination id"
+                    },
+                    "effective": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Choose a destination for this server (administrators): default, none or a destination id",
+        "x-permission": "admin.settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "destination_id": {
+                      "type": "string",
+                      "description": "default, none, or a destination id"
+                    },
+                    "effective": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Any"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/servers/{id}/staged-restores": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Staged restores of a server",
+        "x-permission": "backup.manage",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StagedRestore"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/staged-restores/{id}": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "A staged restore with its checks and the diff against the live server",
+        "x-permission": "backup.manage",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedRestore"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Discard a staged restore and its files",
+        "x-permission": "backup.manage",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/staged-restores/{id}/promote": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Promote: re-check, take a safety backup, swap atomically, keep the old files under removed/",
+        "x-permission": "backup.manage",
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     }
   }

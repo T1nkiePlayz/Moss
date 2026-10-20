@@ -24,7 +24,7 @@
 
 <div class="page-head">
   <div><h1>Servers</h1><p>{servers.list.length} total · {count('running')} running</p></div>
-  <a class="btn primary" href="#/servers/new"><Icon name="plus" size={16} />New server</a>
+  <div class="row g6"><a class="btn" href="#/servers/import"><Icon name="download" size={16} />Import</a><a class="btn primary" href="#/servers/new"><Icon name="plus" size={16} />New server</a></div>
 </div>
 
 <div class="row wrap" style="margin-bottom:10px">

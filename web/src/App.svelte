@@ -22,6 +22,7 @@
   const routes = {
     servers: () => import('./routes/Servers.svelte'),
     new: () => import('./routes/NewServer.svelte'),
+    import: () => import('./routes/ImportServer.svelte'),
     server: () => import('./routes/Server.svelte'),
     backups: () => import('./routes/AllBackups.svelte'),
     activity: () => import('./routes/Activity.svelte'),
@@ -54,7 +55,7 @@
     { href: '#/activity', name: 'activity', label: 'Activity', icon: 'activity' },
     { href: '#/settings', name: 'settings', label: 'Settings', icon: 'settings' },
   ];
-  const cur = $derived(router.route.name === 'new' || router.route.name === 'server' ? 'servers' : router.route.name);
+  const cur = $derived(router.route.name === 'new' || router.route.name === 'import' || router.route.name === 'server' ? 'servers' : router.route.name);
   const guard = $derived(router.route.name === 'users' && !isAdmin());
 </script>
 

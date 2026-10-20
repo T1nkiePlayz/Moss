@@ -405,7 +405,7 @@ const ensureLimits = (s: A.Server) => {
 const imageOf = (s: A.Server) => s.container?.image_override ?? `docker.io/library/eclipse-temurin:${s.java_major}-jre`;
 const ensureIsolation = (s: A.Server) => {
   s.isolation ??= 'process';
-  s.container = { image: imageOf(s), image_override: s.container?.image_override ?? null, running_in_container: s.container?.running_in_container ?? false, restart_needed: false };
+  s.container = { image: imageOf(s), image_override: s.container?.image_override ?? null, running_in_container: s.container?.running_in_container ?? false, restart_needed: false, network: s.container?.network ?? 'open', extra_ports: s.container?.extra_ports ?? [] };
 };
 const worldSets: Record<string, string[]> = {};
 const normalize = () => {
@@ -568,22 +568,27 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
   }
   if (p === '/container/status') {
     return noEngine
-      ? { available: false, engine: null, version: null, rootless: null, message: 'Neither Docker nor Podman was found. Install one of them (rootless Podman is the safest choice), make sure the user running Moss can use it, then check again.', outbound_restricted: false, default_image: 'docker.io/library/eclipse-temurin:<java version>-jre' }
-      : { available: true, engine: 'podman', version: '5.2.2', rootless: true, message: null, outbound_restricted: false, default_image: 'docker.io/library/eclipse-temurin:<java version>-jre' };
+      ? { available: false, engine: null, version: null, rootless: null, message: 'Neither Docker nor Podman was found. Install one of them (rootless Podman is the safest choice), make sure the user running Moss can use it, then check again.', outbound_restricted: false, game_only_supported: false, default_image: 'docker.io/library/eclipse-temurin:<java version>-jre' }
+      : { available: true, engine: 'podman', version: '5.2.2', rootless: true, message: null, outbound_restricted: false, game_only_supported: false, default_image: 'docker.io/library/eclipse-temurin:<java version>-jre' };
   }
   if (M(/^\/servers\/([^/]+)\/container\/pull$/)) {
     const s = sv(m![1]);
     return op2('container.pull', `Download ${imageOf(s)}`, s.id, ['Pulling fs layer', 'Downloading', 'Extracting', 'Verifying'], () => {});
   }
-  if (M(/^\/servers\/([^/]+)$/) && method === 'PATCH' && ('isolation' in b || 'container_image' in b)) {
+  if (M(/^\/servers\/([^/]+)$/) && method === 'PATCH' && ('isolation' in b || 'container_image' in b || 'network' in b || 'extra_ports' in b)) {
     const s = sv(m![1]);
     const fields: { path: string; message: string }[] = [];
     if (b.isolation && !['process', 'container'].includes(b.isolation)) fields.push({ path: 'isolation', message: 'process | container' });
     if (b.container_image && !/^(ghcr\.io\/|(docker\.io\/library\/)?eclipse-temurin:|azul\/zulu-openjdk:|amazoncorretto:)/.test(b.container_image)) fields.push({ path: 'container_image', message: 'Only eclipse-temurin, azul/zulu-openjdk, amazoncorretto and ghcr.io images are allowed.' });
+    if (b.network && !['open', 'game-only'].includes(b.network)) fields.push({ path: 'network', message: 'open | game-only' });
+    if (b.extra_ports && (b.extra_ports.length > 8 || b.extra_ports.some((x: { port: number }) => x.port < 1024 || x.port > 65535))) fields.push({ path: 'extra_ports', message: 'At most 8 ports, each 1024-65535' });
     if (fields.length) throw new ApiError(400, 'validation', 'Some values are not allowed', fields);
+    if (b.network === 'game-only') throw new ApiError(409, 'container.network_failed', 'Game-only networking is not available with Podman: Moss only knows how to restrict outbound traffic safely with Docker.', [{ path: 'network', message: 'game-only is not available' }]);
     if (b.isolation === 'container' && noEngine) throw new ApiError(409, 'container.engine_missing', 'Neither Docker nor Podman was found. Install one of them, then try again.');
     if (b.isolation) s.isolation = b.isolation;
     if ('container_image' in b) s.container = { ...s.container!, image_override: b.container_image ?? null };
+    if (b.network) s.container = { ...s.container!, network: b.network };
+    if (b.extra_ports) s.container = { ...s.container!, extra_ports: b.extra_ports };
     ensureIsolation(s);
     s.container!.restart_needed = (s.state === 'running' || s.state === 'starting') && s.container!.running_in_container !== (s.isolation === 'container');
     log('server.isolation', s.name, s.isolation);

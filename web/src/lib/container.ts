@@ -1,5 +1,5 @@
 // Container isolation wording and input checks (pure).
-import type { ContainerStatus } from './api';
+import type { ContainerStatus, ExtraPort } from './api';
 
 export interface EngineInfo { tone: 'ok' | 'warn'; badge: string; detail: string }
 
@@ -24,8 +24,26 @@ export function imageHint(raw: string): string | null {
   return full ? null : 'Only eclipse-temurin, azul/zulu-openjdk, amazoncorretto and ghcr.io images are allowed.';
 }
 
+/** "19132/udp, 24454/tcp" (a bare number means TCP) to a port list, or the first problem in plain words. */
+export function parseExtraPorts(text: string): { ports: ExtraPort[]; error: string | null } {
+  const ports: ExtraPort[] = [];
+  for (const raw of text.split(/[\s,]+/).filter(Boolean)) {
+    const m = /^(\d{1,5})(?:\/(tcp|udp))?$/i.exec(raw);
+    if (!m) return { ports, error: `"${raw}" is not a port. Write it like 19132/udp.` };
+    const port = Number(m[1]);
+    if (port < 1024 || port > 65535) return { ports, error: `${port} is outside 1024-65535.` };
+    const proto = (m[2]?.toLowerCase() ?? 'tcp') as ExtraPort['proto'];
+    if (ports.some((p) => p.port === port && p.proto === proto)) return { ports, error: `${port}/${proto} is listed twice.` };
+    ports.push({ port, proto });
+  }
+  if (ports.length > 8) return { ports, error: 'At most 8 extra ports.' };
+  return { ports, error: null };
+}
+export const formatExtraPorts = (p: ExtraPort[] | undefined) => (p ?? []).map((x) => `${x.port}/${x.proto}`).join(', ');
+
 export const ISOLATION_NOTES = [
   'Only the server folder is shared with the container, the game port is the only port opened, and the container cannot gain extra privileges.',
-  'The server can still reach the internet and the rest of your network: outbound traffic is not restricted.',
-  'Plugin ports other than the game port (Geyser, voice chat) are not opened.',
+  'With the Open network the server can still reach the internet and the rest of your network. Game-only blocks new outgoing connections to the internet.',
+  'Game-only needs Docker. It also stops online-mode servers from reaching Mojang to check player accounts, so use it for servers behind a proxy that signs players in, or in offline mode. The computer Moss runs on stays reachable from the server.',
+  'Plugins that need their own ports (voice chat, Geyser) work once you list those ports below.',
 ];

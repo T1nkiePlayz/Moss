@@ -36,9 +36,13 @@ pub struct Srv {
     pub container_image: Option<String>,
     /// The current run was launched in a container (survives a mode change until the next start).
     pub in_container: bool,
+    /// Container network: `open` (default bridge) or `game-only`.
+    pub network: String,
+    /// JSON `[{"port":19132,"proto":"udp"}]`, published in container mode only.
+    pub extra_ports: String,
 }
 
-pub const COLS: &str = "id,name,runtime,game_version,loader_version,java_major,port,memory_mb,flags_profile,autostart,restart_enabled,restart_max,eula_at,desired,installed,install_error,pid,pid_start,tags,notes,custom_cmd,created_at,memory_limit_mb,cpu_limit_pct,pids_limit,isolation,container_image,in_container";
+pub const COLS: &str = "id,name,runtime,game_version,loader_version,java_major,port,memory_mb,flags_profile,autostart,restart_enabled,restart_max,eula_at,desired,installed,install_error,pid,pid_start,tags,notes,custom_cmd,created_at,memory_limit_mb,cpu_limit_pct,pids_limit,isolation,container_image,in_container,network,extra_ports";
 
 impl Srv {
     pub fn from_row(r: &Row) -> rusqlite::Result<Srv> {
@@ -50,6 +54,7 @@ impl Srv {
             custom_cmd: r.get::<_, Option<String>>(20)?.and_then(|s| serde_json::from_str(&s).ok()), created_at: r.get(21)?,
             memory_limit_mb: r.get(22)?, cpu_limit_pct: r.get(23)?, pids_limit: r.get(24)?,
             isolation: r.get(25)?, container_image: r.get(26)?, in_container: r.get(27)?,
+            network: r.get(28)?, extra_ports: r.get(29)?,
         })
     }
     pub fn dir(&self, st: &Inner) -> PathBuf { st.cfg.servers_dir().join(&self.id) }

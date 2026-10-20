@@ -121,6 +121,8 @@ pub(super) struct PatchReq {
     #[serde(default, deserialize_with = "limits::double_option")] cpu_limit_pct: Option<Option<i64>>,
     #[serde(default, deserialize_with = "limits::double_option")] pids_limit: Option<Option<i64>>,
     isolation: Option<String>,
+    network: Option<String>,
+    extra_ports: Option<Vec<crate::container::ports::ExtraPort>>,
     #[serde(default, deserialize_with = "limits::double_option")] container_image: Option<Option<String>>,
 }
 #[derive(Deserialize)] struct RestartPolicy { enabled: bool, max_per_10m: i64 }
@@ -137,8 +139,10 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     if let Some(port) = p.port {
         if !(1..=65535).contains(&port) { return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")); }
         if server::list_all(&st).await?.iter().any(|o| o.id != id && o.port == port) { return Err(ApiError::conflict("port.taken", "port already assigned to another Moss server").field("port", "already assigned")); }
+        if crate::container::ports::clashes_with_extra(port, &id, &server::list_all(&st).await?) { return Err(ApiError::conflict("port.taken", "port is used as an extra port by another Moss server").field("port", "already assigned")); }
     }
     let iso = isolation_patch(&st, &user, &s, &p).await?;
+    let net = network_patch(&st, &user, &s, &p).await?;
     let now = crate::db::now();
     let (i, p2, now2) = (id.clone(), (p.name.clone(), p.memory_mb, p.port, p.flags_profile.clone(), p.autostart, p.restart_policy.as_ref().map(|r| (r.enabled, r.max_per_10m.clamp(0, 20))), p.tags.clone().map(|t| serde_json::to_string(&t.into_iter().map(|x| x.trim().chars().take(32).collect::<String>()).filter(|x| !x.is_empty()).take(12).collect::<Vec<_>>()).unwrap()), p.notes.clone(), p.accept_eula), now);
     st.db.call(move |c| {
@@ -156,6 +160,7 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     }).await?;
     limits::save(&st, &id, lim).await?;
     if let Some((mode, image)) = iso { apply_isolation(&st, &user, &s, mode, image).await?; }
+    if let Some((network, extra)) = net { apply_network(&st, &user, &s, network, extra).await?; }
     if p.accept_eula == Some(true) && s.eula_at.is_none() {
         st.audit(&user.actor(), "eula.accept", &s.name, "Minecraft EULA accepted", Some(&id)).await;
         if s.installed { let _ = tokio::fs::write(s.dir(&st).join("eula.txt"), "# Accepted via Moss by the server owner (https://aka.ms/MinecraftEULA)\neula=true\n").await; }
@@ -186,6 +191,40 @@ async fn isolation_patch(st: &St, user: &User, s: &Srv, p: &PatchReq) -> ApiResu
         }
     }
     Ok(Some((mode, image)))
+}
+
+/// Validate `network` and `extra_ports` (admin only). Returns the values to store. `game-only` needs container mode, an
+/// engine that can do it (never silently downgraded) and a network that can actually be created.
+async fn network_patch(st: &St, user: &User, s: &Srv, p: &PatchReq) -> ApiResult<Option<(String, String)>> {
+    use crate::container::ports as cp;
+    if p.network.is_none() && p.extra_ports.is_none() { return Ok(None); }
+    user.require_admin()?;
+    let network = p.network.clone().unwrap_or_else(|| s.network.clone());
+    if cp::Network::parse(&network).is_none() { return Err(ApiError::bad("validation", "unknown network mode").field("network", "open | game-only")); }
+    let extra = match &p.extra_ports {
+        Some(l) => {
+            let all = server::list_all(st).await?;
+            cp::validate(l, p.port.unwrap_or(s.port), &s.id, &all).map_err(|m| ApiError::bad("validation", m.clone()).field("extra_ports", &m))?;
+            serde_json::to_string(l).unwrap_or_else(|_| "[]".into())
+        }
+        None => s.extra_ports.clone(),
+    };
+    if network == "game-only" && (p.network.is_some() || p.isolation.is_some()) {
+        if p.isolation.as_deref().unwrap_or(&s.isolation) != "container" { return Err(ApiError::conflict("container.not_enabled", "game-only networking needs container isolation").field("network", "choose container isolation first")); }
+        let eng = crate::container::engine(st).await.map_err(|m| ApiError::conflict("container.engine_missing", m).field("network", "no container engine"))?;
+        tokio::task::spawn_blocking(move || eng.ensure_gameonly_network()).await.map_err(anyhow::Error::from)?
+            .map_err(|e| ApiError::conflict("container.network_failed", e.to_string()).field("network", "game-only is not available"))?;
+    }
+    Ok(Some((network, extra)))
+}
+
+async fn apply_network(st: &St, user: &User, s: &Srv, network: String, extra: String) -> ApiResult<()> {
+    let (i, n, x) = (s.id.clone(), network.clone(), extra.clone());
+    st.db.call(move |c| c.execute("UPDATE servers SET network=?, extra_ports=? WHERE id=?", rusqlite::params![n, x, i])).await?;
+    if network != s.network || extra != s.extra_ports {
+        st.audit(&user.actor(), "server.network", &s.name, &format!("{network}, extra ports {extra}"), Some(&s.id)).await;
+    }
+    Ok(())
 }
 
 async fn apply_isolation(st: &St, user: &User, s: &Srv, mode: String, image: Option<String>) -> ApiResult<()> {

@@ -73,7 +73,7 @@ pub fn write_user_jvm_args(dir: &Path, s: &Srv) -> std::io::Result<()> {
 /// Test fixture: a minimal installed server record.
 #[cfg(test)]
 pub fn test_srv(runtime: &str, game: &str, loader: Option<&str>, profile: &str) -> Srv {
-    Srv { id: "x".into(), name: "x".into(), runtime: runtime.into(), game_version: game.into(), loader_version: loader.map(String::from), java_major: 21, port: 25565, memory_mb: 4096, memory_limit_mb: None, cpu_limit_pct: None, pids_limit: None, isolation: "process".into(), container_image: None, in_container: false,
+    Srv { id: "x".into(), name: "x".into(), runtime: runtime.into(), game_version: game.into(), loader_version: loader.map(String::from), java_major: 21, port: 25565, memory_mb: 4096, memory_limit_mb: None, cpu_limit_pct: None, pids_limit: None, isolation: "process".into(), container_image: None, in_container: false, network: "open".into(), extra_ports: "[]".into(),
         flags_profile: profile.into(), autostart: false, restart_enabled: false, restart_max: 3, eula_at: None, desired: "stopped".into(), installed: true, install_error: None,
         pid: None, pid_start: None, tags: vec![], notes: String::new(), custom_cmd: None, created_at: String::new() }
 }

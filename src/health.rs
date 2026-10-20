@@ -26,6 +26,16 @@ async fn container_finding(st: &St, s: &Srv) -> Option<Value> {
         Some(json!({"label": "Open settings", "kind": "open_tab", "tab": "settings"}))))
 }
 
+/// Critical when a server is set to the game-only network but the engine cannot provide it (never falls back to open).
+async fn network_finding(st: &St, s: &Srv) -> Option<Value> {
+    if s.isolation != "container" || s.network == "open" { return None; }
+    let eng = crate::container::engine(st).await.ok()?; // a missing engine is the container finding's business
+    let why = tokio::task::spawn_blocking(move || eng.ensure_gameonly_network()).await.ok()?.err()?;
+    Some(finding(format!("{}:network", s.id), "critical", Some(&s.id), "Game-only network not available",
+        format!("This server is set to the game-only network, so it will not start until that works: {why}"), vec!["network: game-only".into()],
+        Some(json!({"label": "Open settings", "kind": "open_tab", "tab": "settings"}))))
+}
+
 pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
     let mut f = vec![];
     let (state, detail) = server::state_of(s, st);
@@ -40,6 +50,7 @@ pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
     }
     f.extend(limits_finding(s));
     f.extend(container_finding(st, s).await);
+    f.extend(network_finding(st, s).await);
     if all.iter().any(|o| o.id != s.id && o.port == s.port) {
         f.push(finding(format!("{}:port", s.id), "warn", Some(&s.id), "Port shared with another server", format!("Port {} is assigned to more than one Moss server; only one can run at a time.", s.port), vec![format!("port {}", s.port)], Some(json!({"label": "Open settings", "kind": "open_tab", "tab": "settings"}))));
     }

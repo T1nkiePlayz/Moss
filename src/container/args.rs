@@ -1,6 +1,6 @@
 //! The one fixed container command line, as pure functions so tests can assert the exact argv. There is no
 //! parameter for extra flags, mounts, devices, capabilities or privileged mode anywhere in this module.
-use super::{EngineInfo, Kind, OnceSpec, RunSpec};
+use super::{EngineInfo, Kind, OnceSpec, RunSpec, ports::{self, Network}};
 
 pub const DATA: &str = "/data";
 pub const LABEL: &str = "moss.managed=true";
@@ -34,6 +34,19 @@ fn hardening(info: &EngineInfo, uid: u32, gid: u32, memory_mb: u64, pids: u32) -
     a
 }
 
+/// Moss's own bridge with masquerading off: published ports still work (DNAT, replies via conntrack) but a new
+/// outbound connection leaves with a private source address nothing routes back. DNS is pointed at an unroutable
+/// address so the embedded resolver does not forward to the host's resolvers.
+fn game_only(info: &EngineInfo) -> Vec<String> {
+    let dns = match info.kind { Kind::Podman => "--dns=none".to_string(), Kind::Docker => "--dns=192.0.2.1".to_string() };
+    vec!["--network".into(), ports::GAMEONLY_NET.into(), dns]
+}
+
+/// `docker network create` arguments for the game-only network.
+pub fn gameonly_network_args() -> Vec<String> {
+    ["network", "create", "--driver", "bridge", "--opt", "com.docker.network.bridge.enable_ip_masquerade=false", ports::GAMEONLY_NET].map(String::from).into()
+}
+
 /// `docker run` arguments (after the CLI name) for a long-running game server.
 pub fn run_args(info: &EngineInfo, s: &RunSpec) -> Vec<String> {
     let mut a: Vec<String> = ["run", "--detach", "--name"].map(String::from).into();
@@ -44,6 +57,8 @@ pub fn run_args(info: &EngineInfo, s: &RunSpec) -> Vec<String> {
     a.extend(["-v".into(), mount(&s.dir, s.selinux), "-w".into(), DATA.into()]);
     // only the game port, published on the same number inside and out so the port the UI shows is the real one
     a.extend(["-p".into(), format!("{0}:{0}/tcp", s.port)]);
+    for e in &s.extra_ports { a.extend(["-p".into(), format!("{0}:{0}/{1}", e.port, e.proto.name())]); }
+    if s.network == Network::GameOnly { a.extend(game_only(info)); }
     a.extend(["-e".into(), "HOME=/data".into(), "-e".into(), "LANG=C.UTF-8".into()]);
     a.extend(["--entrypoint".into(), "/bin/sh".into(), s.image.clone(), "-c".into(), RUN_SCRIPT.into(), "moss-run".into()]);
     a.extend(s.argv.iter().cloned());
@@ -69,7 +84,7 @@ mod tests {
 
     pub fn info(kind: Kind, rootless: bool) -> EngineInfo { EngineInfo { kind, cli: PathBuf::from("/usr/bin/docker"), version: "27".into(), rootless } }
     pub fn spec() -> RunSpec {
-        RunSpec { name: "moss-abc".into(), server_id: "abc".into(), image: "docker.io/library/eclipse-temurin:21-jre".into(), dir: PathBuf::from("/srv/moss/servers/abc"), port: 25570,
+        RunSpec { name: "moss-abc".into(), server_id: "abc".into(), image: "docker.io/library/eclipse-temurin:21-jre".into(), dir: PathBuf::from("/srv/moss/servers/abc"), port: 25570, network: Network::Open, extra_ports: vec![],
             memory_mb: 3072, cpus: Some(1.5), pids: 4096, uid: 1000, gid: 1001, selinux: false, argv: vec!["java".into(), "-Xmx2048M".into(), "-jar".into(), "server.jar".into(), "nogui".into()] }
     }
 
@@ -97,6 +112,29 @@ mod tests {
             let mounts: Vec<&String> = a.iter().zip(a.iter().skip(1)).filter(|(f, _)| *f == "-v").map(|(_, v)| v).collect();
             assert_eq!(mounts, ["/srv/moss/servers/abc:/data"]);
         }
+    }
+
+    #[test]
+    fn game_only_adds_the_network_dns_and_extra_ports_only() {
+        let mut s = spec();
+        s.network = Network::GameOnly;
+        s.extra_ports = vec![ports::ExtraPort { port: 19132, proto: ports::Proto::Udp }, ports::ExtraPort { port: 24454, proto: ports::Proto::Tcp }];
+        let a = run_args(&info(Kind::Docker, false), &s);
+        let at = |f: &str| a.iter().position(|x| x == f).map(|i| a[i + 1].clone());
+        assert_eq!(at("--network").as_deref(), Some("moss-gameonly"));
+        assert!(a.contains(&"--dns=192.0.2.1".to_string()));
+        let published: Vec<&str> = a.iter().zip(a.iter().skip(1)).filter(|(f, _)| *f == "-p").map(|(_, v)| v.as_str()).collect();
+        assert_eq!(published, ["25570:25570/tcp", "19132:19132/udp", "24454:24454/tcp"]);
+        assert!(run_args(&info(Kind::Podman, true), &s).contains(&"--dns=none".to_string()));
+        let open = run_args(&info(Kind::Docker, false), &spec());
+        assert!(!open.iter().any(|x| x == "--network" || x.starts_with("--dns")), "open mode keeps the default bridge");
+        assert!(!a.iter().any(|x| x == "--network=host" || x == "host"));
+    }
+
+    #[test]
+    fn gameonly_network_has_masquerading_off() {
+        let a = gameonly_network_args();
+        assert_eq!(a, ["network", "create", "--driver", "bridge", "--opt", "com.docker.network.bridge.enable_ip_masquerade=false", "moss-gameonly"]);
     }
 
     #[test]

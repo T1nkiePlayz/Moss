@@ -202,7 +202,7 @@ pub async fn diff(State(st): State<St>, user: User, Path((id, file)): Path<(Stri
 mod tests {
     use super::*;
     fn srv(runtime: &str, version: &str) -> Srv {
-        Srv { id: "s".into(), name: "n".into(), runtime: runtime.into(), game_version: version.into(), loader_version: None, java_major: 21, port: 25565, memory_mb: 1024, isolation: "process".into(), container_image: None, in_container: false, flags_profile: "balanced".into(),
+        Srv { id: "s".into(), name: "n".into(), runtime: runtime.into(), game_version: version.into(), loader_version: None, java_major: 21, port: 25565, memory_mb: 1024, isolation: "process".into(), container_image: None, in_container: false, network: "open".into(), extra_ports: "[]".into(), flags_profile: "balanced".into(),
             autostart: false, restart_enabled: true, restart_max: 3, eula_at: None, desired: "stopped".into(), installed: true, install_error: None, pid: None, pid_start: None,
             tags: vec![], notes: String::new(), custom_cmd: None, created_at: String::new(), memory_limit_mb: None, cpu_limit_pct: None, pids_limit: None }
     }

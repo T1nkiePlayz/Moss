@@ -3,7 +3,7 @@
   "info": {
     "title": "Moss HTTP API",
     "version": "0.2.0",
-    "description": "Controller API of Moss. Base path /api/v1. Authenticate with a Supabase access token or a Moss API token (`moss_pat_\u2026`) as a Bearer token. Shapes are summarised here; docs/api.md has the prose reference."
+    "description": "Controller API of Moss. Base path /api/v1. Authenticate with a Supabase access token or a Moss API token (`moss_pat_…`) as a Bearer token. Shapes are summarised here; docs/api.md has the prose reference."
   },
   "servers": [
     {
@@ -277,6 +277,33 @@
               },
               "restart_needed": {
                 "type": "boolean"
+              },
+              "network": {
+                "type": "string",
+                "enum": [
+                  "open",
+                  "game-only"
+                ]
+              },
+              "extra_ports": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1024,
+                      "maximum": 65535
+                    },
+                    "proto": {
+                      "type": "string",
+                      "enum": [
+                        "tcp",
+                        "udp"
+                      ]
+                    }
+                  }
+                }
               }
             }
           }
@@ -4851,6 +4878,9 @@
                     },
                     "default_image": {
                       "type": "string"
+                    },
+                    "game_only_supported": {
+                      "type": "boolean"
                     }
                   }
                 }

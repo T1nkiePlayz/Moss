@@ -9,6 +9,7 @@ use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, Mutex, Onc
 pub mod args;
 pub mod cli;
 pub mod image;
+pub mod ports;
 pub mod pull;
 #[cfg(test)]
 pub mod fake;
@@ -31,6 +32,9 @@ pub struct RunSpec {
     /// Host server directory, the only bind mount (at `/data`).
     pub dir: PathBuf,
     pub port: u16,
+    pub network: ports::Network,
+    /// Extra TCP/UDP ports published on the same number inside and out.
+    pub extra_ports: Vec<ports::ExtraPort>,
     pub memory_mb: u64,
     pub cpus: Option<f64>,
     pub pids: u32,
@@ -58,6 +62,9 @@ pub trait Engine: Send + Sync {
     /// Pull an image; `on_line` receives progress lines and returns false to cancel.
     fn pull(&self, image: &str, on_line: &mut dyn FnMut(&str) -> bool) -> Result<()>;
     fn run(&self, spec: &RunSpec) -> Result<()>;
+    /// Create the `moss-gameonly` network if missing (idempotent) and verify it has masquerading off. Errors with a
+    /// plain-language reason, including when this engine cannot do it (Podman).
+    fn ensure_gameonly_network(&self) -> Result<()>;
     /// `Ok(None)` = the container does not exist; `Err` = the engine could not answer (never read that as "gone").
     fn inspect(&self, name: &str) -> Result<Option<Inspect>>;
     /// Names of running Moss containers (one call for all servers).
@@ -83,6 +90,7 @@ pub fn supported(s: &Srv, dev_runtimes: bool) -> bool { s.is_mc() || (s.runtime 
 /// The `container` object of the server view.
 pub fn view(s: &Srv) -> Value {
     json!({"image": image::for_server(s), "image_override": s.container_image, "running_in_container": s.in_container,
+        "network": s.network, "extra_ports": ports::parse_stored(&s.extra_ports),
         "restart_needed": s.in_container != (s.isolation == "container") && s.pid.is_some()})
 }
 

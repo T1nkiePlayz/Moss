@@ -27,8 +27,8 @@ case "$cmd" in
         --rm) rmflag=1; shift ;;
         --name) name="$2"; shift 2 ;;
         -v) src="${2%%:/data*}"; shift 2 ;;
-        -p) port="${2%%:*}"; shift 2 ;;
-        --label|-w|-e|--user|--tmpfs) shift 2 ;;
+        -p) [ -z "$port" ] && port="${2%%:*}"; shift 2 ;;
+        --label|-w|-e|--user|--tmpfs|--network) shift 2 ;;
         --entrypoint) shift 2; image="$1"; shift; break ;;
         -*) shift ;;
         *) image="$1"; shift; break ;;
@@ -77,5 +77,16 @@ case "$cmd" in
     name="${*: -1}"; [ -d "$STATE/c/$name" ] || nosuch "$name"; echo "stub container log for $name" ;;
   stats)
     for a in "$@"; do case "$a" in -*|"{{"*) ;; *) n="$a"; is_running "$n" && echo "$n|7.50%|256MiB / 1GiB" ;; esac; done; exit 0 ;;
+  network) # network inspect --format F NAME | network create ... NAME (state kept as files; options recorded)
+    sub="${1:-}"; shift
+    case "$sub" in
+      inspect) n="${*: -1}"; [ -f "$STATE/net-$n" ] || { echo "Error response from daemon: network $n not found" >&2; exit 1; }
+        [ -n "${STUB_NET_MASQ:-}" ] && { echo "$STUB_NET_MASQ"; exit 0; }; cat "$STATE/net-$n" ;;
+      create) [ -n "${STUB_NET_FAIL:-}" ] && { echo "Error response from daemon: network create denied" >&2; exit 1; }
+        n="${*: -1}"; v=true; for a in "$@"; do case "$a" in *enable_ip_masquerade=false) v=false ;; esac; done
+        [ -f "$STATE/net-$n" ] && { echo "Error response from daemon: network with name $n already exists" >&2; exit 1; }
+        echo "$v" > "$STATE/net-$n"; echo "netid-$n" ;;
+      *) echo "stub docker: unsupported network subcommand: $sub" >&2; exit 2 ;;
+    esac ;;
   *) echo "stub docker: unsupported subcommand: $cmd" >&2; exit 2 ;;
 esac

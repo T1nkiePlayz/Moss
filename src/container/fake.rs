@@ -14,6 +14,8 @@ pub struct Fake {
     pub down: Mutex<bool>,
     /// A container that exits immediately after `run`.
     pub die_on_start: Mutex<bool>,
+    /// Set to make `ensure_gameonly_network` fail with this message.
+    pub net_error: Mutex<Option<String>>,
     pub stats_out: Mutex<HashMap<String, Stat>>,
 }
 
@@ -44,6 +46,11 @@ impl Engine for Fake {
         self.runs.lock().unwrap().push(spec.clone());
         let i = if *self.die_on_start.lock().unwrap() { exited(1, false) } else { running(4242) };
         self.set(&spec.name, i);
+        Ok(())
+    }
+    fn ensure_gameonly_network(&self) -> Result<()> {
+        self.rec("ensure_gameonly_network")?;
+        if let Some(m) = self.net_error.lock().unwrap().clone() { bail!("{m}"); }
         Ok(())
     }
     fn inspect(&self, name: &str) -> Result<Option<Inspect>> { self.rec(format!("inspect {name}"))?; Ok(self.containers.lock().unwrap().get(name).cloned()) }

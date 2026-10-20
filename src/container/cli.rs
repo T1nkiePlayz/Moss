@@ -92,6 +92,25 @@ impl Engine for CliEngine {
         let a = args::run_args(&self.info, spec);
         self.run_ok(&a, Duration::from_secs(120)).map(|_| ())
     }
+    fn ensure_gameonly_network(&self) -> Result<()> {
+        if self.info.kind == Kind::Podman { bail!("{PODMAN_NO_GAMEONLY}"); }
+        const FMT: &str = "{{index .Options \"com.docker.network.bridge.enable_ip_masquerade\"}}";
+        let net = super::ports::GAMEONLY_NET;
+        let check = || -> Result<Option<String>> {
+            let o = exec(&self.info.cli, &s(&["network", "inspect", "--format", FMT, net]), Duration::from_secs(20))?;
+            if o.code == 0 { return Ok(Some(o.stdout.trim().to_string())); }
+            if not_found(&o.stderr) { return Ok(None); }
+            bail!("could not inspect the network {net}: {}", first_line(&o.stderr))
+        };
+        let verify = |v: String| if v == "false" { Ok(()) } else { Err(anyhow!("the network {net} exists but was not created by Moss (outbound masquerading is on); remove it with `docker network rm {net}` and try again")) };
+        if let Some(v) = check()? { return verify(v); }
+        let o = exec(&self.info.cli, &args::gameonly_network_args(), Duration::from_secs(30))?;
+        if o.code != 0 {
+            // lost a race with another creator: fine if it now exists and is right
+            return match check() { Ok(Some(v)) => verify(v), _ => bail!("could not create the network {net}: {}", first_line(&o.stderr)) };
+        }
+        verify(check()?.unwrap_or_default())
+    }
     fn inspect(&self, name: &str) -> Result<Option<Inspect>> {
         let o = exec(&self.info.cli, &s(&["inspect", "--type", "container", "--format", INSPECT_FMT, name]), Duration::from_secs(20))?;
         if o.code == 0 { return parse_inspect(&o.stdout).map(Some); }
@@ -130,6 +149,8 @@ impl Engine for CliEngine {
         self.stream(&a, on_line, timeout, Some(s(&["rm", "--force", &spec.name])))
     }
 }
+
+pub const PODMAN_NO_GAMEONLY: &str = "Game-only networking is not available with Podman: Moss only knows how to restrict outbound traffic safely with Docker's bridge options. Use the open network, or run this server under Docker.";
 
 const INSPECT_FMT: &str = "{{.State.Status}}|{{.State.Running}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.State.Pid}}";
 

@@ -448,9 +448,11 @@ export function openConsole(id: string, h: { onOpen(): void; onClose(): void; on
 
 // ===== Container isolation (optional Docker/Podman mode) =====
 export type Isolation = 'process' | 'container';
-export interface ServerContainer { image: string; image_override: string | null; running_in_container: boolean; restart_needed: boolean }
+export type ContainerNetwork = 'open' | 'game-only';
+export interface ExtraPort { port: number; proto: 'tcp' | 'udp' }
+export interface ServerContainer { image: string; image_override: string | null; running_in_container: boolean; restart_needed: boolean; network?: ContainerNetwork; extra_ports?: ExtraPort[] }
 export interface Server { isolation?: Isolation; container?: ServerContainer }
-export interface ContainerStatus { available: boolean; engine: 'docker' | 'podman' | null; version: string | null; rootless: boolean | null; message: string | null; outbound_restricted: boolean; default_image: string }
+export interface ContainerStatus { available: boolean; engine: 'docker' | 'podman' | null; version: string | null; rootless: boolean | null; message: string | null; outbound_restricted: boolean; game_only_supported?: boolean; default_image: string }
 
 export const errMsg = (x: unknown) => (x instanceof ApiError ? x.message : x instanceof Error ? x.message : String(x));
 
@@ -533,7 +535,7 @@ export const apiOps = {
   removeJava: (major: number) => send('DELETE', `/java/${major}`),
   reinstall: (id: string, keep_data: boolean) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/actions/reinstall`, { keep_data }),
   containerStatus: () => get<ContainerStatus>('/container/status'),
-  patchIsolation: (id: string, b: { isolation?: Isolation; container_image?: string | null }) => send<Server>('PATCH', `/servers/${e(id)}`, b),
+  patchIsolation: (id: string, b: { isolation?: Isolation; container_image?: string | null; network?: ContainerNetwork; extra_ports?: ExtraPort[] }) => send<Server>('PATCH', `/servers/${e(id)}`, b),
   pullImage: (id: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/container/pull`),
   patchLimits: (id: string, b: { memory_limit_mb: number | null; cpu_limit_pct: number | null; pids_limit: number | null }) => send<Server>('PATCH', `/servers/${e(id)}`, b),
 };

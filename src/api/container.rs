@@ -13,9 +13,9 @@ const DEFAULT_IMAGE: &str = "docker.io/library/eclipse-temurin:<java version>-jr
 async fn status_json(st: &St) -> Value {
     match crate::container::engine(st).await {
         Ok(e) => { let i = e.info(); json!({"available": true, "engine": i.kind.name(), "version": i.version, "rootless": i.rootless, "message": null, "outbound_restricted": false,
-            "default_image": DEFAULT_IMAGE}) }
+            "game_only_supported": i.kind == crate::container::Kind::Docker, "default_image": DEFAULT_IMAGE}) }
         Err(m) => json!({"available": false, "engine": null, "version": null, "rootless": null, "message": m, "outbound_restricted": false,
-            "default_image": DEFAULT_IMAGE}),
+            "game_only_supported": false, "default_image": DEFAULT_IMAGE}),
     }
 }
 

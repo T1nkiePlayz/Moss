@@ -19,7 +19,7 @@ pub fn limits(s: &Srv) -> (u64, Option<f64>, u32) {
 pub fn run_spec(st: &St, s: &Srv, argv: Vec<String>) -> RunSpec {
     let (memory_mb, cpus, pids) = limits(s);
     RunSpec {
-        name: container::container_name(&s.id), server_id: s.id.clone(), image: image::for_server(s), dir: s.dir(st), port: s.port as u16, memory_mb, cpus, pids,
+        name: container::container_name(&s.id), server_id: s.id.clone(), image: image::for_server(s), dir: s.dir(st), port: s.port as u16, network: container::ports::Network::parse(&s.network).unwrap_or(container::ports::Network::GameOnly), extra_ports: container::ports::parse_stored(&s.extra_ports), memory_mb, cpus, pids,
         uid: unsafe { libc::getuid() }, gid: unsafe { libc::getgid() }, selinux: selinux_enforcing(), argv,
     }
 }
@@ -36,6 +36,8 @@ pub async fn spawn(st: &St, s: &Srv, argv: Vec<String>) -> ApiResult<(i64, i64)>
         if !eng.image_present(&spec.image).map_err(|e| ApiError::conflict("container.engine_error", e.to_string()))? {
             return Err(ApiError::conflict("container.image_missing", format!("The container image {} has not been downloaded yet. Open this server's settings, Isolation, and choose Download image.", spec.image)));
         }
+        // never fall back to the open network: a game-only server whose network cannot be set up does not start
+        if spec.network == container::ports::Network::GameOnly { eng.ensure_gameonly_network().map_err(|e| ApiError::conflict("container.network_failed", format!("The game-only network could not be set up: {e}")))?; }
         let _ = eng.rm(&spec.name); // a stale, stopped container from an unclean exit
         eng.run(&spec).map_err(|e| ApiError::conflict("container.start_failed", format!("could not start the container: {e}")))?;
         let i = eng.inspect(&spec.name).map_err(|e| ApiError::conflict("container.start_failed", e.to_string()))?;
@@ -156,6 +158,27 @@ mod tests {
         assert_eq!((spec.name.as_str(), spec.port, spec.memory_mb, spec.cpus, spec.pids), ("moss-0190-aaaa", 25570, 3000, Some(1.5), 500));
         assert_eq!(spec.dir, s.dir(&st));
         assert!(crate::container::is_alive("moss-0190-aaaa"));
+    }
+
+    #[tokio::test]
+    async fn game_only_ensures_the_network_first_and_never_falls_back_to_open() {
+        let f = Arc::new(Fake::default());
+        let st = state(&f).await;
+        f.images.lock().unwrap().insert("docker.io/library/eclipse-temurin:21-jre".into());
+        let mut s = srv("0190-gggg");
+        s.network = "game-only".into(); s.extra_ports = r#"[{"port":19132,"proto":"udp"}]"#.into();
+        *f.net_error.lock().unwrap() = Some("denied".into());
+        let e = spawn(&st, &s, vec!["java".into()]).await.unwrap_err();
+        assert_eq!(e.code, "container.network_failed");
+        assert_eq!(f.calls_named("run "), 0, "no container is started on the open network instead");
+        *f.net_error.lock().unwrap() = None;
+        spawn(&st, &s, vec!["java".into()]).await.unwrap();
+        let spec = f.runs.lock().unwrap()[0].clone();
+        assert_eq!(spec.network, container::ports::Network::GameOnly);
+        assert_eq!(spec.extra_ports, vec![container::ports::ExtraPort { port: 19132, proto: container::ports::Proto::Udp }]);
+        // an unknown stored value fails closed, not open
+        let mut s2 = srv("0190-hhhh"); s2.network = "weird".into();
+        assert_eq!(run_spec(&st, &s2, vec![]).network, container::ports::Network::GameOnly);
     }
 
     #[tokio::test]

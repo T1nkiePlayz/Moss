@@ -79,7 +79,22 @@ describe('pulse', () => {
   });
 });
 
-import { describeEngine, imageHint } from './container';
+import { describeEngine, imageHint, parseExtraPorts, formatExtraPorts } from './container';
+describe('extra ports input', () => {
+  it('parses lists, defaults to tcp and formats back', () => {
+    const r = parseExtraPorts('19132/udp, 24454/UDP 25000');
+    expect(r.error).toBeNull();
+    expect(formatExtraPorts(r.ports)).toBe('19132/udp, 24454/udp, 25000/tcp');
+    expect(parseExtraPorts('').ports).toEqual([]);
+  });
+  it('explains what is wrong', () => {
+    expect(parseExtraPorts('80/tcp').error).toContain('1024-65535');
+    expect(parseExtraPorts('abc').error).toContain('not a port');
+    expect(parseExtraPorts('2000/udp 2000/udp').error).toContain('twice');
+    expect(parseExtraPorts(Array.from({ length: 9 }, (_, i) => 2000 + i).join(' ')).error).toContain('At most 8');
+    expect(parseExtraPorts('1024/icmp').error).toContain('not a port');
+  });
+});
 describe('container isolation text', () => {
   it('explains a missing engine in plain words', () => {
     const i = describeEngine({ available: false, engine: null, version: null, rootless: null, message: 'Neither Docker nor Podman was found.', outbound_restricted: false, default_image: '' });

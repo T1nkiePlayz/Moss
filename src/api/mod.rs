@@ -34,9 +34,10 @@ mod settings;
 mod setup;
 mod support;
 mod tokens;
+mod webhooks;
 
 use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
-use {metrics::*, notifications::*, support::*};
+use {metrics::*, notifications::*, support::*, webhooks::*};
 pub use servers::{create_server_from_value, free_port_for};
 
 type Q = Query<HashMap<String, String>>;
@@ -153,6 +154,12 @@ pub fn router(st: St) -> Router {
         .route("/notifications", get(notifications_list))
         .route("/notifications/read", post(notifications_read))
         .route("/notifications/test", post(notifications_test))
+        .route("/webhooks", get(webhooks_list).post(webhooks_create))
+        .route("/webhooks/{id}", patch(webhooks_patch).delete(webhooks_delete))
+        .route("/webhooks/{id}/rotate-secret", post(webhooks_rotate))
+        .route("/webhooks/{id}/test", post(webhooks_test))
+        .route("/webhooks/{id}/deliveries", get(webhooks_deliveries))
+        .route("/webhooks/{id}/deliveries/{did}/retry", post(webhooks_retry))
         .route("/servers/{id}/metrics", get(server_metrics))
         .route("/metrics/host", get(host_metrics))
         .route("/support-bundle", get(support_bundle))

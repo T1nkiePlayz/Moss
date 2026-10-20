@@ -82,6 +82,7 @@ The backend is organised by responsibility, each module with a `//!` doc at the 
 | `backups/remote/` | Backup destinations: folder and hand-written S3 (SigV4, streamed multipart) drivers, validators, the 0600 secrets file, upload/fetch/retention jobs, destination self-test. Credentials live only in `<data>/backup-secrets.json`; they are never in SQLite, the support bundle or API responses. Outbound S3 traffic uses the notify SSRF guard (resolve once, pin the address, no redirects). |
 | `backups/staged/` | Promote-after-compare restore: extract to `servers/.staged-<id>`, pre-promotion checks, diff against the live server, then an explicit atomic swap with the old directory kept in `removed/`. |
 | `notify/`, `history.rs` | Notifications and webhooks; hourly metric roll-ups. |
+| `webhooks/` | Event webhooks: a bus subscriber derives events (server state, player list diffs, operations), `publish` queues one signed delivery per matching endpoint in SQLite, a worker delivers with persisted backoff, dead-lettering and auto-disable. Reuses the notification SSRF guard. Secrets in `webhook-secrets.json` (0600). See `docs/webhooks.md`. |
 | `db/` | SQLite access and numbered migrations (`db/migrations/NNNN_name.sql`). |
 
 ## Platform differences

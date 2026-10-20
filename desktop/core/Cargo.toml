@@ -1,0 +1,15 @@
+[package]
+name = "moss-desktop-core"
+version = "0.2.0"
+edition = "2024"
+description = "Starts, finds and stops the bundled Moss controller for the desktop app (no GUI code)"
+license = "GPL-3.0-only"
+publish = false
+
+[dependencies]
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

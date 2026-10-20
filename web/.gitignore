@@ -2,3 +2,5 @@ node_modules
 dist
 *.local
 test-results/
+visual-report
+dist-mock

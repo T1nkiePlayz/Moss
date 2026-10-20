@@ -3,6 +3,7 @@ import { defineConfig } from '@playwright/test';
 // UI checks run against the mock backend (no Rust needed): every page renders without console errors and passes axe.
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: 'visual.spec.ts',
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',

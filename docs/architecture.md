@@ -84,6 +84,16 @@ The backend is organised by responsibility, each module with a `//!` doc at the 
 | `notify/`, `history.rs` | Notifications and webhooks; hourly metric roll-ups. |
 | `db/` | SQLite access and numbered migrations (`db/migrations/NNNN_name.sql`). |
 
+## Desktop app
+
+`desktop/` is a separate Cargo workspace (not part of the root build) holding a Tauri v2 shell around the unchanged controller.
+`desktop/core` is plain Rust with unit tests: it picks a free loopback port, starts the bundled `moss serve --auth supabase`
+as a detached process in its own process group (so closing the app never signals it), records `{pid, port}` in `controller.json`,
+reuses a healthy controller on the next launch, and stops it with SIGTERM on request. `desktop/src-tauri` adds the window (its
+navigation is limited to the controller's own `http://127.0.0.1:<port>` origin; other links open in the system browser), the
+tray icon, single-instance handling and the quit prompt. The window gets no Tauri commands (empty capability set). See
+[desktop.md](desktop.md).
+
 ## Platform differences
 
 Linux reads `/proc` for process and host numbers and, when the service unit delegates a cgroup subtree (`Delegate=yes`), enforces per-server memory, CPU and process limits and detects OOM kills. macOS uses libproc and sysctl; limits are not enforceable there and are reported as such. Process identity is PID plus start time on both, which is what makes re-attaching after a controller restart safe.

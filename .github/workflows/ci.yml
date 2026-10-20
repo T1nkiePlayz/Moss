@@ -42,6 +42,18 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: UI checks (every page renders cleanly and passes axe)
         run: npm run test:ui
+      - name: Visual regression (screenshots of key pages against the committed baselines)
+        run: npm run test:visual
+      - name: Keep the visual diffs when they fail
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-diffs
+          path: |
+            web/test-results/visual
+            web/visual-report
+          if-no-files-found: ignore
+          retention-days: 14
       - name: CurseForge edge function test
         working-directory: .
         run: node supabase/functions/curseforge/index.test.mts

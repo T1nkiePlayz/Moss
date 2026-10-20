@@ -1,6 +1,6 @@
 // Supabase GoTrue via plain fetch; the session lives in localStorage (best effort).
 import { api, ApiError, configureAuth, mockAuthCall, type AuthConfig, type Me } from './api';
-import { toast } from './stores.svelte';
+import { toast } from './feedback.svelte';
 
 interface Session { access_token: string; refresh_token: string; expires_at: number; email?: string }
 const KEY = 'moss.session';

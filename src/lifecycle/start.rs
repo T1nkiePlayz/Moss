@@ -108,7 +108,7 @@ pub async fn send_command(st: &St, s: &Srv, cmd: &str) -> ApiResult<()> {
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().write(true).custom_flags(libc::O_NONBLOCK).open(fifo)?;
         f.write_all(line.as_bytes())
-    }).await.map_err(|e| anyhow::anyhow!(e))?.map_err(|_| ApiError::conflict("server.not_running", "console is not accepting input"))?;
+    }).await.map_err(|e| anyhow::anyhow!(e))?.map_err(|e| if e.kind() == std::io::ErrorKind::WouldBlock { ApiError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "console.busy", "the server is not reading its console fast enough; try again in a moment") } else { ApiError::conflict("server.not_running", "console is not accepting input") })?;
     crate::console::push(&crate::console::hub(st, &s.id), format!("\x1b[36m> {cmd}\x1b[0m"));
     Ok(())
 }

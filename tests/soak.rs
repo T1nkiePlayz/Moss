@@ -105,6 +105,16 @@ impl Api {
             Err(e) => panic!("POST {path} failed: {e}"),
         }
     }
+    /// Waits for a server state; a timeout reports what the API says about the server.
+    async fn wait_state(&self, id: &str, label: &str, secs: u64, why: &str) -> Value {
+        let end = Instant::now() + Duration::from_secs(secs);
+        loop {
+            let s = self.server(id).await;
+            if s["state"] == label { return s; }
+            assert!(Instant::now() < end, "timed out waiting for server {id} to be {label} ({why}); API says: state={} detail={} desired={} pid={} since={}", s["state"], s["state_detail"], s["desired"], s["pid"], s["state_since"]);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
     async fn server(&self, id: &str) -> Value { self.get(&format!("/servers/{id}")).await.unwrap_or(Value::Null) }
     async fn wait_op(&self, id: &str) -> Value {
         until(&format!("operation {id} to finish"), 120, || async { let o = self.get(&format!("/operations/{id}")).await?; matches!(o["state"].as_str()?, "completed" | "failed" | "cancelled" | "interrupted").then_some(o) }).await
@@ -155,7 +165,7 @@ impl Soak {
     async fn settle_and_check(&mut self) {
         for (id, _, want) in self.servers.clone() {
             let (label, secs) = match want { Want::Running => ("running", 45), Want::Stopped => ("stopped", 45) };
-            until(&format!("server {id} to be {label}"), secs, || async { (self.api.server(&id).await["state"] == label).then_some(()) }).await;
+            self.api.wait_state(&id, label, secs, "settle check").await;
         }
         self.check_processes().await;
         self.check_ops().await;
@@ -212,7 +222,7 @@ impl Soak {
 
     async fn action(&mut self, i: usize, a: &'static str) {
         let id = self.servers[i].0.clone();
-        if a == "start" { until(&format!("{id} to be stopped before start"), 60, || async { (self.api.server(&id).await["state"] == "stopped").then_some(()) }).await; }
+        if a == "start" { self.api.wait_state(&id, "stopped", 60, "before start").await; }
         let (s, b) = self.api.post(&format!("/servers/{id}/actions/{a}"), json!({})).await;
         assert!(s < 300, "{a} on {id}: HTTP {s}: {b}");
         self.servers[i].2 = if matches!(a, "start" | "restart") { Want::Running } else { Want::Stopped };
@@ -221,7 +231,7 @@ impl Soak {
 
     async fn spam(&mut self, i: usize) {
         let id = self.servers[i].0.clone();
-        until("server to be running before spam", 45, || async { (self.api.server(&id).await["state"] == "running").then_some(()) }).await;
+        self.api.wait_state(&id, "running", 60, "before console spam").await;
         let mut bad = vec![];
         for chunk in 0..6 {
             let reqs = (0..50).map(|n| { let (c, url) = (self.api.c.clone(), format!("{}/servers/{id}/command", self.api.base)); async move {
@@ -231,7 +241,11 @@ impl Soak {
             } });
             for r in futures_util::future::join_all(reqs).await { match r { Ok((204 | 429, _)) => {}, other => bad.push(format!("{other:?}")) } }
         }
-        assert!(bad.is_empty(), "console spam got unexpected answers: {bad:?}");
+        if !bad.is_empty() {
+            let sv = self.api.server(&id).await;
+            let procs = sim_procs(&self.ports);
+            panic!("console spam on {id} got {} unexpected answers, first: {:?}; API says state={} detail={} pid={}; game processes {procs:?}", bad.len(), bad[0], sv["state"], sv["state_detail"], sv["pid"]);
+        }
         let backlog = self.api.get(&format!("/servers/{id}/console/backlog?lines=100")).await.expect("backlog after spam");
         assert!(backlog["lines"].as_array().is_some_and(|l| !l.is_empty()), "console backlog empty after spam");
         self.count("console_spam");
@@ -251,7 +265,7 @@ impl Soak {
 
     async fn restore(&mut self, i: usize) {
         let id = self.servers[i].0.clone();
-        if self.servers[i].2 == Want::Running { self.action(i, "stop").await; until("stop before restore", 40, || async { (self.api.server(&id).await["state"] == "stopped").then_some(()) }).await; }
+        if self.servers[i].2 == Want::Running { self.action(i, "stop").await; self.api.wait_state(&id, "stopped", 60, "before restore").await; }
         let mut list = self.api.get(&format!("/servers/{id}/backups")).await.unwrap();
         if list.as_array().is_none_or(|l| l.is_empty()) { self.backup_and_verify(i).await; list = self.api.get(&format!("/servers/{id}/backups")).await.unwrap(); }
         let ok: Vec<_> = list.as_array().unwrap().iter().filter(|b| b["status"] == "ok").collect();
@@ -285,19 +299,21 @@ impl Soak {
     async fn kill_controller(&mut self) {
         let before: BTreeMap<String, u64> = {
             let mut m = BTreeMap::new();
-            for (id, _, w) in &self.servers { if *w == Want::Running { m.insert(id.clone(), self.api.server(id).await["pid"].as_u64().unwrap_or(0)); } }
+            for (id, ..) in &self.servers { let s = self.api.server(id).await; if s["state"] == "running" { m.insert(id.clone(), s["pid"].as_u64().unwrap_or(0)); } }
             m
         };
         self.moss.sigkill();
-        for (id, port, w) in &self.servers {
-            if *w == Want::Running { assert!(std::net::TcpStream::connect_timeout(&format!("127.0.0.1:{port}").parse().unwrap(), Duration::from_secs(2)).is_ok(), "game {id} died with the controller"); }
+        for (id, port, _) in &self.servers {
+            if before.contains_key(id) { assert!(std::net::TcpStream::connect_timeout(&format!("127.0.0.1:{port}").parse().unwrap(), Duration::from_secs(2)).is_ok(), "game {id} died with the controller"); }
         }
         self.moss.restart();
         self.wait_ready().await;
         for (id, pid) in before {
-            let s = until(&format!("re-attach of {id}"), 45, || async { let s = self.api.server(&id).await; (s["state"] == "running").then_some(s) }).await;
+            let s = self.api.wait_state(&id, "running", 60, "re-attach after controller SIGKILL").await;
             assert_eq!(s["pid"].as_u64(), Some(pid), "controller must re-attach to the original process of {id}");
         }
+        // a restart or stop that the old controller never finished must be completed by the new one
+        for (id, _, w) in self.servers.clone() { self.api.wait_state(&id, if w == Want::Running { "running" } else { "stopped" }, 90, "after controller SIGKILL").await; }
         self.base_rss = None; // a fresh process has a fresh baseline
         self.count("controller_sigkill");
     }

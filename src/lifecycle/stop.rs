@@ -103,9 +103,11 @@ pub async fn restart(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
         stop_and_wait(&st2, &s2, Duration::from_secs(if s2.is_proxy() { 30 } else { 90 })).await;
         handle_exit(&st2, &s2.id).await;
         tokio::time::sleep(Duration::from_millis(800)).await;
+        // Someone may have pressed Stop or Kill while the restart was under way: that wish wins.
+        let Ok(fresh) = server::get(&st2, &s2.id).await else { return };
+        if fresh.desired == "stopped" { return; }
         st2.timeline(&s2.id, "restart", &actor2).await;
-        if let Ok(fresh) = server::get(&st2, &s2.id).await
-            && let Err(e) = start(&st2, &fresh, &actor2).await { set_detail(&st2, &s2.id, &format!("restart failed: {}", e.message)); }
+        if let Err(e) = start(&st2, &fresh, &actor2).await { set_detail(&st2, &s2.id, &format!("restart failed: {}", e.message)); }
     });
     let fresh = server::get(st, &s.id).await?;
     server::note_state(st, &fresh);

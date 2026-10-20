@@ -211,6 +211,117 @@ pub fn latest_index(m: &Value, game_version: Option<&str>, loader: u32) -> Optio
         .and_then(|i| Some((i["fileId"].as_u64()?.to_string(), i["filename"].as_str().unwrap_or_default().to_string())))
 }
 
+// ---------- file fingerprints (identify) ----------
+
+/// Minecraft's game id on CurseForge.
+pub const GAME_MINECRAFT: u32 = 432;
+
+/// CurseForge's file fingerprint: MurmurHash2 (32-bit, seed 1) over the file with the whitespace bytes 9, 10, 13 and 32
+/// removed. The seed mixes in the *filtered* length, so streaming callers count it first (`filtered_len`).
+pub struct Murmur2 { h: u32, buf: [u8; 4], fill: usize }
+
+const M2: u32 = 0x5bd1_e995;
+
+pub fn is_fp_space(b: u8) -> bool { matches!(b, 9 | 10 | 13 | 32) }
+
+impl Murmur2 {
+    pub fn new(filtered_len: u32) -> Self { Murmur2 { h: 1 ^ filtered_len, buf: [0; 4], fill: 0 } }
+    fn block(&mut self, k: u32) {
+        let mut k = k.wrapping_mul(M2);
+        k ^= k >> 24;
+        k = k.wrapping_mul(M2);
+        self.h = self.h.wrapping_mul(M2) ^ k;
+    }
+    /// Feed bytes that are already whitespace-filtered.
+    pub fn update(&mut self, data: &[u8]) {
+        for &b in data {
+            self.buf[self.fill] = b;
+            self.fill += 1;
+            if self.fill == 4 { let k = u32::from_le_bytes(self.buf); self.block(k); self.fill = 0; }
+        }
+    }
+    pub fn finish(mut self) -> u32 {
+        if self.fill > 0 {
+            for i in (0..self.fill).rev() { self.h ^= (self.buf[i] as u32) << (8 * i); }
+            self.h = self.h.wrapping_mul(M2);
+        }
+        self.h ^= self.h >> 13;
+        self.h = self.h.wrapping_mul(M2);
+        self.h ^ (self.h >> 15)
+    }
+}
+
+/// One-shot fingerprint of in-memory bytes (the streaming `Murmur2` is what identify uses on files).
+#[cfg(test)]
+pub fn fingerprint(data: &[u8]) -> u32 {
+    let filtered: Vec<u8> = data.iter().copied().filter(|b| !is_fp_space(*b)).collect();
+    let mut m = Murmur2::new(filtered.len() as u32);
+    m.update(&filtered);
+    m.finish()
+}
+
+/// A file CurseForge recognised by fingerprint.
+#[derive(Debug, PartialEq)]
+pub struct FpMatch { pub fingerprint: u32, pub mod_id: u64, pub file_id: u64, pub file_name: String, pub display_name: String }
+
+pub fn parse_fp_matches(v: &Value) -> Vec<FpMatch> {
+    v["data"]["exactMatches"].as_array().into_iter().flatten().filter_map(|m| {
+        let f = &m["file"];
+        Some(FpMatch { fingerprint: f["fileFingerprint"].as_u64()? as u32, mod_id: m["id"].as_u64().or_else(|| f["modId"].as_u64())?, file_id: f["id"].as_u64()?,
+            file_name: f["fileName"].as_str()?.to_string(), display_name: f["displayName"].as_str().or_else(|| f["fileName"].as_str())?.to_string() })
+    }).collect()
+}
+
+/// Looks up fingerprints (through the shared limiter). Only ids, names and versions leave this function; nothing is cached.
+pub async fn fingerprint_matches(st: &St, token: Option<&str>, fps: &[u32]) -> Result<Vec<FpMatch>> {
+    let body = json!({"fingerprints": fps});
+    Ok(parse_fp_matches(&call(st, token, Method::POST, &format!("/v1/fingerprints/{GAME_MINECRAFT}"), &[], Some(body)).await?))
+}
+
+/// Project names for ids in one batch call.
+pub async fn mod_names(st: &St, token: Option<&str>, ids: &[u64]) -> Result<std::collections::HashMap<u64, String>> {
+    let v = call(st, token, Method::POST, "/v1/mods", &[], Some(json!({"modIds": ids}))).await?;
+    Ok(v["data"].as_array().into_iter().flatten().filter_map(|m| Some((m["id"].as_u64()?, m["name"].as_str()?.to_string()))).collect())
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+
+    /// Vectors from an independent implementation of the reference MurmurHash2 (m = 0x5bd1e995, r = 24, seed 1); inputs with spaces are hashed without them.
+    #[test]
+    fn matches_reference_vectors() {
+        for (input, want) in [("", 1540447798u32), ("a", 626045324), ("ab", 1692487918), ("abc", 1621425345), ("abcd", 3376380438), ("hello world", 2824650221), ("The quick brown fox jumps over the lazy dog", 3751777527)] {
+            assert_eq!(fingerprint(input.as_bytes()), want, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn whitespace_bytes_are_ignored() {
+        assert_eq!(fingerprint(b"a b\n\tc\r d"), fingerprint(b"abcd"));
+        assert_eq!(fingerprint(b"a b\n\tc\r d"), 3376380438);
+        assert_ne!(fingerprint(b"abc\x0b"), fingerprint(b"abc")); // vertical tab (11) is not stripped
+    }
+
+    #[test]
+    fn streaming_in_odd_chunks_equals_one_shot() {
+        let data: Vec<u8> = (0..1000u32).map(|i| (i * 7 % 251) as u8).collect();
+        let filtered: Vec<u8> = data.iter().copied().filter(|b| !is_fp_space(*b)).collect();
+        for chunk in [1, 3, 5, 64, 999] {
+            let mut m = Murmur2::new(filtered.len() as u32);
+            for c in filtered.chunks(chunk) { m.update(c); }
+            assert_eq!(m.finish(), fingerprint(&data), "chunk {chunk}");
+        }
+    }
+
+    #[test]
+    fn parses_exact_matches() {
+        let v = json!({"data": {"exactMatches": [{"id": 306612, "file": {"id": 55, "modId": 306612, "fileName": "a-1.0.jar", "displayName": "A 1.0", "fileFingerprint": 3376380438u64}}, {"id": 1}]}});
+        assert_eq!(parse_fp_matches(&v), vec![FpMatch { fingerprint: 3376380438, mod_id: 306612, file_id: 55, file_name: "a-1.0.jar".into(), display_name: "A 1.0".into() }]);
+        assert!(parse_fp_matches(&json!({})).is_empty());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -29,3 +29,16 @@ pub(super) async fn compatible_versions(st: &St, pid: &str, c: &Compat) -> Resul
 pub(super) fn pick_latest(vs: &[Value]) -> Option<&Value> {
     ["release", "beta", "alpha"].iter().find_map(|ch| vs.iter().find(|v| v["version_type"] == *ch))
 }
+
+/// Identifies files by SHA-512 in one batch: `{hash: version}` for every file Modrinth knows. Not cached (the key set varies).
+pub(super) async fn version_files(st: &St, hashes: &[String]) -> Result<Value> {
+    let r = st.http.post(format!("{API}/version_files")).json(&json!({"hashes": hashes, "algorithm": "sha512"})).send().await.context("contacting Modrinth")?;
+    if r.status() == 429 { bail!("Modrinth rate limit reached — try again in a minute"); }
+    Ok(r.error_for_status().context("Modrinth returned an error")?.json::<Value>().await?)
+}
+
+/// Titles for project ids in one request.
+pub(super) async fn project_titles(st: &St, ids: &[String]) -> Result<HashMap<String, String>> {
+    let v = mr(st, "/projects", &[("ids", serde_json::to_string(ids)?)]).await?;
+    Ok(v.as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["title"].as_str()?.to_string()))).collect())
+}

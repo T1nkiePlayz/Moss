@@ -2,7 +2,7 @@
 use super::*;
 
 // ---------- planning ----------
-pub(super) struct Step { pub action: &'static str, pub project_id: String, pub title: String, pub version: Value, pub file: Value, pub replaces: Option<(String, String)>, pub reason: String }
+pub(super) struct Step { pub prov: Prov, pub action: &'static str, pub project_id: String, pub title: String, pub version: Value, pub file: Value, pub replaces: Option<(String, String)>, pub reason: String }
 
 pub(super) fn primary_file(v: &Value) -> Option<Value> {
     let files = v["files"].as_array()?;
@@ -69,7 +69,7 @@ pub(super) async fn build_plan_cf(st: &St, token: Option<&str>, s: &Srv, c: &Com
         let sha1 = file["hashes"].as_array().into_iter().flatten().find(|h| h["algo"] == 1).and_then(|h| h["value"].as_str()).map(String::from);
         let version = json!({"id": fid, "version_number": file["displayName"], "version_type": cf::channel(&file)});
         let file_j = json!({"filename": fname, "size": file["fileLength"], "url": file["downloadUrl"], "hashes": {"sha1": sha1}, "cf_mod": pid});
-        steps.push(Step { action, project_id: pid, title, version, file: file_j, replaces, reason });
+        steps.push(Step { prov: Prov::Curseforge, action, project_id: pid, title, version, file: file_j, replaces, reason });
     }
     steps.reverse();
     Ok((steps, warnings))
@@ -114,7 +114,7 @@ pub(super) async fn build_plan_mr(st: &St, s: &Srv, c: &Compat, project_id: &str
                 && let Some(dp) = d["project_id"].as_str()
                     && !installed.iter().any(|i| i["provider"] == "modrinth" && i["project_id"] == dp) { queue.push((dp.to_string(), d["version_id"].as_str().map(String::from))); }
         }
-        steps.push(Step { action, project_id: pid_real, title: proj["title"].as_str().unwrap_or("project").into(), version, file, replaces, reason });
+        steps.push(Step { prov: Prov::Modrinth, action, project_id: pid_real, title: proj["title"].as_str().unwrap_or("project").into(), version, file, replaces, reason });
     }
     steps.reverse();
     Ok((steps, warnings))
@@ -124,7 +124,18 @@ pub async fn plan(State(st): State<St>, user: User, Path(id): Path<String>, Json
     let (s, c) = compat_for(&st, &user, &id, "content.manage").await?;
     let src = src_for(&st, &user, &c, r.provider.as_deref())?;
     let (steps, warnings) = build_plan(&st, &src, &s, &c, &r.project_id, r.version_id.as_deref()).await.map_err(|e| match e.downcast_ref::<cf::CfError>() { Some(_) => upstream(e), None => ApiError::bad("plan.failed", format!("{e:#}")) })?;
-    Ok(Json(json!({"items": steps.iter().map(|x| json!({"action": x.action, "title": x.title, "filename": x.file["filename"], "size": x.file["size"], "reason": x.reason})).collect::<Vec<_>>(), "warnings": warnings, "requires_restart": true})))
+    Ok(Json(plan_json(&st, &s, &c, &steps, warnings).await?))
+}
+
+/// The ChangePlan response for resolved steps: items with versions, warnings, and the problems the plan would cause.
+pub(super) async fn plan_json(st: &St, s: &Srv, c: &Compat, steps: &[Step], mut warnings: Vec<String>) -> Result<Value> {
+    let installed = db_items(st, &s.id).await?;
+    let from = |x: &Step| x.replaces.as_ref().and_then(|(id, _)| installed.iter().find(|i| i["id"] == id.as_str())).and_then(|i| i["version_number"].as_str().map(String::from));
+    let changes: Vec<check::Change> = steps.iter().map(|x| check::Change { replaces: x.replaces.as_ref().map(|(id, _)| id.clone()), new_version: x.version["version_number"].as_str().unwrap_or_default().to_string() }).collect();
+    let conflicts = check::plan_conflicts(st, s, c, &changes).await.unwrap_or_default();
+    for f in &conflicts { warnings.push(format!("{}: {}", f.title, f.detail)); }
+    let items: Vec<Value> = steps.iter().map(|x| json!({"action": x.action, "title": x.title, "filename": x.file["filename"], "size": x.file["size"], "reason": x.reason, "version": x.version["version_number"], "from_version": from(x)})).collect();
+    Ok(json!({"items": items, "warnings": warnings, "conflicts": conflicts, "requires_restart": true}))
 }
 
 #[cfg(test)]

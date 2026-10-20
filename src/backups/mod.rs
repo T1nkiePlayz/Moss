@@ -20,7 +20,7 @@ pub use pre_change::{pre_change, pre_change_forced, pre_change_forced_locked, pr
 pub use create::do_backup;
 pub use preview::preview;
 pub use restore::restore;
-pub use archive::{extract_archive, verify_archive};
+pub use archive::{extract_archive_limited, verify_archive};
 /// Builds a real archive for tests of other modules.
 #[cfg(test)]
 pub fn build_archive_for_tests(root: std::path::PathBuf, out: std::path::PathBuf) -> (String, u64, u64) {

@@ -10,6 +10,8 @@ use serde_json::{Value, json};
 use std::path::{Component, Path, PathBuf};
 
 const MAX_BYTES: u64 = 200 << 30;
+/// What an uploaded archive may expand to: the upload itself is capped at 512 MiB, so a larger result is a decompression bomb.
+const UPLOAD_EXPANSION: u64 = 64 << 30;
 const MAX_ENTRIES: usize = 1_000_000;
 const STAGE_TTL_SECS: u64 = 6 * 3600;
 
@@ -195,7 +197,7 @@ async fn sweep(st: &St) {
 }
 
 /// Unpacks a zip or tar.zst into `dest` with every entry confined to it. Symlinks and special files are refused.
-pub fn extract(archive: &Path, dest: &Path, token: &tokio_util::sync::CancellationToken) -> Result<()> { extract_limited(archive, dest, token, MAX_BYTES) }
+pub fn extract(archive: &Path, dest: &Path, token: &tokio_util::sync::CancellationToken) -> Result<()> { extract_limited(archive, dest, token, UPLOAD_EXPANSION) }
 
 fn extract_limited(archive: &Path, dest: &Path, token: &tokio_util::sync::CancellationToken, max_bytes: u64) -> Result<()> {
     use std::io::Read;
@@ -224,7 +226,7 @@ fn extract_limited(archive: &Path, dest: &Path, token: &tokio_util::sync::Cancel
         }
         Ok(())
     } else if magic == [0x28, 0xB5, 0x2F, 0xFD] {
-        crate::backups::extract_archive(archive, dest, token, None)
+        crate::backups::extract_archive_limited(archive, dest, token, None, max_bytes)
     } else {
         bail!("Only .zip and .tar.zst files can be imported.")
     }

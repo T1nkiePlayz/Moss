@@ -117,7 +117,10 @@ pub fn verify_archive_scan(path: &FsPath, want: &str) -> Result<(u64, std::colle
 }
 
 /// Extract into `dest`; with `only`, just those top-level entries.
-pub fn extract_archive(path: &FsPath, dest: &FsPath, token: &tokio_util::sync::CancellationToken, only: Option<&[String]>) -> Result<()> {
+pub fn extract_archive(path: &FsPath, dest: &FsPath, token: &tokio_util::sync::CancellationToken, only: Option<&[String]>) -> Result<()> { extract_archive_limited(path, dest, token, only, 2u64 << 40) }
+
+/// Like `extract_archive` with an explicit cap on the bytes the archive may expand to (uploads use a much lower one).
+pub fn extract_archive_limited(path: &FsPath, dest: &FsPath, token: &tokio_util::sync::CancellationToken, only: Option<&[String]>, max_bytes: u64) -> Result<()> {
     std::fs::create_dir_all(dest)?;
     let mut ar = tar::Archive::new(zstd::Decoder::new(std::fs::File::open(path)?)?);
     ar.set_preserve_permissions(false);
@@ -133,7 +136,7 @@ pub fn extract_archive(path: &FsPath, dest: &FsPath, token: &tokio_util::sync::C
         if let Some(only) = only && !top_name(&p).is_some_and(|t| only.contains(&t)) { continue; }
         if !safe_entry_path(&p) || !matches!(e.header().entry_type(), tar::EntryType::Regular | tar::EntryType::Directory) { bail!("refusing unsafe archive entry {}", p.display()); }
         total += e.size();
-        if total > (2u64 << 40) { bail!("archive expands beyond the safety limit"); }
+        if total > max_bytes { bail!("archive expands beyond the safety limit"); }
         if !e.unpack_in(dest)? { bail!("entry {} would escape the destination", p.display()); }
     }
     Ok(())
@@ -182,6 +185,8 @@ mod tests {
         tar.into_inner().unwrap().finish().unwrap();
         extract_archive(&out, &dst, &tokio_util::sync::CancellationToken::new(), None).unwrap();
         assert!(dst.join("server.properties").is_file() && !dst.join(".moss").exists() && !dst.join(".MOSS").exists());
+        let e = extract_archive_limited(&out, &base.join("small"), &tokio_util::sync::CancellationToken::new(), None, 2).unwrap_err().to_string();
+        assert!(e.contains("safety limit"), "{e}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

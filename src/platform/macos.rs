@@ -1,11 +1,17 @@
 //! macOS: libproc for processes, sysctl/vm_stat/ps for host numbers.
 use super::GroupUsage;
-use std::{mem, process::Command, time::Instant};
+use std::{mem, process::Command, sync::Mutex, time::Instant};
+
+// libc deprecates its mach_timebase_info binding (in favour of the mach2 crate), and warnings are errors in CI,
+// so the one function we need is declared here. It lives in libSystem, which is always linked.
+#[repr(C)]
+struct TimebaseInfo { numer: u32, denom: u32 }
+unsafe extern "C" { fn mach_timebase_info(info: *mut TimebaseInfo) -> i32; }
 
 /// Nanoseconds per mach tick (1/1 on Intel, 125/3 on Apple silicon); libproc reports CPU time in mach ticks.
 fn timebase() -> (u64, u64) {
-    let mut t = libc::mach_timebase_info { numer: 0, denom: 0 };
-    if unsafe { libc::mach_timebase_info(&mut t) } != 0 || t.denom == 0 { return (1, 1); }
+    let mut t = TimebaseInfo { numer: 0, denom: 0 };
+    if unsafe { mach_timebase_info(&mut t) } != 0 || t.denom == 0 { return (1, 1); }
     (t.numer as u64, t.denom as u64)
 }
 
@@ -64,8 +70,19 @@ fn sysctl_u64(name: &str) -> Option<u64> {
     (r == 0).then_some(v)
 }
 
-/// (total, used) physical memory. "Used" follows Activity Monitor: everything except free, inactive and speculative pages.
+static MEM_CACHE: Mutex<Option<(Instant, (u64, u64))>> = Mutex::new(None);
+
+/// (total, used) physical memory, cached for two seconds because it costs a `vm_stat` subprocess.
 pub fn host_memory() -> (u64, u64) {
+    let mut c = MEM_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, v)) = *c && at.elapsed().as_secs() < 2 { return v; }
+    let v = read_host_memory();
+    *c = Some((Instant::now(), v));
+    v
+}
+
+/// "Used" follows Activity Monitor: everything except free, inactive and speculative pages.
+fn read_host_memory() -> (u64, u64) {
     let total = sysctl_u64("hw.memsize").unwrap_or(0);
     let Ok(out) = Command::new("vm_stat").output() else { return (total, 0) };
     let text = String::from_utf8_lossy(&out.stdout);
@@ -82,14 +99,12 @@ pub fn load1() -> f64 {
 
 #[derive(Default)]
 pub struct HostSampler {
-    prev: Option<Instant>,
     pub cpu_pct: f64,
 }
 
 impl HostSampler {
     /// Sum of per-process %cpu from `ps`, divided by the core count: close to Activity Monitor's total without mach APIs.
     pub fn sample(&mut self) {
-        self.prev = Some(Instant::now());
         let Ok(out) = Command::new("ps").args(["-A", "-o", "%cpu="]).output() else { return };
         let sum: f64 = String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse::<f64>().ok()).sum();
         let cores = sysctl_u64("hw.logicalcpu").unwrap_or(1).max(1) as f64;

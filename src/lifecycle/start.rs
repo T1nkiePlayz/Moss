@@ -3,7 +3,9 @@ use super::command::build_command;
 use crate::{error::{ApiError, ApiResult}, platform, server::{self, Srv}, state::St};
 use std::{os::unix::fs::OpenOptionsExt, time::Instant};
 
-const RUN_SCRIPT: &str = r#"echo $$ > "$MOSS_DIR/pid"; "$@" <>"$MOSS_DIR/console.fifo" >>"$MOSS_DIR/console.log" 2>&1; echo $? > "$MOSS_DIR/exit""#;
+// When MOSS_CGROUP is set the wrapper shell moves itself into that cgroup first, so the game and everything it forks
+// start inside the limits (no window in which they run unconfined).
+const RUN_SCRIPT: &str = r#"[ -n "$MOSS_CGROUP" ] && echo $$ > "$MOSS_CGROUP/cgroup.procs" 2>/dev/null; echo $$ > "$MOSS_DIR/pid"; "$@" <>"$MOSS_DIR/console.fifo" >>"$MOSS_DIR/console.log" 2>&1; echo $? > "$MOSS_DIR/exit""#;
 
 pub async fn start(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     {
@@ -24,7 +26,8 @@ async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     if tokio::net::TcpListener::bind(("0.0.0.0", s.port as u16)).await.is_err() {
         return Err(ApiError::conflict("port.in_use", format!("port {} is already in use on this host", s.port)));
     }
-    let argv = build_command(st, s)?;
+    // Java discovery may run `java -version`, so keep it off the async worker threads.
+    let argv = tokio::task::spawn_blocking({ let (st, s) = (st.clone(), s.clone()); move || build_command(&st, &s) }).await.map_err(anyhow::Error::from)??;
     let (dir, mdir) = (s.dir(st), s.moss_dir(st));
     std::fs::create_dir_all(&mdir)?;
     let fifo = mdir.join("console.fifo");
@@ -37,10 +40,12 @@ async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     if std::fs::metadata(&log).map(|m| m.len() > 0).unwrap_or(false) { let _ = std::fs::rename(&log, mdir.join("console.log.1")); }
     std::fs::write(&log, format!("[moss] starting {} ({} {})\n", s.name, s.runtime, s.game_version))?;
 
+    let cg_dir = limit_cgroup(st, s);
     let mut cmd = tokio::process::Command::new("/bin/sh");
     cmd.arg("-c").arg(RUN_SCRIPT).arg("moss-run").args(&argv).current_dir(&dir).env_clear()
-        .env("PATH", platform::GAME_PATH).env("HOME", &dir).env("LANG", "C.UTF-8").env("MOSS_DIR", &mdir)
+        .env("PATH", platform::GAME_PATH).env("HOME", &dir).env("LANG", platform::GAME_LANG).env("MOSS_DIR", &mdir)
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    if let Some(d) = &cg_dir { cmd.env("MOSS_CGROUP", d); }
     unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
     let mut child = cmd.spawn().map_err(|e| ApiError::conflict("spawn.failed", format!("could not launch: {e}")))?;
     let pid = child.id().unwrap_or(0) as i64;
@@ -61,6 +66,21 @@ async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     let fresh = server::get(st, &s.id).await?;
     server::note_state(st, &fresh);
     Ok(())
+}
+
+/// Create the server's cgroup with its limits (default memory cap for Java servers). None when limits cannot be enforced.
+fn limit_cgroup(st: &St, s: &Srv) -> Option<std::path::PathBuf> {
+    let cg = platform::cgroup::backend().ok()?;
+    let req = s.requested_limits();
+    let mem = req.memory_mb.map(|m| (m.max(0) as u64) << 20).or_else(|| s.is_mc().then(|| platform::cgroup::default_memory_cap(s.memory_mb)));
+    cg.remove(&s.id); // a leftover leaf from an unclean exit
+    match cg.apply(&s.id, mem, &req) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            crate::console::push(&crate::console::hub(st, &s.id), format!("\x1b[33m[moss] resource limits could not be applied: {e}\x1b[0m"));
+            None
+        }
+    }
 }
 
 pub async fn send_command(st: &St, s: &Srv, cmd: &str) -> ApiResult<()> {

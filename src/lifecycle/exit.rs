@@ -14,6 +14,8 @@ pub async fn handle_exit(st: &St, id: &str) {
     }
     let Ok(s) = server::get(st, id).await else { return };
     if s.pid.is_none() || process_alive(&s) { st.live.lock().unwrap().entry(id.to_string()).or_default().exiting = false; return; }
+    let oom = super::finish_cgroup(id);
+    if oom { crate::console::push(&crate::console::hub(st, id), "\x1b[31m[moss] the server was killed by the memory limit\x1b[0m".into()); }
     let code = std::fs::read_to_string(s.moss_dir(st).join("exit")).ok().and_then(|c| c.trim().parse::<i32>().ok());
     server::save_pid(st, id, None, None, Some(code.map_or("unknown (killed)".into(), |c| c.to_string()))).await;
     let stopping = { let l = st.live.lock().unwrap(); l.get(id).is_some_and(|l| l.stopping) };
@@ -30,7 +32,7 @@ pub async fn handle_exit(st: &St, id: &str) {
             l.crashes.retain(|t| t.elapsed() < Duration::from_secs(600));
             l.crashes.push(Instant::now());
             let n = l.crashes.len() as i64;
-            let why = code.map_or("killed".to_string(), |c| format!("exit code {c}"));
+            let why = if oom { "killed by the memory limit".to_string() } else { code.map_or("killed".to_string(), |c| format!("exit code {c}")) };
             if s.restart_enabled && n <= s.restart_max {
                 let delay = (2u64.pow(n as u32)).min(60);
                 l.restart_at = Some(Instant::now() + Duration::from_secs(delay));

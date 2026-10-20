@@ -13,6 +13,7 @@ struct CustomCmd { command: Vec<String> }
 pub(super) struct CreateReq {
     name: String, runtime: String, game_version: String, loader_version: Option<String>, memory_mb: Option<i64>, port: Option<i64>,
     accept_eula: Option<bool>, flags_profile: Option<String>, autostart: Option<bool>, custom: Option<CustomCmd>,
+    memory_limit_mb: Option<i64>, cpu_limit_pct: Option<i64>, pids_limit: Option<i64>,
 }
 
 pub(super) async fn free_port(_st: &St, preferred: i64, used: &[i64]) -> i64 {
@@ -44,6 +45,8 @@ pub(super) async fn servers_create(State(st): State<St>, user: User, Json(r): Js
         ("custom", _) => return Err(ApiError::bad("validation", "custom runtime needs a non-empty command array").field("custom.command", "required")),
         _ => None,
     };
+    let lim = limits::LimitsPatch { memory: Some(r.memory_limit_mb), cpu: Some(r.cpu_limit_pct), pids: Some(r.pids_limit) };
+    limits::validate_now(&lim)?;
     let flags = r.flags_profile.filter(|f| f == "balanced" || f == "minimal").unwrap_or_else(|| "balanced".into());
     let existing: Vec<i64> = server::list(&st).await?.iter().map(|s| s.port).collect();
     let default_port = if r.runtime == "velocity" { 25577 } else { 25565 };
@@ -59,6 +62,7 @@ pub(super) async fn servers_create(State(st): State<St>, user: User, Json(r): Js
     st.db.call(move |c| c.execute(
         "INSERT INTO servers(id,name,runtime,game_version,loader_version,port,memory_mb,flags_profile,autostart,eula_at,eula_by,custom_cmd,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rusqlite::params![row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10, row.11, row.12])).await?;
+    limits::save(&st, &id, lim).await?;
     let s = server::get(&st, &id).await?;
     tokio::fs::create_dir_all(s.dir(&st)).await?;
     if is_mc { st.audit(&user.email, "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
@@ -76,6 +80,9 @@ pub(super) async fn server_get(State(st): State<St>, user: User, Path(id): Path<
 pub(super) struct PatchReq {
     name: Option<String>, memory_mb: Option<i64>, port: Option<i64>, flags_profile: Option<String>, autostart: Option<bool>,
     restart_policy: Option<RestartPolicy>, tags: Option<Vec<String>>, notes: Option<String>, accept_eula: Option<bool>,
+    #[serde(default, deserialize_with = "limits::double_option")] memory_limit_mb: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "limits::double_option")] cpu_limit_pct: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "limits::double_option")] pids_limit: Option<Option<i64>>,
 }
 #[derive(Deserialize)] struct RestartPolicy { enabled: bool, max_per_10m: i64 }
 
@@ -84,6 +91,8 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     let s = server::get(&st, &id).await?;
     if let Some(n) = &p.name && (n.trim().is_empty() || n.chars().count() > 48) { return Err(ApiError::bad("validation", "invalid name").field("name", "1–48 characters")); }
     if let Some(m) = p.memory_mb && !(256..=262144).contains(&m) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", "256–262144")); }
+    let lim = limits::LimitsPatch { memory: p.memory_limit_mb, cpu: p.cpu_limit_pct, pids: p.pids_limit };
+    limits::validate_now(&lim)?;
     if let Some(f) = &p.flags_profile && f != "balanced" && f != "minimal" { return Err(ApiError::bad("validation", "unknown flags profile").field("flags_profile", "balanced | minimal")); }
     if let Some(port) = p.port {
         if !(1..=65535).contains(&port) { return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")); }
@@ -104,6 +113,7 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
         if eula == Some(true) { c.execute("UPDATE servers SET eula_at=COALESCE(eula_at,?), eula_by=COALESCE(eula_by,'owner') WHERE id=?", rusqlite::params![now2, i])?; }
         Ok(())
     }).await?;
+    limits::save(&st, &id, lim).await?;
     if p.accept_eula == Some(true) && s.eula_at.is_none() {
         st.audit(&user.email, "eula.accept", &s.name, "Minecraft EULA accepted", Some(&id)).await;
         if s.installed { let _ = tokio::fs::write(s.dir(&st).join("eula.txt"), "# Accepted via Moss by the server owner (https://aka.ms/MinecraftEULA)\neula=true\n").await; }
@@ -140,6 +150,7 @@ pub(super) async fn server_delete(State(st): State<St>, user: User, Path(id): Pa
         if wipe { c.execute("DELETE FROM backups WHERE server_id=?", [&i])?; }
         Ok(())
     }).await?;
+    lifecycle::cleanup_cgroup(&id);
     st.live.lock().unwrap().remove(&id);
     st.hubs.lock().unwrap().remove(&id);
     st.stats.lock().unwrap().remove(&id);

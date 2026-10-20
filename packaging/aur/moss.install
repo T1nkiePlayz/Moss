@@ -1,0 +1,3 @@
+post_install() {
+  echo "Edit /etc/moss/moss.env (Supabase URL, key, owner email), then: systemctl enable --now moss"
+}

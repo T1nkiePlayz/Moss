@@ -11,6 +11,8 @@ use std::{collections::HashMap, path::{Path, PathBuf}};
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 compile_error!("Moss supports Linux and macOS hosts only");
 
+pub mod cgroup;
+
 pub use imp::{HostSampler, group_usage_all, host_memory, load1, pid_start};
 
 /// Name Adoptium uses for this OS in its API (`os=` parameter).
@@ -47,12 +49,16 @@ pub fn system_java_candidates() -> Vec<PathBuf> {
             }
         }
     }
-    c.push(PathBuf::from("/usr/bin/java"));
+    // On macOS /usr/bin/java is a stub that pops up an "install Java" dialog when no JDK exists, so never run it there.
+    if cfg!(not(target_os = "macos")) { c.push(PathBuf::from("/usr/bin/java")); }
     c
 }
 
 /// The directories game servers inherit on PATH.
 pub const GAME_PATH: &str = if cfg!(target_os = "macos") { "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" } else { "/usr/local/bin:/usr/bin:/bin" };
+
+/// UTF-8 locale for game servers: macOS has no guaranteed `C.UTF-8`, but always has `en_US.UTF-8`.
+pub const GAME_LANG: &str = if cfg!(target_os = "macos") { "en_US.UTF-8" } else { "C.UTF-8" };
 
 pub fn disk(path: &Path) -> (u64, u64) {
     let Ok(c) = std::ffi::CString::new(path.to_string_lossy().as_bytes()) else { return (0, 0) };

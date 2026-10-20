@@ -4,7 +4,9 @@
 //! (schema present, `user_version` 0) are adopted without change.
 use rusqlite::Connection;
 
-const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("migrations/0001_init.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("migrations/0001_init.sql")),
+    ("0002_limits", include_str!("migrations/0002_limits.sql")),
+];
 
 pub fn run(c: &Connection) -> rusqlite::Result<()> {
     let applied: usize = c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?.max(0) as usize;

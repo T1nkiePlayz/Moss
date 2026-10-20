@@ -22,7 +22,7 @@ pub async fn reconcile(st: &St) -> anyhow::Result<()> {
             st.timeline(&s.id, "reattach", "controller restarted; server kept running").await;
             tracing::info!(server = %s.name, pid = ?s.pid, "re-attached to running server");
         } else {
-            if s.pid.is_some() { handle_exit(st, &s.id).await; }
+            if s.pid.is_some() { handle_exit(st, &s.id).await; } else { super::cleanup_cgroup(&s.id); }
             if s.desired == "running" || s.autostart { to_start.push(s.clone()); }
         }
     }

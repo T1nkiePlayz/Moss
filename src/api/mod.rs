@@ -27,6 +27,7 @@ mod java;
 mod limits;
 mod metrics;
 mod notifications;
+pub mod origin;
 mod reinstall;
 mod servers;
 mod session;

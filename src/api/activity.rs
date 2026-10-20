@@ -33,7 +33,8 @@ pub(super) async fn activity(State(st): State<St>, user: User, Query(q): Q) -> A
 }
 
 /// Server-sent events. A subscriber that fell behind the broadcast buffer gets `resync` (it must refetch its lists).
-pub(super) async fn events(State(st): State<St>, Query(q): Q) -> ApiResult<Response> {
+pub(super) async fn events(State(st): State<St>, headers: axum::http::HeaderMap, Query(q): Q) -> ApiResult<Response> {
+    super::origin::check(&st, &headers)?;
     let user = take_ticket(&st, q.get("ticket"))?;
     let vis = auth::visible_servers(&st, &user).await?;
     let admin = user.is_admin();

@@ -134,7 +134,8 @@ pub async fn backlog(State(st): State<St>, user: User, Path(id): Path<String>, Q
     Ok(axum::Json(serde_json::json!({"lines": lines})))
 }
 
-pub async fn ws(State(st): State<St>, Path(id): Path<String>, Query(q): Query<std::collections::HashMap<String, String>>, up: WebSocketUpgrade) -> Result<Response, ApiError> {
+pub async fn ws(State(st): State<St>, Path(id): Path<String>, Query(q): Query<std::collections::HashMap<String, String>>, headers: axum::http::HeaderMap, up: WebSocketUpgrade) -> Result<Response, ApiError> {
+    crate::api::origin::check(&st, &headers)?; // before the ticket is consumed
     let user = crate::api::take_ticket(&st, q.get("ticket"))?;
     auth::authz(&st, &user, &id, "server.console.read").await?;
     let s = crate::server::get(&st, &id).await?;

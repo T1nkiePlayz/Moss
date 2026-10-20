@@ -88,3 +88,56 @@ fn copy(src: &Path, dest: &Path, x: &Xfer) -> Result<(String, u64)> {
         Err(e) => { let _ = std::fs::remove_file(&part); Err(e) }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("moss-folder-{n}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn sha(b: &[u8]) -> String { hex::encode(Sha256::digest(b)) }
+
+    #[test]
+    fn keys_must_be_plain_components() {
+        assert!(safe_key("srv/b.tar.zst").is_ok());
+        for k in ["", "../x", "a/../b", "/abs", "a//b", "a/./b", "a\\b", "a/\0"] { assert!(safe_key(k).is_err(), "{k:?}"); }
+    }
+
+    #[tokio::test]
+    async fn put_head_get_list_delete_round_trip() {
+        let d = tmp("rt");
+        let (f, src) = (Folder::new(d.to_str().unwrap()), d.join("src.bin"));
+        let body: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&src, &body).unwrap();
+        let x = Xfer::new();
+        f.put(&src, "s1/b1.tar.zst", &x).await.unwrap();
+        assert_eq!(x.done(), body.len() as u64);
+        let info = f.head("s1/b1.tar.zst").await.unwrap().unwrap();
+        assert_eq!((info.size, info.sha256), (body.len() as u64, Some(sha(&body))));
+        assert!(f.head("s1/nope").await.unwrap().is_none());
+        let out = d.join("out.bin");
+        let (h, n) = f.get("s1/b1.tar.zst", &out, &Xfer::new()).await.unwrap();
+        assert_eq!((h, n, std::fs::read(&out).unwrap()), (sha(&body), body.len() as u64, body));
+        f.put(&src, "s2/b2.tar.zst", &Xfer::new()).await.unwrap();
+        assert_eq!(f.list("s1/").await.unwrap().len(), 1);
+        assert_eq!(f.list("").await.unwrap().len(), 2);
+        f.delete("s1/b1.tar.zst").await.unwrap();
+        f.delete("s1/b1.tar.zst").await.unwrap();
+        assert!(f.head("s1/b1.tar.zst").await.unwrap().is_none());
+        assert!(f.put(&src, "../escape", &Xfer::new()).await.is_err());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_copy_leaves_no_partial_object() {
+        let d = tmp("cancel");
+        let (f, src) = (Folder::new(d.to_str().unwrap()), d.join("src.bin"));
+        std::fs::write(&src, vec![1u8; 100_000]).unwrap();
+        let x = Xfer::new();
+        x.token.cancel();
+        assert!(f.put(&src, "s1/b.tar.zst", &x).await.is_err());
+        assert!(f.head("s1/b.tar.zst").await.unwrap().is_none());
+        let left: Vec<_> = std::fs::read_dir(d.join(SUBDIR).join("s1")).map(|r| r.flatten().collect()).unwrap_or_default();
+        assert!(left.is_empty(), "no .part file left behind");
+        let _ = std::fs::remove_dir_all(d);
+    }
+}

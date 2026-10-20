@@ -71,7 +71,7 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 **Backups** · manual and scheduled, checksummed `tar.zst`, verify, lock, world-aware listing, restore as a new server, in place or per world · **restore preview, or restore to a staging folder and promote after comparing** · **remote destinations**: a folder (for example a NAS mount) or any S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, MinIO), with upload retries, checksums and remote retention.
 
-**Schedules, operations, notifications** · backup, start, stop, restart and console-command schedules in an IANA time zone (daylight-saving aware) · every long job is a persisted, cancellable operation · in-app inbox plus optional Discord or generic webhook (HTTPS, SSRF-safe).
+**Schedules, operations, notifications** · backup, start, stop, restart and console-command schedules in an IANA time zone (daylight-saving aware) · every long job is a persisted, cancellable operation · in-app inbox plus optional Discord or generic webhook (HTTPS, SSRF-safe) · **signed event webhooks** (HMAC-SHA256, retries, auto-disable on repeated failure) for your own automation, see [docs/webhooks.md](docs/webhooks.md).
 
 **Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · support bundle with secrets redacted.
 
@@ -275,7 +275,10 @@ macOS binaries are built in CI and are ad-hoc signed, not notarised; see [docs/m
 
 ## Current limitations
 
-- Container mode does not restrict outbound network access, does not publish UDP plugin ports, and has only been tested against a stand-in for Docker and Podman. It is offered for Minecraft servers only.
+- Container mode has only been tested against a stand-in for Docker and Podman. Game-only networking (no outbound access) needs Docker; Podman is refused rather than weakened. It is offered for Minecraft servers only.
+- The desktop app source is in `desktop/` but has not been built or run yet; there are no desktop downloads.
+- Release checksums are signed with cosign, but no signed release has been published yet.
+- Moss has had an internal security review only; an external one is still to come.
 - CurseForge cannot say whether a mod is server-safe and never downloads files whose authors disabled third-party distribution.
 - Non-Minecraft games are not supported. Forge before 1.12.2 is not supported.
 - One node. Safety backups taken before risky changes stay local; scheduled and manual backups can go to a remote destination.
@@ -290,15 +293,15 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 
 | Milestone | Status | Done | Still to do |
 |---|---|---|---|
-| **M0 Foundations** | ✅ | Threat model, design decisions ([docs/adr](docs/adr)), kill-and-reattach tests | Written console-flood spike results |
+| **M0 Foundations** | ✅ | Threat model, design decisions ([docs/adr](docs/adr)), kill-and-reattach tests, [console-flood results](docs/spikes/console-flood.md) | |
 | **M1 Hello, server** | ✅ | Lifecycle, console, files, recovery CLI | |
 | **M2 Plugins** | ✅ | Modrinth and CurseForge, Paper-family config editors, outage tests | |
-| **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | |
-| **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode | Network restrictions for containers |
-| **M5 Polish** | 🟡 | Four themes plus editor, saved views, blueprints, import, search, axe suite | Visual-regression suite, desktop shell (Tauri), a smaller first load |
-| **M6 Open it up and 1.0** | 🟡 | OpenAPI document, MFA policy, API tokens | OpenAPI freeze, external security review, soak tests, signed checksums, event webhooks |
+| **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | Feedback from real S3 providers |
+| **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode with game-only network and extra UDP/TCP ports | Verification against real Docker and Podman |
+| **M5 Polish** | 🟡 | Four themes plus editor, saved views, blueprints and share codes, import, search, axe suite, visual-regression suite, first load of 34 KB, desktop shell source | Build and ship the desktop app (never compiled here) |
+| **M6 Open it up and 1.0** | 🟡 | OpenAPI document and [freeze with compatibility tests](docs/api-policy.md), MFA policy, API tokens, [event webhooks](docs/webhooks.md), [internal security review](docs/security-review.md), dependency audit, soak tests, cosign-signed checksums, [SECURITY.md](SECURITY.md) | External security review, a 20-minute release-profile soak, first signed release |
 
-**Next:** container network limits and UDP ports, smaller first load, and feedback from real remote-storage providers.
+**Next:** an external security review, trying container mode on real Docker and Podman, building the desktop app, and a first signed release.
 
 **After 1.0:** event workflows, multi-node, extensions and SDK, player analytics, other games, public status pages.
 
@@ -309,7 +312,10 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | [docs/curseforge.md](docs/curseforge.md) | How CurseForge works in Moss, limits, using your own key |
 | [docs/macos.md](docs/macos.md) | Running Moss on macOS |
 | [docs/recovery.md](docs/recovery.md) | `moss recover`: locked-out owner, stuck jobs, integrity |
-| [docs/threat-model.md](docs/threat-model.md) | What Moss defends against and what it does not |
+| [docs/threat-model.md](docs/threat-model.md) · [docs/security-review.md](docs/security-review.md) · [SECURITY.md](SECURITY.md) | What Moss defends against, what the internal review found, how to report a problem |
+| [docs/webhooks.md](docs/webhooks.md) | Signed event webhooks and how to verify them |
+| [docs/api-policy.md](docs/api-policy.md) | The frozen API and what counts as a breaking change |
+| [docs/desktop.md](docs/desktop.md) | The desktop app |
 | [docs/architecture.md](docs/architecture.md) · [docs/adr](docs/adr) | How it works and why |
 | [docs/api.md](docs/api.md) · [docs/openapi.json](docs/openapi.json) | HTTP API reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing and releasing |

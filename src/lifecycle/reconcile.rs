@@ -1,5 +1,5 @@
 //! Startup reconciliation: re-attach to servers that survived, account for ones that died, autostart.
-use super::{exit::handle_exit, process_alive, set_detail, start::start};
+use super::{exit::handle_exit, process_alive, set_detail, start::start, stop::stop_and_wait};
 use crate::{server, state::St};
 use std::time::{Duration, Instant};
 
@@ -26,6 +26,18 @@ pub async fn reconcile(st: &St) -> anyhow::Result<()> {
             if unknown { set_detail(st, &s.id, "the container engine is not reachable right now; Moss will pick the server up when it is"); }
             crate::console::start_tailer(st, s.id.clone(), s.moss_dir(st).join("console.log"), true);
             st.timeline(&s.id, "reattach", "controller restarted; server kept running").await;
+            // `stop` records the wish first and delivers it from a background task, so a controller that died in between
+            // leaves a live process whose desired state is already "stopped". Finish that stop instead of reporting a
+            // server the user asked to stop as running forever.
+            if s.desired == "stopped" && !unknown {
+                st.live.lock().unwrap().entry(s.id.clone()).or_default().stopping = true;
+                st.timeline(&s.id, "stop", "finishing a stop requested before the controller restarted").await;
+                let (st2, s2) = (st.clone(), s.clone());
+                tokio::spawn(async move {
+                    stop_and_wait(&st2, &s2, Duration::from_secs(if s2.is_proxy() { 30 } else { 90 })).await;
+                    handle_exit(&st2, &s2.id).await;
+                });
+            }
             tracing::info!(server = %s.name, pid = ?s.pid, "re-attached to running server");
         } else {
             if s.pid.is_some() { handle_exit(st, &s.id).await; } else { super::cleanup_cgroup(&s.id); }

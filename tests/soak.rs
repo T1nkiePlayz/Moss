@@ -212,6 +212,7 @@ impl Soak {
 
     async fn action(&mut self, i: usize, a: &'static str) {
         let id = self.servers[i].0.clone();
+        if a == "start" { until(&format!("{id} to be stopped before start"), 60, || async { (self.api.server(&id).await["state"] == "stopped").then_some(()) }).await; }
         let (s, b) = self.api.post(&format!("/servers/{id}/actions/{a}"), json!({})).await;
         assert!(s < 300, "{a} on {id}: HTTP {s}: {b}");
         self.servers[i].2 = if matches!(a, "start" | "restart") { Want::Running } else { Want::Stopped };

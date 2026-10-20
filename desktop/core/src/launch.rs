@@ -130,8 +130,7 @@ mod tests {
         assert_eq!(state::read(d.path()), None);
     }
 
-    /// A stand-in `moss` (a shell script): serves /healthz with the port from `--port` using bash's /dev/tcp is not
-    /// portable, so it only sleeps and the health check is satisfied by a stub listener on the same port.
+    /// A stand-in `moss` that exits at once: starting fails quickly and the log keeps its output.
     #[test]
     fn a_controller_that_exits_early_fails_fast_with_the_log_hint() {
         let d = tempfile::tempdir().unwrap();

@@ -1,0 +1,5 @@
+/target/
+src-tauri/gen/
+src-tauri/icons/icon.icns
+src-tauri/icons/icon.ico
+src-tauri/resources/shipped.env

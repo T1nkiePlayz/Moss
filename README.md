@@ -34,7 +34,7 @@
 
 Moss installs, runs, watches, updates and backs up game servers on a machine you own. It is a single Rust binary that embeds its web UI, keeps state in SQLite, needs no Docker (container isolation is optional) and no hosted backend, and uses Supabase **only** to sign people in.
 
-- **Fast and small.** One binary, a Svelte UI with no UI framework (about 52 KB of JavaScript on first load, gzipped), live state over Server-Sent Events and WebSockets, no polling storms. Idle cost is a few tens of MB.
+- **Fast and small.** One binary, a Svelte UI with no UI framework (about 34 KB of JavaScript on first load, gzipped), live state over Server-Sent Events and WebSockets, no polling storms. Idle cost is a few tens of MB.
 - **Local first.** Server files, worlds, console logs and backups never leave your machine. The controller works offline except for downloads and the content catalogues.
 - **Honest about compatibility.** Plugins for Paper-family servers, mods for Fabric, Quilt, Forge and NeoForge, proxy plugins for Velocity, datapacks for Vanilla. Moss reads every jar, checks dependencies, versions and loaders, and tells you what is wrong before the server does.
 - **Recoverable.** Every change Moss makes can be undone, risky changes take a safety backup first, backups are checksummed and verifiable, and restores never delete what they replace.
@@ -278,7 +278,7 @@ macOS binaries are built in CI and are ad-hoc signed, not notarised; see [docs/m
 - Long-term metrics are hourly roll-ups kept 90 days.
 - Remote destinations were tested against a simulated S3 service; please report quirks with a specific provider.
 - If the host reboots, running servers stop; Moss restarts the ones that were running or have *autostart* set.
-- The first page load is about 52 KB of JavaScript (gzipped), above the 40 KB goal.
+- The first page load is about 34 KB of JavaScript (gzipped); each page loads its own code when you open it.
 
 ## Roadmap
 

@@ -1,0 +1,77 @@
+name: Moss Desktop
+
+# Builds the desktop app (a native window and tray icon around the Moss controller) for Linux and macOS.
+# Manual only: run it from the Actions tab. The bundles are uploaded as workflow artifacts.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: "appimage,deb" }
+          - { name: macos-aarch64, os: macos-14, target: aarch64-apple-darwin, bundles: "dmg" }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache Rust
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: desktop-${{ matrix.name }}
+          workspaces: |
+            . -> target
+            desktop -> target
+      - name: Install the window libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Build the web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Build the controller
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Test the desktop helper library
+        working-directory: desktop
+        run: cargo test -p moss-desktop-core
+      - name: Place the controller and the sign-in settings next to the app
+        run: |
+          mkdir -p desktop/src-tauri/binaries desktop/src-tauri/resources
+          cp target/${{ matrix.target }}/release/moss desktop/src-tauri/binaries/moss-${{ matrix.target }}
+          cp .env desktop/src-tauri/resources/shipped.env
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+      - name: Generate the app icons from the Moss logo
+        working-directory: desktop/src-tauri
+        run: cargo tauri icon ../../docs/brand/moss-logo-1024.png
+      - name: Build the app
+        working-directory: desktop/src-tauri
+        run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - name: Upload the bundles
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: moss-desktop-${{ matrix.name }}
+          path: |
+            desktop/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            desktop/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            desktop/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: error

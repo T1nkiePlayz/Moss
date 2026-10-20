@@ -47,7 +47,7 @@ pub fn take_ticket(st: &St, t: Option<&String>) -> ApiResult<User> {
 }
 
 pub fn router(st: St) -> Router {
-    use crate::{backups, blueprints, cfgfiles, console, content, files, health, importer, sched, undo, userdata};
+    use crate::{backups, blueprints, cfgfiles, console, content, files, health, importer, sched, search, undo, userdata};
     let api = Router::new()
         .route("/auth/config", get(auth_config))
         .route("/me", get(me))
@@ -59,6 +59,7 @@ pub fn router(st: St) -> Router {
         .route("/blueprints/{id}", axum::routing::delete(blueprints::delete))
         .route("/blueprints/{id}/export", get(blueprints::export))
         .route("/blueprints/{id}/create", post(blueprints::create))
+        .route("/search", get(search::search))
         .route("/ticket", post(ticket))
         .route("/status", get(status))
         .route("/runtimes", get(runtimes_list))

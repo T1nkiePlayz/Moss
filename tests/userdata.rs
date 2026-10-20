@@ -19,6 +19,8 @@ async fn prefs_views_and_blueprints() {
     let sid = "bp-server-1";
     let sdir = dir.join("servers").join(sid);
     std::fs::create_dir_all(&sdir).unwrap();
+    std::fs::create_dir_all(sdir.join("plugins/Chunky")).unwrap();
+    std::fs::write(sdir.join("plugins/Chunky/chunky-settings.yml"), b"x").unwrap();
     std::fs::write(sdir.join("server.properties"), "#c\nmotd=Hello\nserver-port=25999\nrcon.password=hunter2\nlevel-seed=123\nview-distance=9\n").unwrap();
     {
         let c = rusqlite::Connection::open(dir.join("moss.sqlite")).unwrap();
@@ -33,6 +35,19 @@ async fn prefs_views_and_blueprints() {
     let api = format!("http://127.0.0.1:{port}/api/v1");
     let end = Instant::now() + Duration::from_secs(20);
     while c.get(format!("http://127.0.0.1:{port}/healthz")).send().await.is_err() { assert!(Instant::now() < end, "controller did not start"); tokio::time::sleep(Duration::from_millis(100)).await; }
+
+    // search: grouped, escaped, and empty for short queries
+    let r: Value = c.get(format!("{api}/search?q=chunky")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(r["content"][0]["title"], "Chunky");
+    assert_eq!(r["content"][0]["server_name"], "Source");
+    assert_eq!(r["files"][0]["path"], "plugins/Chunky/chunky-settings.yml");
+    let r: Value = c.get(format!("{api}/search?q=source")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(r["servers"][0]["id"], sid);
+    for q in ["x", "%25%25", "zzzzzz"] {
+        let r: Value = c.get(format!("{api}/search?q={q}")).send().await.unwrap().json().await.unwrap();
+        assert!(["servers", "backups", "content", "files"].iter().all(|k| r[k].as_array().unwrap().is_empty()), "{q}: {r}");
+    }
+    assert_eq!(c.get(format!("{api}/search?q={}", "a".repeat(100))).send().await.unwrap().status(), 400);
 
     // preferences
     let p: Value = c.get(format!("{api}/me/preferences")).send().await.unwrap().json().await.unwrap();

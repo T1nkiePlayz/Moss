@@ -47,6 +47,15 @@ pub fn prune_history(c: &Connection) -> rusqlite::Result<()> {
     crate::history::prune(c)
 }
 
+/// Open the database without migrating or creating it (offline recovery tooling).
+pub fn open_existing(path: &Path) -> Result<Connection> {
+    if !path.is_file() { anyhow::bail!("no database at {}", path.display()); }
+    let c = Connection::open(path).with_context(|| format!("opening database {}", path.display()))?;
+    c.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
+    Ok(c)
+}
+pub use migrations::latest as latest_migration;
+
 pub fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }

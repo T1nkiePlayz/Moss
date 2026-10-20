@@ -1,6 +1,6 @@
 //! Moss entry point: module tree, CLI definition and command dispatch. Each command lives in its own module.
-mod api; mod auth; mod backups; mod config; mod console; mod content; mod db; mod doctor; mod dotenv; mod download; mod error; mod files;
-mod health; mod history; mod installer; mod jars; mod java; mod lifecycle; mod mcping; mod notify; mod ops; mod platform; mod providers; mod runtimes; mod sched; mod serve; mod server; mod sim; mod state; mod undo;
+mod api; mod auth; mod backups; mod cli; mod config; mod console; mod content; mod db; mod doctor; mod dotenv; mod download; mod error; mod files;
+mod health; mod history; mod installer; mod jars; mod java; mod lifecycle; mod lock; mod mcping; mod notify; mod ops; mod platform; mod providers; mod runtimes; mod sched; mod serve; mod server; mod sim; mod state; mod undo;
 
 use clap::{Parser, Subcommand};
 
@@ -14,6 +14,8 @@ enum Cmd {
     Serve(config::Config),
     /// Check the environment: data directory, ports, Java, auth configuration
     Doctor(config::Config),
+    /// Offline repair tools for the data directory (owner, stuck operations, setup token, backups, database)
+    Recover(cli::recover::Recover),
     /// A tiny fake Minecraft server, used by the `sim` runtime for demos and tests
     SimServer { #[arg(long, default_value_t = 25565)] port: u16 },
 }
@@ -26,6 +28,7 @@ fn main() -> anyhow::Result<()> {
     match cli.cmd {
         Cmd::Serve(cfg) => rt.block_on(serve::serve(cfg)),
         Cmd::Doctor(cfg) => rt.block_on(doctor::doctor(cfg)),
+        Cmd::Recover(a) => cli::recover::run(a),
         Cmd::SimServer { port } => rt.block_on(sim::run(port)),
     }
 }

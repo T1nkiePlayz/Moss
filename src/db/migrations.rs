@@ -13,6 +13,9 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0006_modpacks", include_str!("migrations/0006_modpacks.sql")),
 ];
 
+/// Number of migrations this build knows (the `user_version` of an up-to-date database).
+pub fn latest() -> usize { MIGRATIONS.len() }
+
 pub fn run(c: &Connection) -> rusqlite::Result<()> {
     let applied: usize = c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?.max(0) as usize;
     for (i, (_, sql)) in MIGRATIONS.iter().enumerate().skip(applied) {

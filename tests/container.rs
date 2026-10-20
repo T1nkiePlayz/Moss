@@ -227,6 +227,10 @@ async fn network_mode_and_extra_ports_are_validated_and_reach_the_engine() {
     assert_eq!(patch(&ids[1], json!({"extra_ports": [{"port": 19132, "proto": "udp"}]})).await.status(), 400);
     assert_eq!(patch(&ids[1], json!({"port": 19132})).await.status(), 200, "udp extra does not block a tcp game port");
     // the engine saw the network and the extra port when the server started
+    until("image pull operation", 30, || async {
+        let ops = get(&c, format!("{base}/operations")).await?;
+        ops.as_array()?.iter().find(|o| o["kind"] == "container.pull" && o["state"] == "completed").cloned()
+    }).await;
     let r = c.post(format!("{base}/servers/{}/actions/start", ids[0])).send().await.unwrap();
     let (st, body) = (r.status(), r.text().await.unwrap_or_default());
     assert!(st.is_success(), "start -> {st} {body}");

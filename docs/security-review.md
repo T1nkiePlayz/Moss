@@ -17,7 +17,6 @@ Scope: the Rust controller (`src/`), the embedded UI's interaction with it, the 
 | 7 | Data at rest | The data directory was created with the process umask (typically 0755), so on a multi-user host other users could read the database, backups and temporary uploads. The support bundle zip was written to `tmp/` with default permissions. | Medium on shared hosts | Fixed: a data directory Moss creates is 0700; the scratch directory `tmp/` is always 0700; the support bundle is created 0600. An existing data directory keeps the mode its owner chose (the threat model recommends 0700). | `tests/security.rs::a_new_data_directory_and_the_scratch_directory_are_private` |
 | 8 | Webhook SSRF | The address filter treated the local-use NAT64 prefix `64:ff9b:1::/48` as public. | Low | Fixed. | `webhook::tests::local_use_nat64_prefix_is_not_public` |
 | 9 | Container network | Container servers could always reach the internet and the local network. | Design gap | Mitigated: optional `game-only` network (see [architecture](architecture.md)); Docker only; never silently downgraded. | `container::stub_tests`, `lifecycle::ctr::tests`, `tests/container.rs` |
-
 | 10 | Dependencies | `cargo audit` (RustSec database, 2026-10-20) flagged `rustls-webpki` 0.103.15 (RUSTSEC-2026-0382) and `webpki-root-certs` 1.0.9 (RUSTSEC-2026-0383), both certificate-trust issues in TLS clients (webhooks, S3, CurseForge). | Medium | Fixed: `Cargo.lock` updated to 0.103.16 and 1.0.10. | `cargo audit` in CI |
 
 ## Dependency advisories accepted

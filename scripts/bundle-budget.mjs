@@ -2,9 +2,9 @@
 // Bundle-size budget for the web UI. Run after `npm run build` in web/.
 // The "initial" JavaScript is what index.html loads before anything is shown: its script tag plus every
 // modulepreload. Every other chunk is reported so growth is visible.
-// Two numbers: TARGET_KB is the goal (40). BUDGET_KB is the limit CI enforces today. The Svelte runtime alone is
-// about 20 kB gzipped and the app shell, router, stores and API client add about 30 kB, so the goal needs a
-// smaller shell, not just lazy routes. Lower BUDGET_KB whenever the build gets smaller; never raise it quietly.
+// The limit (BUDGET_KB, 35) is also the goal: under 40 kB was reached by splitting the sign-in screen, the app shell
+// and the confirm dialog into their own chunks, so first paint loads only the Svelte runtime, the API client, auth and
+// the loading mark. Lower BUDGET_KB whenever the build gets smaller; never raise it quietly.
 // Usage: node scripts/bundle-budget.mjs [path-to-dist] [budget-kb]
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
@@ -13,8 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = resolve(process.argv[2] ?? join(root, 'web', 'dist'));
-const TARGET_KB = 40;
-const budgetKb = Number(process.argv[3] ?? 54);
+const budgetKb = Number(process.argv[3] ?? 35);
 if (!existsSync(join(dist, 'index.html'))) { console.error(`No build found in ${dist}. Run "npm run build" in web/ first.`); process.exit(2); }
 
 const gz = (file) => gzipSync(readFileSync(file), { level: 9 }).length;
@@ -33,6 +32,10 @@ console.log('Initial JavaScript (gzipped):');
 for (const f of [...initial].sort()) { const n = gz(join(dist, f)); total += n; console.log(`  ${kb(n)}  ${f}`); }
 console.log(`  ${kb(total)}  total, budget ${budgetKb} kB\n`);
 
+let css = 0;
+for (const m of html.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*>/g)) { const h = /href="([^"]+)"/.exec(m[0])?.[1]; if (h) css += gz(join(dist, h.replace(/^\/+/, ''))); }
+console.log(`Initial CSS (gzipped): ${kb(css)}\n`);
+
 const assets = join(dist, 'assets');
 const rest = readdirSync(assets).filter((f) => f.endsWith('.js') && !initial.has(`assets/${f}`))
   .map((f) => [f, gz(join(assets, f))]).sort((a, b) => b[1] - a[1]);
@@ -41,5 +44,4 @@ for (const [f, n] of rest) console.log(`  ${kb(n)}  assets/${f}`);
 
 if (initial.size === 0) { console.error('\nFAIL: no initial scripts found in index.html.'); process.exit(1); }
 if (total > budgetKb * 1024) { console.error(`\nFAIL: initial JavaScript is ${(total / 1024).toFixed(2)} kB gzipped, over the ${budgetKb} kB budget.`); process.exit(1); }
-if (total > TARGET_KB * 1024) console.log(`\nNote: ${((total - TARGET_KB * 1024) / 1024).toFixed(2)} kB above the ${TARGET_KB} kB goal.`);
 console.log(`\nOK: initial JavaScript is ${(total / 1024).toFixed(2)} kB gzipped, within the ${budgetKb} kB budget.`);

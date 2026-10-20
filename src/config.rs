@@ -37,6 +37,12 @@ pub struct Config {
     /// Edge function URL for CurseForge; empty = `<SUPABASE_URL>/functions/v1/curseforge`, `off` disables CurseForge.
     #[arg(long, env = "MOSS_CURSEFORGE_PROXY", default_value = "")]
     pub curseforge_proxy: String,
+    /// API base for Modrinth (https, or loopback http for tests).
+    #[arg(long, env = "MOSS_MODRINTH_API_URL", default_value = "https://api.modrinth.com/v2")]
+    pub modrinth_api_url: String,
+    /// Ports staged update copies may listen on, `first-last`.
+    #[arg(long, env = "MOSS_STAGING_PORT_RANGE", default_value = "30000-30999")]
+    pub staging_port_range: String,
     /// Allow notification webhooks that resolve to private, loopback or link-local addresses (default: refuse, to prevent SSRF).
     #[arg(long, env = "MOSS_ALLOW_PRIVATE_WEBHOOKS", default_value_t = false, action = clap::ArgAction::Set)]
     pub allow_private_webhooks: bool,
@@ -63,6 +69,7 @@ impl Config {
     pub fn cache_dir(&self) -> PathBuf { self.data_dir.join("cache") }
     pub fn tmp_dir(&self) -> PathBuf { self.data_dir.join("tmp") }
     pub fn java_dir(&self) -> PathBuf { self.data_dir.join("java") }
+    pub fn staging_ports(&self) -> (u16, u16) { parse_port_range(&self.staging_port_range).unwrap_or((30000, 30999)) }
 
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.dev() {
@@ -78,6 +85,39 @@ impl Config {
         if !(u.starts_with("https://") || u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost")) {
             anyhow::bail!("MOSS_CURSEFORGE_API_URL must be https (or loopback http for tests)");
         }
+        let m = &self.modrinth_api_url;
+        if !(m.starts_with("https://") || m.starts_with("http://127.0.0.1") || m.starts_with("http://localhost")) {
+            anyhow::bail!("MOSS_MODRINTH_API_URL must be https (or loopback http for tests)");
+        }
+        if parse_port_range(&self.staging_port_range).is_none() { anyhow::bail!("MOSS_STAGING_PORT_RANGE must look like 30000-30999 (1024 or higher, first <= last)"); }
         Ok(())
+    }
+}
+
+/// `first-last` with 1024 <= first <= last.
+pub fn parse_port_range(s: &str) -> Option<(u16, u16)> {
+    let (a, b) = s.trim().split_once('-')?;
+    let (a, b): (u16, u16) = (a.trim().parse().ok()?, b.trim().parse().ok()?);
+    (a >= 1024 && a <= b).then_some((a, b))
+}
+
+/// A configuration for tests: dev auth, the given data directory, everything else default.
+#[cfg(test)]
+pub fn for_test(dir: &std::path::Path) -> Config {
+    use clap::Parser;
+    #[derive(Parser)] struct W { #[command(flatten)] c: Config }
+    let mut c = W::parse_from(["moss", "--auth", "dev"]).c;
+    c.data_dir = dir.to_path_buf();
+    c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn port_ranges_are_validated() {
+        assert_eq!(parse_port_range("30000-30999"), Some((30000, 30999)));
+        assert_eq!(parse_port_range(" 2000 - 2000 "), Some((2000, 2000)));
+        for bad in ["", "30000", "30999-30000", "80-90", "a-b", "1000-99999"] { assert_eq!(parse_port_range(bad), None, "{bad}"); }
     }
 }

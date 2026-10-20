@@ -5,9 +5,10 @@ use super::*;
 /// Resolves every available update into one ordered list of steps (dependencies before dependents, no project twice).
 pub(super) async fn build_all(st: &St, s: &Srv, c: &Compat, token: Option<&str>) -> Result<(Vec<Step>, Vec<String>)> {
     let items = db_items(st, &s.id).await?;
-    let updates = apply::collect_updates(st, token, c, &items).await.map_err(|e| anyhow!(e.message))?;
+    let found = apply::collect_updates(st, token, c, &items).await;
+    let updates = found.list;
     let mut steps: Vec<Step> = vec![];
-    let mut warnings: Vec<String> = vec![];
+    let mut warnings: Vec<String> = found.problems;
     for u in updates {
         let (Some(pid), Some(prov)) = (u["project_id"].as_str(), u["provider"].as_str()) else { continue };
         let src = Src { prov: if prov == "curseforge" { Prov::Curseforge } else { Prov::Modrinth }, token: token.map(String::from) };

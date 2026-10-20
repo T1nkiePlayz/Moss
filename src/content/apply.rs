@@ -131,19 +131,28 @@ async fn record_rows(st: &St, s: &Srv, c: &Compat, steps: &[Step], downloaded: &
     }).await
 }
 
+/// Updates found plus the problems met on the way: one provider being down must not hide what the other found.
+pub(super) struct Updates { pub list: Vec<Value>, pub problems: Vec<String> }
+
 /// Updates available for the non-pinned, enabled provider items in `items` (Modrinth per project, CurseForge in one batch call).
-pub(super) async fn collect_updates(st: &St, token: Option<&str>, c: &Compat, items: &[Value]) -> ApiResult<Vec<Value>> {
+pub(super) async fn collect_updates(st: &St, token: Option<&str>, c: &Compat, items: &[Value]) -> Updates {
     let watched = |prov: &'static str| items.iter().filter(move |i| i["provider"] == prov && i["project_id"].is_string() && i["pinned"] != true && !i["filename"].as_str().unwrap_or_default().ends_with(".disabled")).take(60).cloned().collect::<Vec<_>>();
     let checks = watched("modrinth").into_iter().map(|i| {
         let (st, pid, cur, item_id, title, cur_num) = (st.clone(), i["project_id"].as_str().unwrap().to_string(), i["version_id"].as_str().unwrap_or_default().to_string(), i["id"].as_str().unwrap_or_default().to_string(), i["title"].as_str().unwrap_or_default().to_string(), i["version_number"].clone());
         let c = c.clone();
         async move {
-            let vs = compatible_versions(&st, &pid, &c).await.ok()?;
-            let latest = pick_latest(&vs)?;
-            (latest["id"].as_str()? != cur).then(|| json!({"item_id": item_id, "title": title, "current": cur_num, "latest": latest["version_number"], "version_id": latest["id"], "project_id": pid, "provider": "modrinth"}))
+            let vs = match compatible_versions(&st, &pid, &c).await { Ok(v) => v, Err(e) => return Err(format!("{e:#}")) };
+            let Some(latest) = pick_latest(&vs) else { return Ok(None) };
+            Ok((latest["id"].as_str() != Some(cur.as_str())).then(|| json!({"item_id": item_id, "title": title, "current": cur_num, "latest": latest["version_number"], "version_id": latest["id"], "project_id": pid, "provider": "modrinth"})))
         }
     });
-    let mut updates: Vec<Value> = futures_util::future::join_all(checks).await.into_iter().flatten().collect();
+    let mut updates: Vec<Value> = vec![];
+    let mut problems: Vec<String> = vec![];
+    let mut failed = 0;
+    for r in futures_util::future::join_all(checks).await {
+        match r { Ok(Some(u)) => updates.push(u), Ok(None) => {}, Err(e) => { failed += 1; if !problems.contains(&e) { problems.push(e); } } }
+    }
+    if failed > 0 { problems.push(format!("{failed} Modrinth item(s) could not be checked, so the list may be incomplete.")); }
     // CurseForge: one batch call for every installed CurseForge item instead of one per item
     let cfi = watched("curseforge");
     if !cfi.is_empty() && cf::availability(st, token).0 {
@@ -156,16 +165,17 @@ pub(super) async fn collect_updates(st: &St, token: Option<&str>, c: &Compat, it
                     updates.push(json!({"item_id": item["id"], "title": item["title"], "current": item["version_number"], "latest": fname, "version_id": fid, "project_id": item["project_id"], "provider": "curseforge"}));
                 }
             },
-            Err(e) => return Err(upstream(e)),
+            Err(e) => problems.push(format!("CurseForge items were not checked: {e:#}")),
         }
     }
-    Ok(updates)
+    Updates { list: updates, problems }
 }
 
 pub async fn check_updates(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let (_s, c) = compat_for(&st, &user, &id, "content.manage").await?;
     let items = db_items(&st, &id).await?;
-    Ok(Json(json!({"updates": collect_updates(&st, user.token.as_deref(), &c, &items).await?})))
+    let u = collect_updates(&st, user.token.as_deref(), &c, &items).await;
+    Ok(Json(json!({"updates": u.list, "warnings": u.problems})))
 }
 
 pub async fn update(State(st): State<St>, user: User, Path((id, item)): Path<(String, String)>) -> ApiResult<(StatusCode, Json<Value>)> {

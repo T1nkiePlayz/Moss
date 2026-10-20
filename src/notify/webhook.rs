@@ -32,6 +32,7 @@ pub fn is_public_ip(ip: IpAddr) -> bool {
             if s[0] == 0x2001 && s[1] == 0x0db8 { return false; } // documentation
             let embedded = |hi: u16, lo: u16| Ipv4Addr::new((hi >> 8) as u8, hi as u8, (lo >> 8) as u8, lo as u8);
             if s[0] == 0x0064 && s[1] == 0xff9b && s[2..6] == [0; 4] { return public_v4(embedded(s[6], s[7])); } // NAT64
+            if s[0] == 0x0064 && s[1] == 0xff9b && s[2] == 1 { return false; } // 64:ff9b:1::/48 local-use NAT64 (RFC 8215)
             if s[0] == 0x2002 { return public_v4(embedded(s[1], s[2])); } // 6to4
             if s[0..5] == [0; 5] && s[5] == 0 { return false; } // deprecated IPv4-compatible
             true
@@ -107,6 +108,13 @@ pub async fn deliver(url: &str, payload: &Value, allow_private: bool, attempts: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_use_nat64_prefix_is_not_public() {
+        assert!(!is_public_ip("64:ff9b:1::7f00:1".parse().unwrap()));
+        assert!(is_public_ip("64:ff9b::808:808".parse().unwrap()));
+        assert!(!is_public_ip("64:ff9b::7f00:1".parse().unwrap()));
+    }
 
     fn ip(s: &str) -> IpAddr { s.parse().unwrap() }
 

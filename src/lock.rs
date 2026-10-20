@@ -4,9 +4,18 @@
 //! game servers started by the controller do not inherit it.
 use std::{fs::File, path::Path};
 
+/// Create the data directory if it is missing, private (0700) because it holds the database, backups and secrets. An
+/// existing directory keeps whatever mode its owner gave it; missing parents get the default mode.
+pub fn create_data_dir(data_dir: &Path) -> std::io::Result<()> {
+    if data_dir.is_dir() { return Ok(()); }
+    if let Some(parent) = data_dir.parent().filter(|p| !p.as_os_str().is_empty()) { std::fs::create_dir_all(parent)?; }
+    use std::os::unix::fs::DirBuilderExt;
+    match std::fs::DirBuilder::new().mode(0o700).create(data_dir) { Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => Err(e), _ => Ok(()) }
+}
+
 /// Try to take the lock. `Ok(None)` means another process holds it.
 pub fn try_acquire(data_dir: &Path) -> std::io::Result<Option<File>> {
-    std::fs::create_dir_all(data_dir)?;
+    create_data_dir(data_dir)?;
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(data_dir.join("moss.lock"))?;
     use std::os::fd::AsRawFd;
     // SAFETY: plain flock(2) on a descriptor we own.

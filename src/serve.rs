@@ -3,10 +3,17 @@
 use crate::{api, config, db, download, java, lifecycle, ops, platform, providers::curseforge, sched, state};
 use std::{collections::HashMap, sync::{Arc, Mutex}, time::Instant};
 
+fn private_dir(p: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700))
+}
+
 pub async fn build_state(cfg: config::Config) -> anyhow::Result<state::St> {
+    crate::lock::create_data_dir(&cfg.data_dir)?;
     for d in [cfg.data_dir.clone(), cfg.servers_dir(), cfg.backups_dir(), cfg.cache_dir(), cfg.tmp_dir(), cfg.java_dir()] { std::fs::create_dir_all(&d)?; }
     let _ = std::fs::remove_dir_all(cfg.tmp_dir()); // controller-owned scratch space: safe to clear on start
     std::fs::create_dir_all(cfg.tmp_dir())?;
+    private_dir(&cfg.tmp_dir())?; // scratch space for uploads and support bundles is always private
     let db = db::Db::open(&cfg.data_dir.join("moss.sqlite"))?;
     let contact = db.call(|c| c.query_row("SELECT v FROM meta WHERE k='modrinth_contact'", [], |r| r.get::<_, String>(0))).await.unwrap_or_default();
     let (bus, _) = tokio::sync::broadcast::channel(512);

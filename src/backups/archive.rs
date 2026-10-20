@@ -128,6 +128,8 @@ pub fn extract_archive(path: &FsPath, dest: &FsPath, token: &tokio_util::sync::C
         let mut e = e?;
         let p = e.path()?.into_owned();
         if p == FsPath::new(MANIFEST) { continue; }
+        // Moss never archives its own metadata, so an archive that carries `.moss` was not made by Moss: never restore it
+        if top_name(&p).is_some_and(|t| t.eq_ignore_ascii_case(".moss")) { continue; }
         if let Some(only) = only && !top_name(&p).is_some_and(|t| only.contains(&t)) { continue; }
         if !safe_entry_path(&p) || !matches!(e.header().entry_type(), tar::EntryType::Regular | tar::EntryType::Directory) { bail!("refusing unsafe archive entry {}", p.display()); }
         total += e.size();
@@ -163,6 +165,23 @@ mod tests {
         extract_archive(&out, &dst, &tok, None).unwrap();
         assert_eq!(std::fs::read(dst.join("world/level.dat")).unwrap(), b"data");
         assert!(!dst.join(".moss").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn extraction_never_writes_controller_metadata() {
+        let base = std::env::temp_dir().join(format!("moss-bk-meta-{}", std::process::id()));
+        let (out, dst) = (base.join("evil.tar.zst"), base.join("dst"));
+        std::fs::create_dir_all(&base).unwrap();
+        let mut tar = tar::Builder::new(zstd::Encoder::new(std::fs::File::create(&out).unwrap(), 3).unwrap());
+        for (name, body) in [(".moss/console.fifo", "x"), (".MOSS/undo", "x"), ("server.properties", "a=b")] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(body.len() as u64); h.set_mode(0o644); h.set_entry_type(tar::EntryType::Regular);
+            tar.append_data(&mut h, name, body.as_bytes()).unwrap();
+        }
+        tar.into_inner().unwrap().finish().unwrap();
+        extract_archive(&out, &dst, &tokio_util::sync::CancellationToken::new(), None).unwrap();
+        assert!(dst.join("server.properties").is_file() && !dst.join(".moss").exists() && !dst.join(".MOSS").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 

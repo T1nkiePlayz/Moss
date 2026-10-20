@@ -78,7 +78,10 @@ pub(super) async fn support_bundle(State(st): State<St>, user: User, Query(q): Q
     let path = st.cfg.tmp_dir().join(format!("support-{}.zip", uuid::Uuid::new_v4()));
     let p2 = path.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-        let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(std::fs::File::create(&p2)?));
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(o.open(&p2)?));
         let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for (name, data) in files { zip.start_file(name, opts)?; zip.write_all(&data)?; }
         zip.finish()?.flush()?;

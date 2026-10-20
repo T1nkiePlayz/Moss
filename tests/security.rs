@@ -79,3 +79,15 @@ async fn file_api_cannot_reach_controller_metadata_or_delete_the_root_by_odd_spe
     let listing: Value = c.get(&f).query(&[("path", "./")]).send().await.unwrap().json().await.unwrap();
     assert!(!listing["entries"].as_array().unwrap().iter().any(|e| e["name"] == ".moss"), "the metadata directory is hidden from every spelling of the root");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_data_directory_and_the_scratch_directory_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tmp("perm");
+    let m = Moss::start(&dir, &[]);
+    let c = reqwest::Client::new();
+    m.ready(&c).await;
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&dir), 0o700);
+    assert_eq!(mode(&dir.join("tmp")), 0o700);
+}

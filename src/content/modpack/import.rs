@@ -4,9 +4,9 @@ use super::*;
 use futures_util::StreamExt;
 use std::path::{Path as FsPath, PathBuf};
 
-struct Fetched { file: PackFile, path: PathBuf }
+pub(super) struct Fetched { pub(super) file: PackFile, pub(super) path: PathBuf }
 
-async fn download_one(ctx: OpCtx, token: Option<String>, f: PackFile, tmp: PathBuf, idx: usize) -> Result<Fetched> {
+pub(super) async fn download_one(ctx: OpCtx, token: Option<String>, f: PackFile, tmp: PathBuf, idx: usize) -> Result<Fetched> {
     let st = ctx.st.clone();
     let hash = f.sha512.clone().map(Hash::Sha512).or_else(|| f.sha1.clone().map(Hash::Sha1)).ok_or_else(|| anyhow!("{} has no hash", f.path))?;
     let dest = tmp.join(format!("{idx}.bin"));
@@ -113,7 +113,9 @@ pub(super) async fn import(ctx: OpCtx, s: Srv, c: Compat, entry: store::Entry, m
         let (root, cdir, ppath, ov, aside) = (s.dir(&st), c.dir.clone(), entry.path.clone(), sc.overrides.clone(), s.moss_dir(&st).join("modpack-prev"));
         let wrote = tokio::task::spawn_blocking(move || place(&root, &cdir, &ppath, &ov, &placed, replace, &aside)).await??;
         ctx.log(format!("Installed {} files and {wrote} override files.", fetched.len()));
-        record(&st, &s, &c, &pack, &mode, &fetched).await?;
+        let (root, rels) = (s.dir(&st), sc.overrides.iter().map(|o| o.rel.clone()).collect::<Vec<_>>());
+        let sums = tokio::task::spawn_blocking(move || diff::sha256_paths(&root, &rels)).await?;
+        record(&st, &s, &c, &pack, &mode, &fetched, entry.source.as_ref(), &sums).await?;
         Ok(fetched.len())
     }.await;
     let _ = tokio::fs::remove_dir_all(&tmp).await;
@@ -125,14 +127,20 @@ pub(super) async fn import(ctx: OpCtx, s: Srv, c: Compat, entry: store::Entry, m
     Ok(())
 }
 
-async fn record(st: &St, s: &Srv, c: &Compat, pack: &Pack, mode: &str, fetched: &[Fetched]) -> Result<()> {
+/// Writes the install row (with the pack's provider identity when it has one, so it can be checked for updates later),
+/// the item rows, and the checksums of the override files the pack wrote (the baseline for later pack updates).
+#[allow(clippy::too_many_arguments)]
+async fn record(st: &St, s: &Srv, c: &Compat, pack: &Pack, mode: &str, fetched: &[Fetched], source: Option<&store::Identity>, sums: &HashMap<String, String>) -> Result<()> {
     let rows = rows_for(fetched, &c.dir);
     let (sid, kind, dir, replace) = (s.id.clone(), c.kind.to_string(), c.dir.clone(), mode == "replace");
+    let (src, sums) = (source.cloned(), sums.clone());
     let (install, name, version, format, gv, loader, mode, n) = (uuid::Uuid::now_v7().to_string(), pack.name.clone(), pack.version.clone(), pack.format.to_string(), pack.game_version.clone(), pack.loader.clone(), mode.to_string(), fetched.len() as i64);
     st.db.call(move |db| {
         let tx = db.unchecked_transaction()?;
         if replace { tx.execute("DELETE FROM content_items WHERE server_id=? AND dir=?", rusqlite::params![sid, dir])?; }
         tx.execute("INSERT INTO modpack_installs(id,server_id,name,version,format,game_version,loader,mode,installed_at,files) VALUES (?,?,?,?,?,?,?,?,?,?)", rusqlite::params![install, sid, name, version, format, gv, loader, mode, crate::db::now(), n])?;
+        if let Some(i) = &src { tx.execute("UPDATE modpack_installs SET provider=?, project_id=?, version_id=? WHERE id=?", rusqlite::params![i.provider, i.project_id, i.version_id, install])?; }
+        for (path, sum) in &sums { tx.execute("INSERT OR REPLACE INTO modpack_files(install_id,path,sha256) VALUES (?,?,?)", rusqlite::params![install, path, sum])?; }
         for r in rows {
             tx.execute("DELETE FROM content_items WHERE server_id=? AND dir=? AND filename=?", rusqlite::params![sid, dir, r.filename])?;
             tx.execute("INSERT INTO content_items(id,server_id,provider,project_id,version_id,title,version_number,filename,kind,sha512,installed_at,pinned,dir) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?)",

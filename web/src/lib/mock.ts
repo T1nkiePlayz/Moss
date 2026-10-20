@@ -1,6 +1,7 @@
 // In-memory backend for `VITE_MOCK=1`. Never imported in production builds.
 import type * as A from './api';
 import { ApiError } from './api';
+import { handleRemote, NONE as NOT_REMOTE, seedRemote } from './mock-remote';
 import { extraRuntimes, handleContent, inspectModpack, itemsFromPack, NONE, seedContent, versionsFor } from './mock-content';
 import { nextDailyRun, offsetName } from './tz';
 
@@ -397,6 +398,7 @@ const ensureLimits = (s: A.Server) => {
 const worldSets: Record<string, string[]> = {};
 const normalize = () => {
   servers.forEach(ensureLimits);
+  seedRemote(backups);
   backups.forEach((b, i) => {
     b.worlds ??= worldSets[b.server_id] ??= b.server_id !== servers[3].id ? ['world', 'world_nether', 'world_the_end'] : ['world'];
     b.locked ??= i === 1;
@@ -464,6 +466,8 @@ function metricsFor(range: A.MetricRange, base: { cpu: number; mem: number; play
 const err500 = () => new ApiError(500, 'internal', 'The backend returned an unexpected error (mock).', [], 'req_mock123');
 
 async function handleX(method: string, p: string, qs: URLSearchParams, b: Record<string, any>): Promise<unknown> {
+  const rem = await handleRemote({ uid, now, op: (...a) => startOp(...a), backups, servers }, method, p, method === 'DELETE' ? { ...b, force: qs.get('force') === '1' } : b);
+  if (rem !== NOT_REMOTE) return rem;
   let m: RegExpMatchArray | null;
   const M = (re: RegExp) => (m = p.match(re));
   if (p === '/auth/config') return { mode: 'dev', owner_claimed: !(gate === 'setup'), setup_required: gate === 'setup', access_message: 'Ask Sam in #minecraft on Discord to invite you.' };

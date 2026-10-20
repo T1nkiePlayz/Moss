@@ -373,7 +373,23 @@ export interface AuthConfig { setup_required?: boolean; access_message?: string 
 export interface Me { mfa?: { required: boolean; satisfied: boolean } }
 export interface Limits { memory_mb: number | null; cpu_pct: number | null; pids: number | null; enforced: boolean; backend: 'cgroup2' | 'none'; detail: string | null }
 export interface Server { limits?: Limits }
-export interface Backup { worlds?: string[]; locked?: boolean }
+export interface Backup { worlds?: string[]; locked?: boolean; remote?: RemoteState; remote_error?: string | null; remote_at?: string | null; remote_destination?: string | null; local_present?: boolean }
+export type RemoteState = 'none' | 'uploading' | 'stored' | 'failed';
+export interface BackupDestination {
+  id: string; name: string; kind: 'folder' | 's3'; is_default: boolean; keep_local: number; keep_remote: number; created_at: string; stored_backups?: number;
+  path?: string; endpoint?: string; region?: string; bucket?: string; prefix?: string; path_style?: boolean; access_key?: 'set' | 'not set'; secret_key?: 'set' | 'not set';
+}
+export interface DestinationInput {
+  name?: string; kind?: 'folder' | 's3'; path?: string; endpoint?: string; region?: string; bucket?: string; prefix?: string; path_style?: boolean;
+  access_key?: string; secret_key?: string; is_default?: boolean; keep_local?: number; keep_remote?: number;
+}
+export interface DestinationTest { ok: boolean; steps: { step: string; ok: boolean; detail: string }[] }
+export interface ServerDestination { destination_id: string; effective: { id: string; name: string; kind: string } | null }
+export interface StagedRestore {
+  id: string; backup_id: string; server_id: string; only: string[] | null; status: 'preparing' | 'ready' | 'failed' | 'promoting' | 'promoted'; error: string | null; created_at: string;
+  can_promote?: boolean; checks?: { id: string; ok: boolean; blocking: boolean; message: string }[]; warnings?: string[];
+  diff?: { archive: { files: number; size: number }; current: { files: number; size: number }; added: number; removed: number; changed: number; unchanged: number; size_delta: number; samples: { added: string[]; removed: string[]; changed: string[] } };
+}
 export interface Schedule { tz?: string }
 export type AuditMode = 'redacted' | 'all' | 'off';
 export interface Settings { notify_webhook_url?: string; notify_events?: string[]; audit_console_commands?: AuditMode; access_message?: string }
@@ -409,6 +425,21 @@ export const apiOps = {
   patchBackup: (id: string, b: { locked?: boolean; note?: string }) => send<Backup>('PATCH', `/backups/${e(id)}`, b),
   previewRestore: (id: string, mode: 'new_server' | 'in_place', only?: string[]) => send<RestorePreview>('POST', `/backups/${e(id)}/preview`, { mode, only }),
   restore: (id: string, mode: 'new_server' | 'in_place', only?: string[]) => send<{ operation?: Operation }>('POST', `/backups/${e(id)}/restore`, { mode, only }),
+  prepareRestore: (id: string, only?: string[]) => send<{ operation?: Operation; staged_id: string }>('POST', `/backups/${e(id)}/restore`, { mode: 'in_place', only, staged: true }),
+  stagedRestores: (sid: string) => get<StagedRestore[]>(`/servers/${e(sid)}/staged-restores`, { ttl: 0 }),
+  stagedRestore: (id: string) => get<StagedRestore>(`/staged-restores/${e(id)}`, { ttl: 0 }),
+  promoteStaged: (id: string) => send<{ operation?: Operation }>('POST', `/staged-restores/${e(id)}/promote`),
+  discardStaged: (id: string) => send('DELETE', `/staged-restores/${e(id)}`),
+  uploadBackup: (id: string) => send<{ operation?: Operation }>('POST', `/backups/${e(id)}/upload`),
+  fetchBackup: (id: string) => send<{ operation?: Operation }>('POST', `/backups/${e(id)}/fetch`),
+  destinations: () => get<BackupDestination[]>('/backup-destinations', { ttl: 0 }),
+  addDestination: (b: DestinationInput) => send<BackupDestination>('POST', '/backup-destinations', b),
+  patchDestination: (id: string, b: DestinationInput) => send<BackupDestination>('PATCH', `/backup-destinations/${e(id)}`, b),
+  removeDestination: (id: string, force = false) => send('DELETE', `/backup-destinations/${e(id)}${q({ force: force ? 1 : undefined })}`),
+  testDestination: (id: string) => send<DestinationTest>('POST', `/backup-destinations/${e(id)}/test`),
+  testNewDestination: (b: DestinationInput) => send<DestinationTest>('POST', '/backup-destinations/test', b),
+  serverDestination: (sid: string) => get<ServerDestination>(`/servers/${e(sid)}/backup-destination`, { ttl: 0 }),
+  setServerDestination: (sid: string, destination_id: string) => send<ServerDestination>('PUT', `/servers/${e(sid)}/backup-destination`, { destination_id }),
   metrics: (id: string, range: MetricRange) => get<MetricSeries>(`/servers/${e(id)}/metrics${q({ range })}`),
   hostMetrics: (range: MetricRange) => get<MetricSeries>(`/metrics/host${q({ range })}`),
   supportPreview: () => get<SupportPreview>('/support-bundle?preview=1'),

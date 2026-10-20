@@ -45,10 +45,11 @@
   }
   const loadNotif = () => import('../components/settings/Notifications.svelte');
   const loadTokens = () => import('../components/settings/Tokens.svelte');
+  const loadDest = () => import('../components/settings/BackupDestinations.svelte');
   const loadBundle = () => import('../components/settings/SupportBundle.svelte');
 </script>
 
-<div class="page-head"><div><h1>Settings</h1><p>Appearance, instance defaults, notifications, API tokens and runtimes.</p></div></div>
+<div class="page-head"><div><h1>Settings</h1><p>Appearance, instance defaults, notifications, backup destinations, API tokens and runtimes.</p></div></div>
 
 <div class="col" style="gap:var(--gap)">
   <section class="card" aria-labelledby="ap">
@@ -94,6 +95,7 @@
   </section>
 
   {#if canAdmin}<Lazy load={loadNotif} />{/if}
+  {#if canAdmin}<Lazy load={loadDest} />{/if}
 
   <section class="card" aria-labelledby="jv">
     <div class="card-title" id="jv"><Icon name="package" size={14} />Java installs</div>

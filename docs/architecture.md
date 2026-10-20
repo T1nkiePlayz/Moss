@@ -62,6 +62,8 @@ The backend is organised by responsibility, each module with a `//!` doc at the 
 | `auth/` | JWT verification, provisioning, RBAC, API tokens, setup token, MFA policy, throttling. |
 | `content/`, `providers/`, `jars/` | Catalogue search, change plans, install/update/upgrade, modpacks; Modrinth and CurseForge clients; jar metadata and compatibility rules. |
 | `backups/` | Archive format, create/prune, safety backups, preview, restore and swap. |
+| `backups/remote/` | Backup destinations: folder and hand-written S3 (SigV4, streamed multipart) drivers, validators, the 0600 secrets file, upload/fetch/retention jobs, destination self-test. Credentials live only in `<data>/backup-secrets.json`; they are never in SQLite, the support bundle or API responses. Outbound S3 traffic uses the notify SSRF guard (resolve once, pin the address, no redirects). |
+| `backups/staged/` | Promote-after-compare restore: extract to `servers/.staged-<id>`, pre-promotion checks, diff against the live server, then an explicit atomic swap with the old directory kept in `removed/`. |
 | `notify/`, `history.rs` | Notifications and webhooks; hourly metric roll-ups. |
 | `db/` | SQLite access and numbered migrations (`db/migrations/NNNN_name.sql`). |
 

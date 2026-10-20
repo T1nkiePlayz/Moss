@@ -203,6 +203,7 @@ Flags and environment variables (flags win):
 | `MOSS_REQUIRE_MFA` | `off` | `off`, `admins` or `all`: require an MFA (aal2) session. |
 | `MOSS_TRUST_PROXY` | `false` | Read the client address from `X-Forwarded-For` (only behind a proxy). |
 | `MOSS_ALLOW_PRIVATE_WEBHOOKS` | `false` | Let notification webhooks resolve to private addresses (still HTTPS only). |
+| `MOSS_ALLOW_PRIVATE_BACKUP_HOSTS` | `false` | Let an S3 backup destination resolve to a private or loopback address (a MinIO on your LAN). Plain `http` is then accepted for loopback only. |
 | `CURSEFORGE_API_KEY` | – | Your own CurseForge key for direct access (secret; `.env.local`). Without it Moss uses the Supabase edge function, see [docs/curseforge.md](docs/curseforge.md). |
 | `MOSS_CURSEFORGE_PROXY` | auto | Edge function URL, or `off` to disable CurseForge. |
 | `MOSS_CURSEFORGE_API_URL` | `https://api.curseforge.com` | API base for direct mode (https, or loopback for tests). |
@@ -285,7 +286,7 @@ macOS binaries are built in CI and are ad-hoc signed, not notarised; see [docs/m
 - No container backend: no file or network isolation between servers and the host (resource limits are Linux cgroups only).
 - Content comes from Modrinth and CurseForge only. CurseForge needs a key, cannot say whether a mod is server-safe, and never downloads files whose authors disabled third-party distribution.
 - Forge before Minecraft 1.17 is not supported; non-Minecraft games are not supported.
-- One node. Backups are local; no remote storage.
+- One node. Backups are kept locally and can also be copied to a folder or an S3-compatible bucket (see Settings, Backups). Only the in-process fake S3 and folders were exercised in tests; real AWS, Backblaze B2 and Cloudflare R2 were not.
 - Long-term metrics are hourly roll-ups kept 90 days.
 - If the host reboots, running servers stop (as always); Moss restarts the ones that were running when it comes back, or that have *autostart* set.
 - No staging-server health gate for updates yet.
@@ -299,14 +300,14 @@ Milestones follow [docs/PLAN.md §27](docs/PLAN.md). They are gates, not dates. 
 | **M0 Foundations and spikes** | 🟡 | ADRs and `docs/threat-model.md`; written spike results (kill -9 mid-operation reconciliation, console flood/backpressure); a written Modrinth terms review (CurseForge's is in [docs/curseforge.md](docs/curseforge.md)). |
 | **M1 "Hello, server"** | ✅ | Recovery CLI (re-link the owner, reset a stuck operation); the simulated runtime as a shared conformance suite. |
 | **M2 "Plugins"** | ✅ | Paper config editors (`paper-global.yml`, `spigot.yml`) with history; provider-outage tests. |
-| **M3 "Don't lose data"** | ✅ | An upgrade test from the previous release; promote-after-compare restore flow. |
+| **M3 "Don't lose data"** | ✅ | An upgrade test from the previous release; promote-after-compare restore flow; remote backup destinations (folder, S3-compatible). |
 | **M4 "Mods and packs"** | 🟡 | Pack diff and pack-version pinning, staged updates with a health-gated promotion, sandboxed installers, pre-1.17 Forge. Fabric, Quilt, Forge, NeoForge, Velocity, `.mrpack`/CurseForge packs, CurseForge and the upgrade assistant are in. |
 | **M5 "Polish"** | 🟡 | Theme editor and import/export, saved views, cross-product search, visual-regression suite, blueprints and collections, directory import, config diffs, desktop shell (Tauri), performance budgets. Four themes, the command palette and an axe page suite are in. |
 | **M6 "Open it up" and 1.0** | 🟡 | OpenAPI freeze and compatibility policy, event webhooks beyond notifications, sandboxed UI extensions and safe mode, external security review and dependency audit, soak tests (upgrade, restore, crash, provider outage), a published supported-runtime matrix, signed checksums. The OpenAPI document, MFA policy and API tokens are in. |
 
-**Next:** container isolation (Docker/Podman) with real resource and network limits, then staged updates with health-gated promotion, remote backup destinations, and the polish items above.
+**Next:** container isolation (Docker/Podman) with real resource and network limits, then staged updates with health-gated promotion, and the polish items above.
 
-**After 1.0:** event workflows, multi-node, remote backup destinations, backend extensions and SDK, player analytics, other games and importers, public status pages.
+**After 1.0:** event workflows, multi-node, backend extensions and SDK, player analytics, other games and importers, public status pages.
 
 ## Documentation index
 

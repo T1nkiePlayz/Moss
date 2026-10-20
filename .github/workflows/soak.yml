@@ -1,0 +1,59 @@
+name: Moss soak
+
+# A long randomised run of the real binary with the simulated game server (see tests/soak.rs):
+# start/stop/restart, console spam, backups with verify, restores, schedules, SIGKILL of the controller,
+# provider outages and a database upgrade, with invariants checked throughout.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to run the soak, in minutes"
+        default: "20"
+        required: false
+      seed:
+        description: "Random seed (empty for a fresh one; a failed run prints its seed)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soak
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: Soak (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      MOSS_SOAK_MINUTES: ${{ inputs.minutes || '20' }}
+      MOSS_SOAK_SEED: ${{ inputs.seed }}
+      MOSS_SOAK_DIR: ${{ github.workspace }}/soak-out
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+      - name: Cache Rust
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The binary embeds web/dist; an empty directory is enough for the soak.
+      - name: Prepare embedded UI directory
+        run: mkdir -p web/dist
+      - name: Soak
+        run: cargo test --locked --release --test soak -- --ignored --nocapture
+      - name: Upload logs and data on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: soak-failure
+          path: |
+            soak-out/controller.log
+            soak-out/data/moss.sqlite*
+          if-no-files-found: ignore
+          retention-days: 14

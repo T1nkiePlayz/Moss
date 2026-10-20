@@ -175,6 +175,12 @@ pub async fn check_updates(State(st): State<St>, user: User, Path(id): Path<Stri
     let (_s, c) = compat_for(&st, &user, &id, "content.manage").await?;
     let items = db_items(&st, &id).await?;
     let u = collect_updates(&st, user.token.as_deref(), &c, &items).await;
+    if !u.list.is_empty() {
+        let list: Vec<Value> = u.list.iter().take(20).map(|x| json!({"title": x["title"], "current": x["current"], "latest": x["latest"], "provider": x["provider"]})).collect();
+        let ev = crate::webhooks::Ev { kind: "update.available", server: Some((_s.id.clone(), _s.name.clone())), data: json!({"count": u.list.len(), "updates": list}) };
+        let st2 = st.clone();
+        tokio::spawn(async move { crate::webhooks::publish(&st2, ev).await });
+    }
     Ok(Json(json!({"updates": u.list, "warnings": u.problems})))
 }
 

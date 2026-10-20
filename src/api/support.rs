@@ -18,7 +18,9 @@ fn cap(mut v: Vec<u8>) -> Vec<u8> {
 
 async fn collect(st: &St, user: &User) -> ApiResult<Vec<(String, Vec<u8>)>> {
     let webhook = st.setting("notify_webhook_url", "").await;
-    let secrets = crate::backups::remote::secrets::all_values(&st.cfg.data_dir);
+    let mut secrets = crate::backups::remote::secrets::all_values(&st.cfg.data_dir);
+    secrets.extend(crate::webhooks::secrets::all_values(&st.cfg.data_dir));
+    for e in crate::webhooks::list(st).await.unwrap_or_default() { secrets.push(e.url); }
     let lits: Vec<&str> = std::iter::once(webhook.as_str()).chain(secrets.iter().map(String::as_str)).collect();
     let red = |s: &str| redact_text(s, &lits).into_bytes();
     let pretty = |v: &Value| serde_json::to_string_pretty(v).unwrap_or_default();

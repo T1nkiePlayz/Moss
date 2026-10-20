@@ -91,3 +91,58 @@ async fn servers_survive_the_controller_and_backups_verify() {
     moss.sigkill();
     let _ = std::fs::remove_dir_all(&moss.dir);
 }
+
+/// A stop is recorded first and delivered from a background task. A controller that dies in between leaves a live
+/// process whose desired state is already "stopped": the next controller must finish the stop (found by the soak test).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_lost_to_a_controller_crash_is_finished_after_restart() {
+    let data = std::env::temp_dir().join(format!("moss-e2e-stop-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+    let (port, game_port) = (free_port(), free_port());
+    let c = reqwest::Client::new();
+    let mut moss = Moss::start(&data, port);
+    until("controller to answer", 20, || async { c.get(format!("http://127.0.0.1:{port}/healthz")).send().await.ok().filter(|r| r.status().is_success()) }).await;
+    let created: Value = c.post(format!("{}/servers", moss.base)).json(&json!({"name": "lost-stop", "runtime": "sim", "game_version": "sim-1.0", "memory_mb": 512, "port": game_port}))
+        .send().await.unwrap().json().await.unwrap();
+    let id = created["server"]["id"].as_str().unwrap().to_string();
+    assert_eq!(wait_op(&c, &moss.base, created["operation"]["id"].as_str().unwrap()).await["state"], "completed");
+    assert!(c.post(format!("{}/servers/{id}/actions/start", moss.base)).send().await.unwrap().status().is_success());
+    until("server to be running", 30, || async { (server_state(&c, &moss.base, &id).await?["state"] == "running").then_some(()) }).await;
+    // the controller recorded the stop wish and died before the background task delivered it
+    moss.sigkill();
+    rusqlite::Connection::open(data.join("moss.sqlite")).unwrap().execute("UPDATE servers SET desired='stopped' WHERE id=?", [&id]).unwrap();
+    let mut moss = Moss::start(&data, moss.port);
+    until("the pending stop to be finished", 40, || async { (server_state(&c, &moss.base, &id).await?["state"] == "stopped").then_some(()) }).await;
+    assert!(std::net::TcpStream::connect_timeout(&format!("127.0.0.1:{game_port}").parse().unwrap(), Duration::from_millis(500)).is_err(), "the game is still listening");
+    moss.sigkill();
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+/// Pressing Stop or Kill while a restart is under way must win: the restart must not bring the server back
+/// (found by the soak test).
+#[tokio::test(flavor = "multi_thread")]
+async fn stop_during_a_restart_wins() {
+    let data = std::env::temp_dir().join(format!("moss-e2e-restart-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+    let (port, game_port) = (free_port(), free_port());
+    let c = reqwest::Client::new();
+    let mut moss = Moss::start(&data, port);
+    until("controller to answer", 20, || async { c.get(format!("http://127.0.0.1:{port}/healthz")).send().await.ok().filter(|r| r.status().is_success()) }).await;
+    let created: Value = c.post(format!("{}/servers", moss.base)).json(&json!({"name": "restart-stop", "runtime": "sim", "game_version": "sim-1.0", "memory_mb": 512, "port": game_port}))
+        .send().await.unwrap().json().await.unwrap();
+    let id = created["server"]["id"].as_str().unwrap().to_string();
+    assert_eq!(wait_op(&c, &moss.base, created["operation"]["id"].as_str().unwrap()).await["state"], "completed");
+    for action in ["stop", "kill"] {
+        assert!(c.post(format!("{}/servers/{id}/actions/start", moss.base)).send().await.unwrap().status().is_success());
+        until("server to be running", 30, || async { (server_state(&c, &moss.base, &id).await?["state"] == "running").then_some(()) }).await;
+        assert!(c.post(format!("{}/servers/{id}/actions/restart", moss.base)).send().await.unwrap().status().is_success());
+        assert!(c.post(format!("{}/servers/{id}/actions/{action}", moss.base)).send().await.unwrap().status().is_success());
+        until("server to be stopped", 30, || async { (server_state(&c, &moss.base, &id).await?["state"] == "stopped").then_some(()) }).await;
+        // the restart's background task would start it again about a second later
+        tokio::time::sleep(Duration::from_millis(3500)).await;
+        let s = server_state(&c, &moss.base, &id).await.unwrap();
+        assert_eq!(s["state"], "stopped", "{action} during a restart was overridden: {s}");
+    }
+    moss.sigkill();
+    let _ = std::fs::remove_dir_all(&data);
+}

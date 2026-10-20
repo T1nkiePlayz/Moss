@@ -2,6 +2,7 @@
 import type * as A from './api';
 import { ApiError } from './api';
 import { NONE } from './mock-content';
+import { mockDecode, mockEncode } from './blueprint-share';
 
 export interface OpsCtx { uid: () => string; now: () => string; fs: Record<string, Record<string, string>>; pushUndo: (sid: string, title: string, files: string[]) => string; log: (a: string, t: string, d?: string) => void }
 
@@ -201,6 +202,16 @@ export async function handleOpsGlobal(c: GlobalCtx, method: string, p: string, q
     const { doc: _d, ...sum } = bp;
     return sum;
   }
+  if (p === '/blueprints/import-code' && method === 'POST') {
+    let d: Record<string, any>;
+    try { d = mockDecode(String(b.code ?? ''), { slugs: true }); } catch (e) { throw bad('blueprint.invalid', (e as Error).message); }
+    const props = d.properties ?? {}, items = d.content ?? [];
+    const bp = { id: c.uid(), name: String(d.name), runtime: d.runtime, game_version: d.game_version, loader_version: d.loader_version ?? null, memory_mb: d.memory_mb ?? 2048, properties: Object.keys(props).length, content: items.length, schedules: (d.schedules ?? []).length, created_by: 'dev@example.com', created_at: c.now(), doc: d };
+    blueprints.unshift(bp);
+    c.log('blueprint.import', bp.name);
+    const { doc: _d, ...sum } = bp;
+    return sum;
+  }
   if (p === '/blueprints/import') {
     const d = b as Record<string, any>;
     if (d.format !== 'moss-blueprint' || d.version !== 1) throw bad('blueprint.invalid', 'This is not a valid Moss blueprint: missing the moss-blueprint marker.');
@@ -211,10 +222,11 @@ export async function handleOpsGlobal(c: GlobalCtx, method: string, p: string, q
     const { doc: _d, ...sum } = bp;
     return sum;
   }
-  if (M(/^\/blueprints\/([^/]+)(\/export|\/create)?$/)) {
+  if (M(/^\/blueprints\/([^/]+)(\/export|\/create|\/share)?$/)) {
     const bp = blueprints.find((x) => x.id === m![1]);
     if (!bp) throw new ApiError(404, 'not_found', 'blueprint not found');
     if (m![2] === '/export') return bp.doc;
+    if (m![2] === '/share') { const code = mockEncode(bp.doc); return { code, length: code.length }; }
     if (m![2] === '/create') {
       if (!b.accept_eula) throw new ApiError(400, 'eula.required', 'You must accept the Minecraft EULA to create a Minecraft server.', [{ path: 'accept_eula', message: 'required' }]);
       if (!String(b.name ?? '').trim()) throw bad('validation', 'Give the new server a name.', 'name');

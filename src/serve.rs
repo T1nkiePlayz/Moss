@@ -48,6 +48,7 @@ pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     crate::content::staging_spawn_background(&st);
     crate::notify::spawn_background(&st);
     crate::history::spawn_background(&st);
+    crate::webhooks::spawn_background(&st);
     let addr = format!("{}:{}", cfg.bind, cfg.port);
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}"))?;
     if cfg.dev() { tracing::warn!("AUTH DISABLED (dev mode) — anyone who can reach {addr} has full control"); }

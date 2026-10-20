@@ -55,7 +55,7 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 ## Features
 
-**Servers** · Vanilla, Paper, Purpur, Folia, Fabric, Quilt, Forge, NeoForge and Velocity from official metadata, checksum-verified where upstream publishes one · start, graceful stop, restart, force stop with escalation · crash detection with backoff and a crash-loop breaker · autostart · per-server memory, flags profile and port · **import an existing server** from a folder, zip or tar.zst · **blueprints** to create new servers from a saved recipe · EULA acceptance is an explicit, audited step.
+**Servers** · Vanilla, Paper, Purpur, Folia, Fabric, Quilt, Forge, NeoForge and Velocity from official metadata, checksum-verified where upstream publishes one · start, graceful stop, restart, force stop with escalation · crash detection with backoff and a crash-loop breaker · autostart · per-server memory, flags profile and port · **import an existing server** from a folder, zip or tar.zst · **blueprints** to create new servers from a saved recipe, shareable as a copy-and-paste code · EULA acceptance is an explicit, audited step.
 
 **Isolation and limits** · optional **container mode** (Docker or Podman): one mounted folder, no capabilities, read-only root, memory/CPU/process limits, Java provided by the image · on Linux, cgroup limits without containers · servers survive controller restarts in both modes.
 
@@ -101,10 +101,14 @@ Releases carry `moss-<tag>-linux-x86_64`, `moss-<tag>-macos-aarch64` and `moss-<
 ```bash
 sha256sum -c SHA256SUMS.txt                      # macOS: shasum -a 256 -c SHA256SUMS.txt
 gh attestation verify moss-*-linux-x86_64.tar.gz --repo T1nkiePlayz/Moss
+# the checksum file itself is signed too (cosign, keyless; releases of public repositories):
+cosign verify-blob --bundle SHA256SUMS.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/T1nkiePlayz/Moss/\.github/workflows/release\.yml@refs/(tags/v.+|heads/.+)$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS.txt
 tar xzf moss-*-linux-x86_64.tar.gz && cd moss-*-linux-x86_64
 ```
 
-Or use the installer, which verifies the checksum and installs one file ([`scripts/install.sh`](scripts/install.sh); read it first):
+Or use the installer, which verifies the checksum (and the cosign signature when `cosign` is installed; it is never required) and installs one file ([`scripts/install.sh`](scripts/install.sh); read it first):
 
 ```bash
 sh install.sh --prefix "$HOME/.local"
@@ -291,7 +295,7 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | **M2 Plugins** | ✅ | Modrinth and CurseForge, Paper-family config editors, outage tests | |
 | **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | |
 | **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode | Network restrictions for containers |
-| **M5 Polish** | 🟡 | Four themes plus editor, saved views, blueprints, import, search, axe suite | Visual-regression suite, blueprint sharing, desktop shell (Tauri), a smaller first load |
+| **M5 Polish** | 🟡 | Four themes plus editor, saved views, blueprints, import, search, axe suite | Visual-regression suite, desktop shell (Tauri), a smaller first load |
 | **M6 Open it up and 1.0** | 🟡 | OpenAPI document, MFA policy, API tokens | OpenAPI freeze, external security review, soak tests, signed checksums, event webhooks |
 
 **Next:** container network limits and UDP ports, smaller first load, and feedback from real remote-storage providers.

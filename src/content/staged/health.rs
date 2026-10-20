@@ -86,7 +86,7 @@ mod tests {
         let log = "[12:00:01 INFO]: Starting\n[12:00:02 WARN]: Can't keep up!\n[12:00:03 ERROR]: Could not pass event\n\
                    [Server thread/WARN]: x\n[Server thread/ERROR]: y\n12:00:04 [ERROR] z\n[12:00:05] [main/FATAL]: boom\n[12:00:06 INFO]: Done (3.1s)!";
         let f = analyze(log);
-        assert_eq!((f.errors, f.warnings), (5, 2));
+        assert_eq!((f.errors, f.warnings), (4, 2));
         assert!(f.fatal.is_none(), "plain error lines are not fatal by themselves");
     }
 

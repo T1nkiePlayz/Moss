@@ -354,6 +354,23 @@ async fn record_update(st: &St, s: &Srv, c: &Compat, row: &InstallRow, p: &Plan,
     Ok(())
 }
 
+/// What a staged test of a pack update would change on `s`, for the run report: (signature, changes). Refuses when
+/// there is nothing to change or the update needs the upgrade assistant first.
+pub async fn staged_plan(st: &St, utoken: Option<&str>, s: &Srv, c: &Compat, install: &str, path: &FsPath) -> Result<(String, Vec<Value>)> {
+    let row = install_row(st, &s.id, install).await.map_err(|e| anyhow!(e.message))?;
+    if row.pinned { bail!("this pack is pinned to its current version; unpin it first"); }
+    let p = plan(st, utoken, s, c, &row, path).await?;
+    if !p.diff.blockers.is_empty() { bail!("{}", p.diff.blockers.join(" ")); }
+    if !p.diff.changes_anything() { bail!("There are no pack changes to try."); }
+    let f = &p.diff.files;
+    let mut changes: Vec<Value> = vec![];
+    for (action, list) in [("add", &f.added), ("update", &f.updated), ("remove", &f.removed)] {
+        for ch in list { changes.push(json!({"title": ch.title, "action": action, "to": ch.to})); }
+    }
+    for path in p.diff.overrides.added.iter().chain(p.diff.overrides.updated.iter()) { changes.push(json!({"title": path, "action": "config", "to": null})); }
+    Ok((p.diff.signature(&p.to_version), changes))
+}
+
 #[derive(Deserialize)] pub struct UpdateReq { token: String }
 
 /// `POST /servers/{id}/modpacks/{install}/update`: apply the staged newer pack version.

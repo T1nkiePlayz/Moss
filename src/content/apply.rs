@@ -136,7 +136,7 @@ pub(super) struct Updates { pub list: Vec<Value>, pub problems: Vec<String> }
 
 /// Updates available for the non-pinned, enabled provider items in `items` (Modrinth per project, CurseForge in one batch call).
 pub(super) async fn collect_updates(st: &St, token: Option<&str>, c: &Compat, items: &[Value]) -> Updates {
-    let watched = |prov: &'static str| items.iter().filter(move |i| i["provider"] == prov && i["project_id"].is_string() && i["pinned"] != true && !i["filename"].as_str().unwrap_or_default().ends_with(".disabled")).take(60).cloned().collect::<Vec<_>>();
+    let watched = |prov: &'static str| items.iter().filter(move |i| i["provider"] == prov && i["project_id"].is_string() && i["pinned"] != true && i["pack_pinned"] != true && !i["filename"].as_str().unwrap_or_default().ends_with(".disabled")).take(60).cloned().collect::<Vec<_>>();
     let checks = watched("modrinth").into_iter().map(|i| {
         let (st, pid, cur, item_id, title, cur_num) = (st.clone(), i["project_id"].as_str().unwrap().to_string(), i["version_id"].as_str().unwrap_or_default().to_string(), i["id"].as_str().unwrap_or_default().to_string(), i["title"].as_str().unwrap_or_default().to_string(), i["version_number"].clone());
         let c = c.clone();

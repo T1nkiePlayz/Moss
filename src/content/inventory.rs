@@ -4,13 +4,13 @@ use super::*;
 pub(super) fn item_json(r: &rusqlite::Row) -> rusqlite::Result<Value> {
     Ok(json!({"id": r.get::<_, String>(0)?, "provider": r.get::<_, String>(1)?, "project_id": r.get::<_, Option<String>>(2)?, "version_id": r.get::<_, Option<String>>(3)?, "title": r.get::<_, String>(4)?,
         "version_number": r.get::<_, Option<String>>(5)?, "filename": r.get::<_, String>(6)?, "kind": r.get::<_, String>(7)?, "sha512": r.get::<_, Option<String>>(8)?,
-        "installed_at": r.get::<_, String>(9)?, "pinned": r.get::<_, bool>(10)?, "source": r.get::<_, Option<String>>(12)?.unwrap_or_else(|| "moss".into()), "dir": r.get::<_, String>(11)?}))
+        "installed_at": r.get::<_, String>(9)?, "pinned": r.get::<_, bool>(10)?, "source": r.get::<_, Option<String>>(12)?.unwrap_or_else(|| "moss".into()), "dir": r.get::<_, String>(11)?, "pack_pinned": r.get::<_, bool>(13)?}))
 }
 
 pub(super) async fn db_items(st: &St, sid: &str) -> Result<Vec<Value>> {
     let sid = sid.to_string();
     st.db.call(move |c| {
-        let mut q = c.prepare("SELECT id,provider,project_id,version_id,title,version_number,filename,kind,sha512,installed_at,pinned,dir,COALESCE(source, (SELECT 'modpack' FROM modpack_items m WHERE m.content_item_id=content_items.id)) FROM content_items WHERE server_id=? ORDER BY title COLLATE NOCASE")?;
+        let mut q = c.prepare("SELECT id,provider,project_id,version_id,title,version_number,filename,kind,sha512,installed_at,pinned,dir,COALESCE(source, (SELECT 'modpack' FROM modpack_items m WHERE m.content_item_id=content_items.id)), EXISTS(SELECT 1 FROM modpack_items m JOIN modpack_installs i ON i.id=m.install_id WHERE m.content_item_id=content_items.id AND i.pinned=1) FROM content_items WHERE server_id=? ORDER BY title COLLATE NOCASE")?;
         q.query_map([sid], item_json)?.collect()
     }).await
 }
@@ -43,7 +43,7 @@ pub(super) async fn list_files(st: &St, s: &Srv, c: &Compat) -> Result<Vec<(Valu
                 if !is_content_file(&name, ext) || known.iter().any(|(d, f)| *d == cdir && *f == name) || !e.file_type().is_ok_and(|t| t.is_file()) { continue; }
                 let when = e.metadata().ok().and_then(|m| m.modified().ok()).map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339()).unwrap_or_default();
                 let title = name.trim_end_matches(".disabled").trim_end_matches(&format!(".{ext}")).to_string();
-                v.push(json!({"id": format!("manual:{name}"), "provider": "manual", "project_id": null, "version_id": null, "title": title, "version_number": null, "filename": name, "kind": "", "sha512": null, "installed_at": when, "pinned": false, "source": "manual", "dir": cdir}));
+                v.push(json!({"id": format!("manual:{name}"), "provider": "manual", "project_id": null, "version_id": null, "title": title, "version_number": null, "filename": name, "kind": "", "sha512": null, "installed_at": when, "pinned": false, "pack_pinned": false, "source": "manual", "dir": cdir}));
             }
         }
         v.sort_by(|a, b| a["filename"].as_str().cmp(&b["filename"].as_str()));

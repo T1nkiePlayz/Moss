@@ -12,14 +12,35 @@ pub struct Req {
     #[serde(default)] pub ready_timeout_s: Option<u64>,
     #[serde(default)] pub watch_s: Option<u64>,
     #[serde(default)] pub upgrade: Option<upgrade::Target>,
+    #[serde(default)] pub pack: Option<PackReq>,
 }
+
+/// A staged modpack update. `token` names the checked pack version (cleared once its file is kept for the run); the
+/// provider fields are filled in by the server, never taken from the client.
+#[derive(Clone, Default, Deserialize, serde::Serialize)]
+pub struct PackReq {
+    pub install_id: String,
+    #[serde(default, skip_serializing)] pub token: Option<String>,
+    #[serde(default)] pub provider: Option<String>,
+    #[serde(default)] pub project_id: Option<String>,
+    #[serde(default)] pub version_id: Option<String>,
+}
+
+impl PackReq {
+    pub fn identity(&self) -> Option<modpack::Identity> {
+        Some(modpack::Identity { provider: self.provider.clone()?, project_id: self.project_id.clone()?, version_id: self.version_id.clone()? })
+    }
+}
+
+/// Where the checked pack file waits while a staged test of it runs (outside every server directory).
+pub fn pack_file(st: &St, run: &str) -> std::path::PathBuf { st.cfg.data_dir.join("staging-packs").join(format!("{run}.pack")) }
 
 impl Req {
     pub fn ready_timeout(&self) -> u64 { self.ready_timeout_s.unwrap_or(180).clamp(10, 900) }
     pub fn watch(&self) -> u64 { self.watch_s.unwrap_or(30).min(300) }
 }
 
-pub(super) const KINDS: &[&str] = &["none", "update_all", "upgrade"];
+pub(super) const KINDS: &[&str] = &["none", "update_all", "upgrade", "pack_update"];
 
 /// Cloned servers carry their own tests' side effects, so everything below works on the copy's own row and directory.
 pub(super) async fn create_copy(st: &St, origin: &Srv, run_id: &str, req: &Req, port: i64, actor: &str) -> anyhow::Result<()> {
@@ -38,7 +59,16 @@ pub(super) async fn create_copy(st: &St, origin: &Srv, run_id: &str, req: &Req, 
         for old in ids {
             tx.execute("INSERT INTO content_items(id,server_id,provider,project_id,version_id,title,version_number,filename,kind,sha512,installed_at,pinned,dir,source)
                         SELECT ?,?,provider,project_id,version_id,title,version_number,filename,kind,sha512,installed_at,pinned,dir,source FROM content_items WHERE id=?",
-                rusqlite::params![uuid::Uuid::now_v7().to_string(), i, old])?;
+                rusqlite::params![format!("{i}:{old}"), i, old])?;
+        }
+        // Installed modpacks come along (ids derived from the run) so a pack update can be applied to the copy.
+        let packs: Vec<String> = { let mut q = tx.prepare("SELECT id FROM modpack_installs WHERE server_id=?")?; q.query_map([&o], |r| r.get(0))?.collect::<Result<_, _>>()? };
+        for old in packs {
+            let new = format!("{i}:{old}");
+            tx.execute("INSERT INTO modpack_installs(id,server_id,name,version,format,game_version,loader,mode,installed_at,files,provider,project_id,version_id,pinned)
+                        SELECT ?,?,name,version,format,game_version,loader,mode,installed_at,files,provider,project_id,version_id,pinned FROM modpack_installs WHERE id=?", rusqlite::params![new, i, old])?;
+            tx.execute("INSERT INTO modpack_files(install_id,path,sha256) SELECT ?,path,sha256 FROM modpack_files WHERE install_id=?", rusqlite::params![new, old])?;
+            tx.execute("INSERT INTO modpack_items(content_item_id,install_id) SELECT ?||':'||content_item_id,? FROM modpack_items WHERE install_id=?", rusqlite::params![i, new, old])?;
         }
         tx.commit()
     }).await?;
@@ -77,7 +107,7 @@ pub(super) fn console_text(st: &St, s: &Srv) -> String {
 }
 
 /// What the plan would change, as shown in the report.
-async fn plan_for(st: &St, origin: &Srv, req: &Req, token: Option<&str>) -> anyhow::Result<(Option<String>, Vec<Value>)> {
+async fn plan_for(st: &St, origin: &Srv, req: &Req, token: Option<&str>, run: &str) -> anyhow::Result<(Option<String>, Vec<Value>)> {
     match req.kind.as_str() {
         "update_all" => {
             let c = compat(st, origin).ok_or_else(|| anyhow!("this runtime has no managed content"))?;
@@ -91,6 +121,12 @@ async fn plan_for(st: &St, origin: &Srv, req: &Req, token: Option<&str>) -> anyh
             let c = compat(st, origin).ok_or_else(|| anyhow!("this runtime has no managed content"))?;
             let sig = upgrade::upgrade_signature(st, token, origin, &c, t).await?;
             Ok((Some(sig), vec![json!({"title": format!("{} {}", origin.runtime, origin.game_version), "action": "upgrade", "to": t.game_version})]))
+        }
+        "pack_update" => {
+            let pr = req.pack.as_ref().ok_or_else(|| anyhow!("pack update details missing"))?;
+            let c = compat(st, origin).ok_or_else(|| anyhow!("this runtime has no managed content"))?;
+            let (sig, changes) = modpack::staged_plan(st, token, origin, &c, &pr.install_id, &pack_file(st, run)).await?;
+            Ok((Some(sig), changes))
         }
         _ => Ok((None, vec![])),
     }
@@ -112,7 +148,7 @@ pub(super) async fn test(ctx: OpCtx, run: String, origin: Srv, req: Req, token: 
 async fn test_inner(ctx: &OpCtx, run: &str, origin: &Srv, req: &Req, token: Option<&str>, actor: &str) -> anyhow::Result<()> {
     let st = ctx.st.clone();
     ctx.stage("Working out what would change");
-    let (signature, changes) = plan_for(&st, origin, req, token).await?;
+    let (signature, changes) = plan_for(&st, origin, req, token, run).await?;
     ctx.check()?;
     ctx.stage("Copying the server");
     let (src, dst, world, cancel) = (origin.dir(&st), st.cfg.servers_dir().join(run), req.include_world, ctx.token.clone());
@@ -136,6 +172,12 @@ async fn test_inner(ctx: &OpCtx, run: &str, origin: &Srv, req: &Req, token: Opti
             ctx.stage("Upgrading the copy");
             upgrade::run_upgrade(ctx.clone(), sv.clone(), c, token.map(String::from), &t, false, actor.to_string()).await?;
             sv = server::get(&st, run).await.map_err(|e| anyhow!(e.message))?;
+        }
+        "pack_update" => {
+            let pr = req.pack.clone().ok_or_else(|| anyhow!("pack update details missing"))?;
+            let c = compat(&st, &sv).ok_or_else(|| anyhow!("this runtime has no managed content"))?;
+            ctx.stage("Applying the pack update to the copy");
+            modpack::apply_update(ctx, &sv, &c, &format!("{run}:{}", pr.install_id), &pack_file(&st, run), token, actor, None, false, pr.identity()).await?;
         }
         _ => {}
     }

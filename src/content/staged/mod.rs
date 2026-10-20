@@ -94,6 +94,7 @@ pub async fn discard(st: &St, id: &str) -> anyhow::Result<()> {
     let _g = lock.lock().await;
     let dir = st.cfg.servers_dir().join(id);
     if dir.starts_with(st.cfg.servers_dir()) && dir != st.cfg.servers_dir() { let _ = tokio::fs::remove_dir_all(&dir).await; }
+    let _ = tokio::fs::remove_file(run::pack_file(st, id)).await;
     let i = id.to_string();
     st.db.call(move |c| {
         c.execute("DELETE FROM timeline WHERE server_id=?", [&i])?;

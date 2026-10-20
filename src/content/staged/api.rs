@@ -3,6 +3,7 @@
 use super::run::{self, Req};
 use super::*;
 use crate::content::{update_all, upgrade};
+use crate::content::modpack;
 
 async fn origin_for(st: &St, user: &User, id: &str, upgrade_kind: bool) -> ApiResult<Srv> {
     let s = server_for(st, user, id, "content.manage").await?;
@@ -47,9 +48,9 @@ pub async fn log(State(st): State<St>, user: User, Path((id, run)): Path<(String
     Ok(Json(json!({"lines": &all[from..], "truncated": from > 0})))
 }
 
-pub async fn start(State(st): State<St>, user: User, Path(id): Path<String>, Json(req): Json<Req>) -> ApiResult<(StatusCode, Json<Value>)> {
+pub async fn start(State(st): State<St>, user: User, Path(id): Path<String>, Json(mut req): Json<Req>) -> ApiResult<(StatusCode, Json<Value>)> {
     let s = origin_for(&st, &user, &id, req.kind == "upgrade").await?;
-    if !run::KINDS.contains(&req.kind.as_str()) { return Err(ApiError::bad("validation", "unknown kind").field("kind", "none | update_all | upgrade")); }
+    if !run::KINDS.contains(&req.kind.as_str()) { return Err(ApiError::bad("validation", "unknown kind").field("kind", "none | update_all | upgrade | pack_update")); }
     if s.runtime == "custom" { return Err(ApiError::bad("capability.unsupported", "custom servers cannot be copied for a test")); }
     if !s.installed { return Err(ApiError::conflict("server.not_installed", "server is not installed yet")); }
     match req.kind.as_str() {
@@ -59,7 +60,19 @@ pub async fn start(State(st): State<St>, user: User, Path(id): Path<String>, Jso
             let t = req.upgrade.as_ref().ok_or_else(|| ApiError::bad("validation", "upgrade target required").field("upgrade", "required for kind upgrade"))?;
             upgrade::validate_target(&s, t)?;
         }
+        "pack_update" => { compat(&st, &s).ok_or_else(|| ApiError::bad("capability.unsupported", "this runtime has no managed content"))?; }
         _ => {}
+    }
+    let mut kept_pack: Option<std::path::PathBuf> = None;
+    if req.kind == "pack_update" {
+        let pr = req.pack.as_mut().ok_or_else(|| ApiError::bad("validation", "pack details required").field("pack", "required for kind pack_update"))?;
+        let row = modpack::install_row(&st, &id, &pr.install_id).await?;
+        if row.pinned { return Err(ApiError::conflict("modpack.pinned", "this pack is pinned to its current version; unpin it to update")); }
+        let tok = pr.token.take().ok_or_else(|| ApiError::bad("validation", "a checked pack version is required").field("pack.token", "required"))?;
+        let entry = modpack::entry(&tok, &user.id).ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "modpack.token_expired", "this modpack token is unknown or has expired (tokens last 30 minutes); check for the update again"))?;
+        if entry.runtime != s.runtime { return Err(ApiError::conflict("modpack.runtime_mismatch", format!("this pack needs {} but the server runs {}", entry.runtime, s.runtime))); }
+        (pr.provider, pr.project_id, pr.version_id) = match entry.source { Some(i) => (Some(i.provider), Some(i.project_id), Some(i.version_id)), None => (None, None, None) };
+        kept_pack = Some(entry.path);
     }
     let existing = runs_for(&st, &id).await;
     if existing.iter().any(Run::active) { return Err(ApiError::conflict("staging.busy", "a test copy is already being built for this server; wait for it or cancel it")); }
@@ -75,7 +88,12 @@ pub async fn start(State(st): State<St>, user: User, Path(id): Path<String>, Jso
     let port = clone::pick_port(range, &used).await.ok_or_else(|| ApiError::conflict("staging.no_port", format!("No free port in {}-{} for the copy. Change MOSS_STAGING_PORT_RANGE or discard old copies.", range.0, range.1)))?;
     for r in existing { let _ = discard(&st, &r.id).await; }
     let (run_id, actor) = (uuid::Uuid::now_v7().to_string(), user.actor());
-    run::create_copy(&st, &s, &run_id, &req, port, &actor).await?;
+    if let Some(src) = kept_pack {
+        let dst = run::pack_file(&st, &run_id);
+        if let Some(d) = dst.parent() { tokio::fs::create_dir_all(d).await.map_err(anyhow::Error::from)?; }
+        tokio::fs::copy(&src, &dst).await.map_err(anyhow::Error::from)?;
+    }
+    if let Err(e) = run::create_copy(&st, &s, &run_id, &req, port, &actor).await { let _ = tokio::fs::remove_file(run::pack_file(&st, &run_id)).await; return Err(e.into()); }
     let (title, token) = (format!("Test a copy of {}", s.name), user.token.clone());
     st.audit(&actor, "staging.start", &s.name, &req.kind, Some(&id)).await;
     let op = ops::spawn_op(&st, "staging.test", title, Some(&id), true, { let (r, o, rq, t, a) = (run_id.clone(), s.clone(), req.clone(), token, actor.clone()); move |ctx| run::test(ctx, r, o, rq, t, a) });
@@ -108,6 +126,10 @@ pub async fn promote(State(st): State<St>, user: User, Path((id, run)): Path<(St
                 ctx.stage("Checking that nothing changed since the test");
                 if Some(upgrade::upgrade_signature(&ctx.st, token.as_deref(), &s, &c, &t).await?) != sig { bail!("what the upgrade would change differs from what was tested; run the test again"); }
                 upgrade::run_upgrade(ctx.clone(), s.clone(), c, token, &t, true, actor).await?;
+            }
+            "pack_update" => {
+                let pr = req.pack.clone().ok_or_else(|| anyhow!("pack update details missing"))?;
+                modpack::apply_update(&ctx, &s, &c, &pr.install_id, &run::pack_file(&ctx.st, &run_id), token.as_deref(), &actor, sig.as_deref(), true, pr.identity()).await?;
             }
             _ => bail!("nothing to apply"),
         }

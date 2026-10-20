@@ -183,3 +183,17 @@ async fn pinning_a_pack_is_stored_and_listed() {
     assert_eq!((j["pinned"].as_bool(), j["can_check"].as_bool(), j["source"]["provider"].as_str()), (Some(true), Some(true), Some("modrinth")));
     assert!(install_row(&fx.st, "other", &fx.install).await.is_err(), "scoped to its server");
 }
+
+#[tokio::test]
+async fn the_staged_plan_and_the_real_apply_agree_on_the_signature() {
+    let fx = fixture(false).await;
+    let pack = new_pack(&fx, "1.21");
+    let (sig, changes) = staged_plan(&fx.st, None, &fx.s, &fx.c, &fx.install, &pack).await.unwrap();
+    assert!(changes.iter().any(|c| c["action"] == "remove" && c["title"] == "b"), "{changes:?}");
+    assert!(changes.iter().any(|c| c["action"] == "config" && c["title"] == "config/added.toml"));
+    let applied = apply_update(&OpCtx::detached(&fx.st), &fx.s, &fx.c, &fx.install, &pack, None, "t", Some(&sig), false, None).await.unwrap();
+    assert_eq!(applied, sig);
+    // once applied there is nothing left to try
+    let e = staged_plan(&fx.st, None, &fx.s, &fx.c, &fx.install, &pack).await.unwrap_err();
+    assert!(format!("{e:#}").contains("no pack changes"), "{e:#}");
+}

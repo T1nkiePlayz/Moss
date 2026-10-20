@@ -15,7 +15,7 @@ async fn origin(st: &St) -> Srv {
     s
 }
 
-fn req(kind: &str) -> run::Req { run::Req { kind: kind.into(), include_world: false, ready_timeout_s: None, watch_s: None, upgrade: None } }
+fn req(kind: &str) -> run::Req { run::Req { kind: kind.into(), include_world: false, ready_timeout_s: None, watch_s: None, upgrade: None, pack: None } }
 
 async fn copy(st: &St, o: &Srv, kind: &str) -> String {
     let id = uuid::Uuid::now_v7().to_string();
@@ -144,4 +144,34 @@ fn test_copies_never_expose_rcon_or_query() {
     let p = std::fs::read_to_string(d.join("server.properties")).unwrap();
     assert!(p.contains("enable-rcon=false") && p.contains("enable-query=false") && p.contains("motd=hi") && !p.contains("enable-rcon=true"), "{p}");
     let _ = std::fs::remove_dir_all(&d);
+}
+
+#[tokio::test]
+async fn the_copy_gets_its_own_pack_records_and_a_discarded_copy_removes_the_kept_pack_file() {
+    let st = state(|_| {}).await;
+    let o = origin(&st).await;
+    let (sid, now) = (o.id.clone(), crate::db::now());
+    st.db.call(move |c| {
+        c.execute("INSERT INTO content_items(id,server_id,provider,project_id,version_id,title,version_number,filename,kind,installed_at,pinned,dir) VALUES ('i1',?,'modrinth','p','v','T','1','a.jar','plugins',?,0,'plugins')", rusqlite::params![sid, now])?;
+        c.execute("INSERT INTO modpack_installs(id,server_id,name,format,game_version,installed_at,pinned,provider,project_id,version_id) VALUES ('k1',?,'Pack','mrpack','1.21',?,0,'modrinth','P','pv')", rusqlite::params![sid, now])?;
+        c.execute("INSERT INTO modpack_items(content_item_id,install_id) VALUES ('i1','k1')", [])?;
+        c.execute("INSERT INTO modpack_files(install_id,path,sha256) VALUES ('k1','config/x.toml','abc')", [])
+    }).await.unwrap();
+    let id = copy(&st, &o, "pack_update").await;
+    let (n, linked, sums): (String, String, i64) = st.db.call({ let i = id.clone(); move |c| {
+        let n: String = c.query_row("SELECT id FROM modpack_installs WHERE server_id=?", [&i], |r| r.get(0))?;
+        let l: String = c.query_row("SELECT content_item_id FROM modpack_items WHERE install_id=?", [&n], |r| r.get(0))?;
+        let s: i64 = c.query_row("SELECT COUNT(*) FROM modpack_files WHERE install_id=?", [&n], |r| r.get(0))?;
+        Ok((n, l, s))
+    } }).await.unwrap();
+    assert_eq!(n, format!("{id}:k1"));
+    assert_eq!(linked, format!("{id}:i1"));
+    assert_eq!(sums, 1);
+    let kept = run::pack_file(&st, &id);
+    std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+    std::fs::write(&kept, "pack").unwrap();
+    discard(&st, &id).await.unwrap();
+    assert!(!kept.exists());
+    let left: i64 = st.db.call(|c| c.query_row("SELECT COUNT(*) FROM modpack_installs WHERE id LIKE '%:k1'", [], |r| r.get(0))).await.unwrap();
+    assert_eq!(left, 0, "the copy's pack rows go with its server row");
 }

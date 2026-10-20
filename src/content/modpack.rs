@@ -15,7 +15,8 @@ pub(super) mod store;
 pub mod zipsafe;
 
 pub use export::export;
-pub use update::{check_update, list, pin, update_start};
+pub use update::{apply_update, check_update, install_row, list, pin, staged_plan, update_start};
+pub use store::{Identity, get as entry};
 pub use zipsafe::OverrideEntry;
 
 /// Largest pack Moss accepts, uploaded or downloaded.

@@ -11,7 +11,15 @@ pub const MAX_BYTES: u64 = 4 << 30;
 const ALLOWED: &[&str] = &[
     "mojang.com", "minecraft.net", "papermc.io", "purpurmc.org", "fabricmc.net", "modrinth.com", "adoptium.net",
     "github.com", "githubusercontent.com", "azul.com", "forgecdn.net",
+    // modded runtimes: official installer jars and version metadata
+    "maven.neoforged.net", "maven.minecraftforge.net", "maven.quiltmc.org", "files.minecraftforge.net", "meta.quiltmc.org",
 ];
+
+/// Hosts a modpack's own file list may point at (Modrinth `.mrpack` rules), in addition to the general allow-list.
+const PACK_HOSTS: &[&str] = &["cdn.modrinth.com", "github.com", "raw.githubusercontent.com", "gitlab.com"];
+
+/// Exact-match check for modpack file hosts: the mrpack allow-list or the general download allow-list.
+pub fn pack_host_allowed(host: &str) -> bool { PACK_HOSTS.contains(&host) || host_allowed(host) }
 
 pub fn host_allowed(host: &str) -> bool {
     ALLOWED.iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
@@ -96,6 +104,10 @@ mod tests {
     fn allow_list_matches_domains_not_suffix_tricks() {
         assert!(host_allowed("cdn.modrinth.com") && host_allowed("fill-data.papermc.io") && host_allowed("github.com"));
         assert!(host_allowed("edge.forgecdn.net") && !host_allowed("forgecdn.net.evil.io"));
+        for h in ["maven.neoforged.net", "maven.minecraftforge.net", "maven.quiltmc.org", "files.minecraftforge.net", "meta.quiltmc.org"] { assert!(host_allowed(h), "{h}"); }
+        assert!(!host_allowed("neoforged.net") && !host_allowed("evil.maven.neoforged.net.io") && !host_allowed("quiltmc.org"));
+        assert!(pack_host_allowed("gitlab.com") && pack_host_allowed("raw.githubusercontent.com") && !host_allowed("gitlab.com"));
+        assert!(!pack_host_allowed("evilgitlab.com") && !pack_host_allowed("gitlab.com.evil.io") && !pack_host_allowed("cdn.modrinth.com.evil.io"));
         assert!(!host_allowed("evilmodrinth.com") && !host_allowed("modrinth.com.evil.io") && !host_allowed("169.254.169.254") && !host_allowed("localhost"));
     }
 }

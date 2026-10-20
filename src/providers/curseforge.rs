@@ -146,6 +146,14 @@ pub const CLASS_BUKKIT: u32 = 5;
 pub const CLASS_MODS: u32 = 6;
 pub const CLASS_DATAPACKS: u32 = 6945;
 pub const LOADER_FABRIC: u32 = 4;
+pub const LOADER_FORGE: u32 = 1;
+pub const LOADER_QUILT: u32 = 5;
+pub const LOADER_NEOFORGE: u32 = 6;
+
+/// The game-version tag CurseForge puts on files for a mod loader id.
+pub fn loader_tag(loader: u32) -> &'static str {
+    match loader { LOADER_FORGE => "Forge", LOADER_FABRIC => "Fabric", LOADER_QUILT => "Quilt", LOADER_NEOFORGE => "NeoForge", _ => "" }
+}
 
 pub fn sort_field(sort: &str) -> &'static str {
     match sort { "downloads" => "6", "updated" => "3", "follows" => "2", _ => "1" }
@@ -210,6 +218,25 @@ pub fn latest_index(m: &Value, game_version: Option<&str>, loader: u32) -> Optio
         .min_by_key(|i| (i["releaseType"].as_u64().unwrap_or(3), std::cmp::Reverse(i["fileId"].as_u64().unwrap_or(0))))
         .and_then(|i| Some((i["fileId"].as_u64()?.to_string(), i["filename"].as_str().unwrap_or_default().to_string())))
 }
+
+// ---------- modpack support ----------
+
+/// Most file ids sent in one `POST /v1/mods/files` call.
+pub const FILES_BATCH: usize = 100;
+
+/// File objects for a list of file ids, in as few calls as possible (`POST /v1/mods/files`, chunked). Goes through
+/// the shared limiter and is never cached; unknown ids are simply absent from the result.
+pub async fn files_batch(st: &St, token: Option<&str>, file_ids: &[u64]) -> Result<Vec<Value>> {
+    let mut out = vec![];
+    for chunk in file_ids.chunks(FILES_BATCH) {
+        let v = call(st, token, Method::POST, "/v1/mods/files", &[], Some(json!({"fileIds": chunk}))).await?;
+        out.extend(v["data"].as_array().cloned().unwrap_or_default());
+    }
+    Ok(out)
+}
+
+/// The author's project page, for files that cannot be downloaded automatically.
+pub fn project_url(project_id: u64) -> String { format!("https://www.curseforge.com/projects/{project_id}") }
 
 #[cfg(test)]
 mod tests {

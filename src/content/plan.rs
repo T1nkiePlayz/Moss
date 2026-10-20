@@ -42,7 +42,7 @@ pub(super) async fn build_plan_cf(st: &St, token: Option<&str>, s: &Srv, c: &Com
                 let f = cf::get(st, token, &format!("/v1/mods/{pid}/files/{v}"), &[]).await?["data"].clone();
                 let tags: Vec<&str> = f["gameVersions"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).collect();
                 let gv_ok = c.game_version.as_ref().is_none_or(|g| tags.contains(&g.as_str()));
-                let loader_ok = c.cf_loader == 0 || tags.contains(&"Fabric");
+                let loader_ok = c.cf_loader == 0 || tags.contains(&cf::loader_tag(c.cf_loader));
                 if !gv_ok || !loader_ok { bail!("{title} {} is not compatible with {} {}", f["displayName"].as_str().unwrap_or(""), s.runtime, s.game_version); }
                 if !cf::downloadable(&f) { bail!("{title}: the author disabled automatic downloads for this file. Download it from the project page and upload it in Files."); }
                 f

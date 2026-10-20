@@ -49,7 +49,7 @@ impl Srv {
     pub fn content_kind(&self) -> &'static str {
         match self.runtime.as_str() {
             "paper" | "purpur" | "folia" => "plugins",
-            "fabric" => "mods",
+            "fabric" | "forge" | "neoforge" | "quilt" => "mods",
             "velocity" => "proxy_plugins",
             "vanilla" => "datapacks",
             _ => "none",

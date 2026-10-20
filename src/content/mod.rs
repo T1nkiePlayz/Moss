@@ -13,15 +13,21 @@ use std::collections::HashMap;
 
 
 mod apply;
+mod cfpack;
 mod inventory;
+mod modpack;
 mod modrinth;
+mod mrpack;
 mod plan;
 mod search;
+mod upgrade;
 
 pub use apply::{check_updates, install, update};
 pub use inventory::{installed, patch_item, remove, resync};
+pub use modpack::{create_params as modpack_create_params, export as modpack_export, import_start as modpack_import, inspect as modpack_inspect, install_then_import};
 pub use plan::plan;
 pub use search::{project, providers, search};
+pub use upgrade::{maybe_backup, upgrade_plan, upgrade_start};
 use inventory::*; use modrinth::*; use plan::*; use search::*;
 
 pub struct Compat { pub kind: &'static str, pub project_type: &'static str, pub loaders: Vec<&'static str>, pub game_version: Option<String>, pub dir: String, pub ext: &'static str, pub cf_class: Option<u32>, pub cf_loader: u32 }
@@ -33,6 +39,9 @@ pub fn compat(st: &St, s: &Srv) -> Option<Compat> {
         "purpur" => Compat { kind: "plugins", project_type: "plugin", loaders: vec!["purpur", "paper", "spigot", "bukkit"], game_version: gv, dir: "plugins".into(), ext: "jar", cf_class: None, cf_loader: 0 },
         "folia" => Compat { kind: "plugins", project_type: "plugin", loaders: vec!["folia"], game_version: gv, dir: "plugins".into(), ext: "jar", cf_class: None, cf_loader: 0 },
         "fabric" => Compat { kind: "mods", project_type: "mod", loaders: vec!["fabric"], game_version: gv, dir: "mods".into(), ext: "jar", cf_class: None, cf_loader: 0 },
+        "neoforge" => Compat { kind: "mods", project_type: "mod", loaders: vec!["neoforge"], game_version: gv, dir: "mods".into(), ext: "jar", cf_class: None, cf_loader: 0 },
+        "forge" => Compat { kind: "mods", project_type: "mod", loaders: vec!["forge"], game_version: gv, dir: "mods".into(), ext: "jar", cf_class: None, cf_loader: 0 },
+        "quilt" => Compat { kind: "mods", project_type: "mod", loaders: vec!["quilt", "fabric"], game_version: gv, dir: "mods".into(), ext: "jar", cf_class: None, cf_loader: 0 },
         "velocity" => Compat { kind: "proxy_plugins", project_type: "plugin", loaders: vec!["velocity"], game_version: None, dir: "plugins".into(), ext: "jar", cf_class: None, cf_loader: 0 },
         "vanilla" => {
             let level = std::fs::read_to_string(s.dir(st).join("server.properties")).ok()
@@ -44,6 +53,9 @@ pub fn compat(st: &St, s: &Srv) -> Option<Compat> {
     let (cf_class, cf_loader) = match s.runtime.as_str() {
         "paper" | "purpur" | "folia" => (Some(cf::CLASS_BUKKIT), 0),
         "fabric" => (Some(cf::CLASS_MODS), cf::LOADER_FABRIC),
+        "forge" => (Some(cf::CLASS_MODS), cf::LOADER_FORGE),
+        "neoforge" => (Some(cf::CLASS_MODS), cf::LOADER_NEOFORGE),
+        "quilt" => (Some(cf::CLASS_MODS), cf::LOADER_QUILT),
         "vanilla" => (Some(cf::CLASS_DATAPACKS), 0),
         _ => (None, 0),
     };

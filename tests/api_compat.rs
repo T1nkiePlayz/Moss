@@ -25,6 +25,7 @@ fn enum_of(v: &Value) -> Option<BTreeSet<String>> { v["enum"].as_array().map(|a|
 enum Dir { Response, Request }
 
 /// Compare an old schema with a new one in the given direction; problems are appended to `errs`.
+#[allow(clippy::too_many_arguments)] // a recursive walk over two specs; a context struct would only rename the arguments
 fn schema(old_spec: &Value, old: &Value, new_spec: &Value, new: &Value, dir: Dir, at: &str, depth: usize, errs: &mut Vec<String>) {
     if depth > MAX_DEPTH { return; }
     let (o, n) = (resolve(old_spec, old), resolve(new_spec, new));

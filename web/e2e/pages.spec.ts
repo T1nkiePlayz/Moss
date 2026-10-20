@@ -49,6 +49,13 @@ test('server settings show the isolation section, and a clear message when no en
   await page.getByLabel('Mode').selectOption('container');
   await page.getByRole('button', { name: 'Save isolation' }).click();
   await expect(page.getByText('Isolation saved')).toBeVisible();
+  await expect(page.getByLabel('Network')).toBeVisible();
+  await expect(page.getByRole('option', { name: /Game-only/ })).toBeDisabled(); // mock engine is Podman
+  await page.getByLabel('Extra ports').fill('80/tcp');
+  await expect(page.getByText(/outside 1024-65535/)).toBeVisible();
+  await page.getByLabel('Extra ports').fill('19132/udp, 24454/udp');
+  await page.getByRole('button', { name: 'Save isolation' }).click();
+  await expect(page.getByLabel('Extra ports')).toHaveValue('19132/udp, 24454/udp');
   await audit(page, 'settings with container mode');
   await page.goto(`/?scenario=noengine#/${first}/settings`);
   await expect(page.getByText('No container engine')).toBeVisible();

@@ -3,14 +3,14 @@
   import { apiOps, ApiError, type ContainerStatus, type Server } from '../lib/api';
   import { toast, toastError } from '../lib/stores.svelte';
   import { can, isAdmin } from '../lib/auth.svelte';
-  import { describeEngine, imageHint, ISOLATION_NOTES } from '../lib/container';
+  import { describeEngine, imageHint, ISOLATION_NOTES, parseExtraPorts, formatExtraPorts } from '../lib/container';
 
   let { server: s }: { server: Server } = $props();
   const canEdit = $derived(can('config.write') && isAdmin());
-  const seedOf = () => ({ mode: s.isolation ?? 'process', image: s.container?.image_override ?? '' });
+  const seedOf = () => ({ mode: s.isolation ?? 'process', image: s.container?.image_override ?? '', network: s.container?.network ?? 'open', ports: formatExtraPorts(s.container?.extra_ports) });
   let f = $state(seedOf());
   let seeded = '';
-  $effect(() => { const k = s.id + JSON.stringify([s.isolation, s.container?.image_override]); if (k !== seeded) { seeded = k; f = seedOf(); } });
+  $effect(() => { const k = s.id + JSON.stringify([s.isolation, s.container?.image_override, s.container?.network, s.container?.extra_ports]); if (k !== seeded) { seeded = k; f = seedOf(); } });
   let eng = $state<ContainerStatus | null>(null);
   let checking = $state(false);
   let saving = $state(false);
@@ -19,6 +19,8 @@
   const dirty = $derived(JSON.stringify(f) !== JSON.stringify(seedOf()));
   const info = $derived(describeEngine(eng));
   const hint = $derived(imageHint(f.image));
+  const parsed = $derived(parseExtraPorts(f.ports));
+  const gameOnlyOk = $derived(eng?.game_only_supported === true || f.network === 'game-only');
   const unsupported = $derived(s.runtime === 'custom');
   const effective = $derived(f.image.trim() || s.container?.image || `eclipse-temurin:${s.java_major}-jre`);
 
@@ -32,7 +34,7 @@
   async function save(e: Event) {
     e.preventDefault(); saving = true; errs = {};
     try {
-      await apiOps.patchIsolation(s.id, { isolation: f.mode, container_image: f.image.trim() === '' ? null : f.image.trim() });
+      await apiOps.patchIsolation(s.id, { isolation: f.mode, container_image: f.image.trim() === '' ? null : f.image.trim(), network: f.network as 'open' | 'game-only', extra_ports: parsed.ports });
       const running = s.state === 'running' || s.state === 'starting';
       toast('success', 'Isolation saved', { body: running ? 'Restart the server to switch.' : f.mode === 'container' ? 'Moss is downloading the image now.' : undefined });
     } catch (er) {
@@ -81,13 +83,29 @@
       {#if errs.container_image}<span class="err">{errs.container_image}</span>{/if}
     </div>
     {#if f.mode === 'container'}
+      <div class="field">
+        <label for="iso-n">Network</label>
+        <select id="iso-n" class="select" bind:value={f.network} disabled={!canEdit} aria-describedby="iso-nh">
+          <option value="open">Open (can reach the internet)</option>
+          <option value="game-only" disabled={!gameOnlyOk}>Game-only (no outgoing connections)</option>
+        </select>
+        <span class="hint" id="iso-nh">{eng && eng.game_only_supported === false ? 'Game-only needs Docker; it is not available with Podman.' : 'Game-only lets players connect but blocks the server from opening connections to the internet. Online-mode servers then cannot check player accounts with Mojang.'}</span>
+        {#if errs.network}<span class="err">{errs.network}</span>{/if}
+      </div>
+      <div class="field">
+        <label for="iso-p">Extra ports</label>
+        <input id="iso-p" class="input" bind:value={f.ports} placeholder="19132/udp, 24454/udp" disabled={!canEdit} spellcheck="false" autocomplete="off" aria-describedby="iso-ph" />
+        <span class="hint" id="iso-ph">For plugins such as voice chat or Geyser. Up to 8, each 1024-65535, TCP or UDP (TCP if you leave it out). Applies on the next start.</span>
+        {#if parsed.error}<span class="err">{parsed.error}</span>{/if}
+        {#if errs.extra_ports}<span class="err">{errs.extra_ports}</span>{/if}
+      </div>
       <ul class="notes full">{#each ISOLATION_NOTES as n}<li>{n}</li>{/each}</ul>
     {/if}
     {#if canEdit}
       <div class="row end full">
         {#if s.isolation === 'container' && eng?.available}<button class="btn" type="button" disabled={pulling} onclick={pull}><Icon name="download" size={15} />Download image</button>{/if}
         <button class="btn" type="button" disabled={!dirty} onclick={() => (f = seedOf())}>Reset</button>
-        <button class="btn primary" disabled={!dirty || saving || !!hint}>{saving ? 'Saving…' : 'Save isolation'}</button>
+        <button class="btn primary" disabled={!dirty || saving || !!hint || !!parsed.error}>{saving ? 'Saving…' : 'Save isolation'}</button>
       </div>
     {/if}
   </form>

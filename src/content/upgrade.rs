@@ -8,9 +8,8 @@ use futures_util::StreamExt;
 mod classify;
 mod run;
 
-/// Pre-change backup hook. TODO(integrator): call `backups::pre_change(st, server)` here (it honours the
-/// `backup_before_change` setting and returns the new backup id). Until then no backup is taken.
-pub async fn maybe_backup(_st: &St, _s: &Srv) -> Result<Option<String>> { Ok(None) }
+/// Setting-driven safety backup for callers holding the server lock (modpack import).
+pub async fn maybe_backup(st: &St, s: &Srv) -> Result<Option<String>> { crate::backups::pre_change_locked(st, s, "importing a modpack").await }
 
 #[derive(Deserialize)]
 pub struct PlanReq { game_version: String, loader_version: Option<String>, #[serde(default)] confirm_downgrade: bool }
@@ -148,7 +147,7 @@ pub async fn upgrade_start(State(st): State<St>, user: User, Path(id): Path<Stri
     if lifecycle_running(&st, &s) || crate::lifecycle::process_alive(&s) { return Err(ApiError::conflict("server.running", "stop the server before upgrading it")); }
     if classify::is_downgrade(&s.game_version, &r.game_version) && !r.confirm_downgrade { return Err(ApiError::bad("upgrade.downgrade", "this is a downgrade; send confirm_downgrade:true to proceed").field("confirm_downgrade", "required for downgrades")); }
     let c = compat(&st, &s).ok_or_else(|| ApiError::bad("capability.unsupported", "this runtime has no managed content"))?;
-    let (title, token, actor) = (format!("Upgrade {} to {}", s.name, r.game_version), user.token.clone(), user.email.clone());
+    let (title, token, actor) = (format!("Upgrade {} to {}", s.name, r.game_version), user.token.clone(), user.actor());
     let op = ops::spawn_op(&st, "server.upgrade", title, Some(&id), true, move |ctx| run::run(ctx, s, c, token, r, actor));
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }

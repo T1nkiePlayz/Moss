@@ -37,5 +37,8 @@ pub async fn pre_change(st: &St, s: &Srv, reason: &str) -> Result<Option<String>
 #[allow(dead_code)] // entry point for other packages
 pub async fn pre_change_locked(st: &St, s: &Srv, reason: &str) -> Result<Option<String>> { run(st, s, reason, false, false, None).await }
 
+/// Forced backup for callers that already hold the server lock (version upgrade).
+pub async fn pre_change_forced_locked(st: &St, s: &Srv, reason: &str, ctx: &OpCtx) -> Result<Option<String>> { run(st, s, reason, false, true, Some(ctx)).await }
+
 /// A safety backup regardless of the setting (used by in-place restore), reporting progress on `ctx`.
 pub async fn pre_change_forced(st: &St, s: &Srv, reason: &str, ctx: &OpCtx) -> Result<Option<String>> { run(st, s, reason, true, true, Some(ctx)).await }

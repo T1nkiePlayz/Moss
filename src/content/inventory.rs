@@ -10,7 +10,7 @@ pub(super) fn item_json(r: &rusqlite::Row) -> rusqlite::Result<Value> {
 pub(super) async fn db_items(st: &St, sid: &str) -> Result<Vec<Value>> {
     let sid = sid.to_string();
     st.db.call(move |c| {
-        let mut q = c.prepare("SELECT id,provider,project_id,version_id,title,version_number,filename,kind,sha512,installed_at,pinned,dir,source FROM content_items WHERE server_id=? ORDER BY title COLLATE NOCASE")?;
+        let mut q = c.prepare("SELECT id,provider,project_id,version_id,title,version_number,filename,kind,sha512,installed_at,pinned,dir,COALESCE(source, (SELECT 'modpack' FROM modpack_items m WHERE m.content_item_id=content_items.id)) FROM content_items WHERE server_id=? ORDER BY title COLLATE NOCASE")?;
         q.query_map([sid], item_json)?.collect()
     }).await
 }
@@ -113,7 +113,7 @@ pub async fn remove(State(st): State<St>, user: User, Path((id, item)): Path<(St
         let f: Option<(String, String)> = st.db.call(move |db| db.query_row("SELECT filename,dir FROM content_items WHERE id=?", [i], |r| Ok((r.get(0)?, r.get(1)?))).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await?;
         (f.ok_or_else(|| ApiError::not_found("content item"))?.0, Some(item.clone()))
     };
-    let actor = user.email.clone();
+    let actor = user.actor();
     let op = ops::spawn_op(&st, "content.remove", format!("Remove {filename}"), Some(&id), false, move |ctx| async move {
         let st = ctx.st.clone();
         let _g = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;

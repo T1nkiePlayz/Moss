@@ -2,10 +2,6 @@
 //! them into ONE change plan, and apply it as one operation with one undo snapshot, dependencies first.
 use super::*;
 
-/// Hook for the pre-change backup ("Back up before risky changes"). The data package wires `backups::pre_change` here;
-/// until then this does nothing, so update-all behaves exactly like any other content change.
-async fn maybe_backup(_st: &St, _server: &Srv) -> Result<()> { Ok(()) }
-
 /// Resolves every available update into one ordered list of steps (dependencies before dependents, no project twice).
 pub(super) async fn build_all(st: &St, s: &Srv, c: &Compat, token: Option<&str>) -> Result<(Vec<Step>, Vec<String>)> {
     let items = db_items(st, &s.id).await?;
@@ -39,7 +35,7 @@ pub async fn update_all_plan(State(st): State<St>, user: User, Path(id): Path<St
 
 pub async fn update_all(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (s, c) = compat_for(&st, &user, &id, "content.manage").await?;
-    let (token, actor) = (user.token.clone(), user.email.clone());
+    let (token, actor) = (user.token.clone(), user.actor());
     let op = ops::spawn_op(&st, "content.update_all", format!("Update all content on {}", s.name), Some(&id), true, move |ctx| async move {
         let st = ctx.st.clone();
         let _guard = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
@@ -47,7 +43,7 @@ pub async fn update_all(State(st): State<St>, user: User, Path(id): Path<String>
         let (steps, _warnings) = build_all(&st, &s, &c, token.as_deref()).await?;
         ctx.check()?;
         if steps.is_empty() { ctx.log("Everything is up to date."); return Ok(()); }
-        maybe_backup(&st, &s).await?;
+        crate::backups::pre_change_locked(&st, &s, "updating content").await?;
         let label = format!("Update all ({} files)", steps.len());
         apply::execute(&ctx, &s, &c, &steps, token.as_deref(), &actor, apply::Labels { undo: Some(label), audit: "content.update_all" }).await
     });

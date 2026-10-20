@@ -36,6 +36,6 @@ pub(super) async fn settings_put(State(st): State<St>, user: User, Json(v): Json
     if let Some(e) = &events { st.set_setting("notify_events", &serde_json::to_string(e).unwrap_or_default()).await; }
     if let Some(a) = audit { st.set_setting("audit_console_commands", a).await; }
     if let Some(m) = &message { st.set_setting("access_message", m).await; }
-    st.audit(&user.email, "settings.update", "instance", "", None).await;
+    st.audit(&user.actor(), "settings.update", "instance", "", None).await;
     Ok(Json(settings_json(&st, true).await))
 }

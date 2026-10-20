@@ -82,7 +82,7 @@ pub(super) async fn support_bundle(State(st): State<St>, user: User, Query(q): Q
     let f = tokio::fs::File::open(&path).await?;
     let _ = tokio::fs::remove_file(&path).await; // the open handle keeps the data alive until the download ends
     let len = f.metadata().await?.len();
-    st.audit(&user.email, "support.bundle", "instance", "", None).await;
+    st.audit(&user.actor(), "support.bundle", "instance", "", None).await;
     let mut r = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(f)).into_response();
     let h = r.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/zip"));

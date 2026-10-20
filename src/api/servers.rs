@@ -66,8 +66,8 @@ pub(super) async fn servers_create(State(st): State<St>, user: User, Json(mut r)
     limits::save(&st, &id, lim).await?;
     let s = server::get(&st, &id).await?;
     tokio::fs::create_dir_all(s.dir(&st)).await?;
-    if is_mc { st.audit(&user.email, "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
-    st.audit(&user.email, "server.create", &name, &format!("{} {}", s.runtime, s.game_version), Some(&id)).await;
+    if is_mc { st.audit(&user.actor(), "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
+    st.audit(&user.actor(), "server.create", &name, &format!("{} {}", s.runtime, s.game_version), Some(&id)).await;
     let op = ops::spawn_op(&st, "server.install", format!("Install {name}"), Some(&id), true, { let (id, tok, u) = (id.clone(), r.modpack_token.clone(), user.clone()); move |ctx| crate::content::install_then_import(ctx, id, tok, u) });
     Ok((StatusCode::ACCEPTED, Json(json!({"server": server::view(&s, &st), "operation": op}))))
 }
@@ -116,11 +116,11 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     }).await?;
     limits::save(&st, &id, lim).await?;
     if p.accept_eula == Some(true) && s.eula_at.is_none() {
-        st.audit(&user.email, "eula.accept", &s.name, "Minecraft EULA accepted", Some(&id)).await;
+        st.audit(&user.actor(), "eula.accept", &s.name, "Minecraft EULA accepted", Some(&id)).await;
         if s.installed { let _ = tokio::fs::write(s.dir(&st).join("eula.txt"), "# Accepted via Moss by the server owner (https://aka.ms/MinecraftEULA)\neula=true\n").await; }
     }
     if let Some(port) = p.port.filter(|port| *port != s.port) { crate::files::patch_port(&st, &s, port).await; }
-    st.audit(&user.email, "server.update", &s.name, "settings changed", Some(&id)).await;
+    st.audit(&user.actor(), "server.update", &s.name, "settings changed", Some(&id)).await;
     let fresh = server::get(&st, &id).await?;
     let v = server::view(&fresh, &st);
     st.emit("server", v.clone());
@@ -156,7 +156,7 @@ pub(super) async fn server_delete(State(st): State<St>, user: User, Path(id): Pa
     st.hubs.lock().unwrap().remove(&id);
     st.stats.lock().unwrap().remove(&id);
     drop(guard);
-    st.audit(&user.email, "server.delete", &s.name, if q.delete_data { "data deleted" } else { "data kept in data/removed" }, None).await;
+    st.audit(&user.actor(), "server.delete", &s.name, if q.delete_data { "data deleted" } else { "data kept in data/removed" }, None).await;
     st.emit("server", json!({"id": id, "deleted": true}));
     Ok(StatusCode::NO_CONTENT)
 }
@@ -165,10 +165,10 @@ pub(super) async fn server_action(State(st): State<St>, user: User, Path((id, ac
     authz(&st, &user, &id, "server.power").await?;
     let s = server::get(&st, &id).await?;
     match action.as_str() {
-        "start" => lifecycle::start(&st, &s, &user.email).await?,
-        "stop" => lifecycle::stop(&st, &s, &user.email).await?,
-        "restart" => lifecycle::restart(&st, &s, &user.email).await?,
-        "kill" => lifecycle::kill(&st, &s, &user.email).await?,
+        "start" => lifecycle::start(&st, &s, &user.actor()).await?,
+        "stop" => lifecycle::stop(&st, &s, &user.actor()).await?,
+        "restart" => lifecycle::restart(&st, &s, &user.actor()).await?,
+        "kill" => lifecycle::kill(&st, &s, &user.actor()).await?,
         _ => return Err(ApiError::bad("action.unknown", "unknown action")),
     }
     let fresh = server::get(&st, &id).await?;
@@ -180,7 +180,7 @@ pub(super) async fn server_command(State(st): State<St>, user: User, Path(id): P
     authz(&st, &user, &id, "server.console.write").await?;
     let s = server::get(&st, &id).await?;
     lifecycle::send_command(&st, &s, &r.command).await?;
-    st.audit_command(&user.email, &s.name, &r.command, &id).await;
+    st.audit_command(&user.actor(), &s.name, &r.command, &id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

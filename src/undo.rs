@@ -88,6 +88,6 @@ pub async fn revert(State(st): State<St>, user: User, Path(uid): Path<String>) -
     crate::content::resync(&st, &s).await;
     drop(lock);
     st.timeline(&sid, "undo", &title).await;
-    st.audit(&user.email, "undo.revert", &s.name, &title, Some(&sid)).await;
+    st.audit(&user.actor(), "undo.revert", &s.name, &title, Some(&sid)).await;
     Ok(Json(json!({"ok": true})))
 }

@@ -34,6 +34,6 @@ pub(super) async fn notifications_read(State(st): State<St>, user: User, Json(r)
 pub(super) async fn notifications_test(State(st): State<St>, user: User) -> ApiResult<Json<Value>> {
     user.require_admin()?;
     let (delivered, detail) = notify::send_test(&st).await;
-    st.audit(&user.email, "notifications.test", "webhook", if delivered { "delivered" } else { "failed" }, None).await;
+    st.audit(&user.actor(), "notifications.test", "webhook", if delivered { "delivered" } else { "failed" }, None).await;
     Ok(Json(json!({"delivered": delivered, "detail": detail})))
 }

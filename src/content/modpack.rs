@@ -99,7 +99,7 @@ pub async fn import_start(State(st): State<St>, user: User, Path(id): Path<Strin
     let entry = store::get(&r.token, &user.id).ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "modpack.token_expired", "this modpack token is unknown or has expired (tokens last 30 minutes); inspect the pack again"))?;
     if entry.runtime != s.runtime { return Err(ApiError::conflict("modpack.runtime_mismatch", format!("this pack needs {} but the server runs {}", entry.runtime, s.runtime))); }
     if r.mode == "replace" && (lifecycle_running(&st, &s) || crate::lifecycle::process_alive(&s)) { return Err(ApiError::conflict("server.running", "stop the server before replacing its content")); }
-    let (title, actor, utoken) = (format!("Import {} into {}", entry.name, s.name), user.email.clone(), user.token.clone());
+    let (title, actor, utoken) = (format!("Import {} into {}", entry.name, s.name), user.actor(), user.token.clone());
     let op = ops::spawn_op(&st, "modpack.import", title, Some(&id), true, move |ctx| import::import(ctx, s, c, entry, r.mode, utoken, actor));
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }

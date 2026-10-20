@@ -40,7 +40,7 @@ pub(super) struct Found { pub filename: String, pub sha512: String, pub provider
 
 pub async fn identify(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (s, c) = compat_for(&st, &user, &id, "content.manage").await?;
-    let (token, actor) = (user.token.clone(), user.email.clone());
+    let (token, actor) = (user.token.clone(), user.actor());
     let op = ops::spawn_op(&st, "content.identify", format!("Identify content on {}", s.name), Some(&id), true, move |ctx| run(ctx, s, c, token, actor));
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }

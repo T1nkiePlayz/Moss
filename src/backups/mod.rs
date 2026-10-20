@@ -14,7 +14,7 @@ mod restore;
 mod swap;
 
 #[allow(unused_imports)] // pre_change* are the entry points other packages call
-pub use pre_change::{pre_change, pre_change_forced, pre_change_locked};
+pub use pre_change::{pre_change, pre_change_forced, pre_change_forced_locked, pre_change_locked};
 pub use create::do_backup;
 pub use preview::preview;
 pub use restore::restore;
@@ -47,7 +47,7 @@ pub async fn create(State(st): State<St>, user: User, Path(id): Path<String>, bo
     let s = server_for(&st, &user, &id, "backup.manage").await?;
     if !s.installed { return Err(ApiError::conflict("server.not_installed", "server is not installed yet")); }
     let note = body.and_then(|b| b.0.note).unwrap_or_default().chars().take(200).collect::<String>();
-    let actor = user.email.clone();
+    let actor = user.actor();
     let op = ops::spawn_op(&st, "backup.create", format!("Back up {}", s.name), Some(&id), true, move |ctx| async move {
         let st = ctx.st.clone();
         do_backup(&ctx, &st, &s, "manual", &note, None).await?;
@@ -88,7 +88,7 @@ pub async fn patch(State(st): State<St>, user: User, Path(bid): Path<String>, Js
     if r.note.as_ref().is_some_and(|n| n.chars().count() > 200) { return Err(ApiError::bad("validation", "note is limited to 200 characters").field("note", "at most 200 characters")); }
     let (b, note, locked) = (bid.clone(), r.note.clone(), r.locked);
     st.db.call(move |c| c.execute("UPDATE backups SET locked=COALESCE(?,locked), note=COALESCE(?,note) WHERE id=?", rusqlite::params![locked, note, b])).await?;
-    st.audit(&user.email, "backup.update", &bid, &match (r.locked, &r.note) { (Some(true), _) => "locked".to_string(), (Some(false), _) => "unlocked".to_string(), _ => "note".to_string() }, Some(&sid)).await;
+    st.audit(&user.actor(), "backup.update", &bid, &match (r.locked, &r.note) { (Some(true), _) => "locked".to_string(), (Some(false), _) => "unlocked".to_string(), _ => "note".to_string() }, Some(&sid)).await;
     let b = bid.clone();
     Ok(Json(st.db.call(move |c| c.query_row(&format!("{SEL} WHERE id=?"), [b], row_json)).await?))
 }
@@ -100,7 +100,7 @@ pub async fn delete(State(st): State<St>, user: User, Path(bid): Path<String>) -
         return Err(ApiError::conflict("backup.locked", "this backup is locked; unlock it before deleting"));
     }
     remove_backup(&st, &sid, &bid).await?;
-    st.audit(&user.email, "backup.delete", &bid, "", Some(&sid)).await;
+    st.audit(&user.actor(), "backup.delete", &bid, "", Some(&sid)).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -163,7 +163,7 @@ async fn handle(st: St, s: crate::server::Srv, user: User, can_write: bool, mut 
                         && let Some(cmd) = v["d"].as_str() {
                             if let Err(e) = crate::lifecycle::send_command(&st, &s, cmd).await {
                                 let _ = sock.send(Message::Text(serde_json::json!({"t":"line","d":format!("\x1b[31m[moss] {}\x1b[0m", e.message)}).to_string().into())).await;
-                            } else { st.audit_command(&user.email, &s.name, cmd, &s.id).await; }
+                            } else { st.audit_command(&user.actor(), &s.name, cmd, &s.id).await; }
                         }
                 }
                 Some(Ok(Message::Ping(p))) => { let _ = sock.send(Message::Pong(p)).await; }

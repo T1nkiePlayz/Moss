@@ -20,7 +20,7 @@ pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, 
         let s = existing.as_ref().ok_or_else(|| ApiError::conflict("server.gone", "the original server no longer exists; restore as a new server"))?;
         if crate::lifecycle::process_alive(s) { return Err(ApiError::conflict("server.running", "stop the server before restoring in place")); }
     } else { user.require_admin()?; }
-    let actor = user.email.clone();
+    let actor = user.actor();
     let b = bid.clone();
     let only = r.only.clone();
     let op = ops::spawn_op(&st, "backup.restore", format!("Restore {sname}"), Some(&sid.clone()), true, move |ctx| async move {

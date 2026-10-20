@@ -89,7 +89,7 @@ pub async fn write(State(st): State<St>, user: User, Path(id): Path<String>, Jso
     let undo_id = undo::snapshot(&st, &s, &format!("Edit {}", r.path), std::slice::from_ref(&r.path)).await?;
     let c = r.content.clone();
     tokio::task::spawn_blocking(move || atomic_write(&p, c.as_bytes())).await.map_err(|e| anyhow::anyhow!(e))??;
-    st.audit(&user.email, "file.write", &s.name, &r.path, Some(&id)).await;
+    st.audit(&user.actor(), "file.write", &s.name, &r.path, Some(&id)).await;
     Ok(Json(json!({"undo_id": undo_id})))
 }
 
@@ -109,7 +109,7 @@ pub async fn rename(State(st): State<St>, user: User, Path(id): Path<String>, Js
     let (a, b) = (safe_join(&root, &r.from)?, safe_join(&root, &r.to)?);
     if b.exists() { return Err(ApiError::conflict("path.exists", "destination already exists")); }
     tokio::fs::rename(a, b).await?;
-    st.audit(&user.email, "file.rename", &s.name, &format!("{} → {}", r.from, r.to), Some(&id)).await;
+    st.audit(&user.actor(), "file.rename", &s.name, &format!("{} → {}", r.from, r.to), Some(&id)).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -120,7 +120,7 @@ pub async fn delete(State(st): State<St>, user: User, Path(id): Path<String>, Qu
     let p = safe_join(&s.dir(&st), &rel)?;
     let m = tokio::fs::symlink_metadata(&p).await?;
     if m.is_dir() { tokio::fs::remove_dir_all(&p).await?; } else { tokio::fs::remove_file(&p).await?; }
-    st.audit(&user.email, "file.delete", &s.name, &rel, Some(&id)).await;
+    st.audit(&user.actor(), "file.delete", &s.name, &rel, Some(&id)).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -149,7 +149,7 @@ pub async fn upload(State(st): State<St>, user: User, Path(id): Path<String>, Qu
         tokio::fs::rename(&tmp, &target).await?;
         saved.push(rel_of(&s.dir(&st), &target));
     }
-    st.audit(&user.email, "file.upload", &s.name, &saved.join(", "), Some(&id)).await;
+    st.audit(&user.actor(), "file.upload", &s.name, &saved.join(", "), Some(&id)).await;
     Ok(Json(json!({"saved": saved})))
 }
 
@@ -202,7 +202,7 @@ pub async fn props_put(State(st): State<St>, user: User, Path(id): Path<String>,
         let i = id.clone();
         st.db.call(move |c| c.execute("UPDATE servers SET port=? WHERE id=?", rusqlite::params![p, i])).await?;
     }
-    st.audit(&user.email, "config.write", &s.name, "server.properties", Some(&id)).await;
+    st.audit(&user.actor(), "config.write", &s.name, "server.properties", Some(&id)).await;
     Ok(Json(json!({"undo_id": undo_id})))
 }
 

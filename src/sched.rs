@@ -64,7 +64,7 @@ pub async fn create(State(st): State<St>, user: User, Path(id): Path<String>, Js
     let next = next_run(r.every_minutes, r.daily_at.as_deref(), &zone, Utc::now()).map(|t| t.to_rfc3339());
     let (i, srv, kind, cmd, ev, da, en, keep) = (sid.clone(), id.clone(), r.kind.clone().unwrap(), r.command.clone(), r.every_minutes, r.daily_at.clone(), r.enabled.unwrap_or(true), r.keep.map(|k| k.clamp(1, 365)));
     st.db.call(move |c| c.execute("INSERT INTO schedules(id,server_id,kind,command,every_minutes,daily_at,tz_offset_min,tz,enabled,keep,next_run) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rusqlite::params![i, srv, kind, cmd, ev, da, tz_off, tz, en, keep, next])).await?;
-    st.audit(&user.email, "schedule.create", &s.name, r.kind.as_deref().unwrap_or(""), Some(&id)).await;
+    st.audit(&user.actor(), "schedule.create", &s.name, r.kind.as_deref().unwrap_or(""), Some(&id)).await;
     let v = get_one(&st, &sid).await?;
     Ok((StatusCode::CREATED, Json(v)))
 }
@@ -105,7 +105,7 @@ pub async fn delete(State(st): State<St>, user: User, Path(id): Path<String>) ->
 pub async fn run_now(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let cur = get_one(&st, &id).await?;
     authorize(&st, &user, &cur).await?;
-    execute(&st, &cur, &user.email).await;
+    execute(&st, &cur, &user.actor()).await;
     Ok(Json(get_one(&st, &id).await?))
 }
 

@@ -4,7 +4,7 @@ use super::*;
 pub async fn install(State(st): State<St>, user: User, Path(id): Path<String>, Json(r): Json<InstallReq>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (s, c) = compat_for(&st, &user, &id, "content.manage").await?;
     let title = format!("Install content on {}", s.name);
-    let actor = user.email.clone();
+    let actor = user.actor();
     let src = src_for(&st, &user, &c, r.provider.as_deref())?;
     let op = ops::spawn_op(&st, "content.install", title, Some(&id), true, move |ctx| apply(ctx, s, c, src, r.project_id, r.version_id, actor));
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
@@ -19,6 +19,7 @@ pub(super) async fn apply(ctx: OpCtx, s: Srv, c: Compat, src: Src, project_id: S
     ctx.stage("Resolving versions and dependencies");
     let (steps, _w) = build_plan(&st, &src, &s, &c, &project_id, version_id.as_deref()).await?;
     ctx.check()?;
+    crate::backups::pre_change_locked(&st, &s, "changing content").await?;
     execute(&ctx, &s, &c, &steps, src.token.as_deref(), &actor, Labels { undo: None, audit: "content.install" }).await
 }
 
@@ -173,7 +174,7 @@ pub async fn update(State(st): State<St>, user: User, Path((id, item)): Path<(St
     let (pid, provider): (Option<String>, String) = st.db.call(move |db| db.query_row("SELECT project_id,provider FROM content_items WHERE id=?", [i], |r| Ok((r.get(0)?, r.get(1)?)))).await.map_err(|_| ApiError::not_found("content item"))?;
     let src = src_for(&st, &user, &c, Some(&provider))?;
     let pid = pid.ok_or_else(|| ApiError::bad("content.manual", "manually added files have no provider to update from"))?;
-    let actor = user.email.clone();
+    let actor = user.actor();
     let op = ops::spawn_op(&st, "content.update", format!("Update on {}", s.name), Some(&id), true, move |ctx| apply(ctx, s, c, src, pid, None, actor));
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }

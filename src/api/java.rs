@@ -16,7 +16,7 @@ pub(super) async fn java_install(State(st): State<St>, user: User, Json(r): Json
     let users = crate::java::running_users(&st, r.major).await;
     if !users.is_empty() { return Err(in_use(r.major, &users)); }
     let op = ops::spawn_op(&st, "java.install", format!("Install Java {}", r.major), None, true, move |ctx| crate::java::install_managed(ctx, r.major));
-    st.audit(&user.email, "java.install", &format!("Java {}", r.major), "", None).await;
+    st.audit(&user.actor(), "java.install", &format!("Java {}", r.major), "", None).await;
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }
 
@@ -37,6 +37,6 @@ pub(super) async fn java_delete(State(st): State<St>, user: User, Path(major): P
     let _ = tokio::fs::remove_dir_all(&aside).await;
     let st2 = st.clone();
     let _ = tokio::task::spawn_blocking(move || crate::java::installs(&st2, true)).await;
-    st.audit(&user.email, "java.remove", &format!("Java {major}"), "", None).await;
+    st.audit(&user.actor(), "java.remove", &format!("Java {major}"), "", None).await;
     Ok(StatusCode::NO_CONTENT)
 }

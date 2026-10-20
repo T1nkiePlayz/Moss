@@ -34,7 +34,7 @@ pub async fn toggle(State(st): State<St>, user: User, Path((id, item)): Path<(St
             let (rid, new2) = (rid.clone(), new.clone());
             st.db.call(move |db| db.execute("UPDATE content_items SET filename=? WHERE id=?", rusqlite::params![new2, rid])).await?;
         }
-        st.audit(&user.email, if r.enabled { "content.enable" } else { "content.disable" }, &s.name, &filename, Some(&s.id)).await;
+        st.audit(&user.actor(), if r.enabled { "content.enable" } else { "content.disable" }, &s.name, &filename, Some(&s.id)).await;
         row.clone().unwrap_or_else(|| format!("manual:{new}"))
     } else { row.clone().unwrap_or_else(|| item.clone()) };
     let items = items_json(&st, &s, &c).await?;

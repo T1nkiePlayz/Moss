@@ -78,7 +78,7 @@ pub(super) async fn run(ctx: OpCtx, s: Srv, c: Compat, token: Option<String>, re
     ctx.check()?;
     if req.backup {
         ctx.stage("Taking a pre-change backup");
-        match maybe_backup(&st, &s).await? { Some(id) => ctx.log(format!("Backup {id} holds the previous state; restore it to roll back.")), None => ctx.log("No pre-change backup was taken.") }
+        match crate::backups::pre_change_forced_locked(&st, &s, "a version upgrade", &ctx).await? { Some(id) => ctx.log(format!("Backup {id} holds the previous state; restore it to roll back.")), None => ctx.log("No pre-change backup was taken.") }
     }
     let (root, ct) = (s.dir(&st), for_game(&c, &req.game_version));
     let dir = safe_join(&root, &c.dir).map_err(|e| anyhow!(e.message))?;

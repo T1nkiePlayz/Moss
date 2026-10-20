@@ -23,7 +23,7 @@ pub(super) async fn server_reinstall(State(st): State<St>, user: User, Path(id):
     }
     if lifecycle::process_alive(&s) { return Err(ApiError::conflict("server.running", "stop the server before reinstalling it")); }
     let guard = st.lock_for(&id).try_lock_owned().map_err(|_| ApiError::conflict("server.locked", "another operation is changing this server"))?;
-    st.audit(&user.email, "server.reinstall", &s.name, if r.keep_data { "keeping data" } else { "data wiped" }, Some(&id)).await;
+    st.audit(&user.actor(), "server.reinstall", &s.name, if r.keep_data { "keeping data" } else { "data wiped" }, Some(&id)).await;
     let (id2, keep) = (id.clone(), r.keep_data);
     let op = ops::spawn_op(&st, "server.reinstall", format!("Reinstall {}", s.name), Some(&id), true, move |ctx| async move {
         let _guard = guard;

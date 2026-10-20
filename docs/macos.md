@@ -13,8 +13,6 @@ less install.sh                       # read it first
 sh install.sh --prefix "$HOME/.local" # or without --prefix for /usr/local/bin (uses sudo)
 ```
 
-While the repository is private, export `GITHUB_TOKEN` (a token that can read releases) before running it.
-
 **Homebrew**: each release ships a `moss.rb` formula with the real checksums.
 
 ```sh
@@ -44,7 +42,7 @@ MOSS_AUTH=dev moss serve          # no sign-in, loopback only: for trying it out
 moss doctor                       # checks data directory, port, Java and sign-in settings
 ```
 
-For real use copy `moss.env.example`, fill in the Supabase settings and owner e-mail (see `docs/supabase.md`).
+For real use, sign-in works out of the box: the release includes the sign-in settings in `.env`. Open the panel, sign in, and enter the setup token Moss wrote to `<data dir>/setup-token` to become the owner. To pin the owner by e-mail instead, copy `moss.env.example` and set `MOSS_OWNER_EMAILS`.
 
 ### launchd
 

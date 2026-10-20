@@ -26,7 +26,7 @@ mod toggle;
 mod update_all;
 mod upgrade;
 
-pub use apply::{check_updates, install, update};
+pub use apply::{check_updates, install, install_many, update};
 pub use check::{check_get, server_findings};
 pub use identify::identify;
 pub use toggle::toggle;

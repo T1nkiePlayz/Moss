@@ -14,6 +14,8 @@ pub(super) struct CreateReq {
     name: String, #[serde(default)] runtime: String, #[serde(default)] game_version: String, modpack_token: Option<String>, loader_version: Option<String>, memory_mb: Option<i64>, port: Option<i64>,
     accept_eula: Option<bool>, flags_profile: Option<String>, autostart: Option<bool>, custom: Option<CustomCmd>,
     memory_limit_mb: Option<i64>, cpu_limit_pct: Option<i64>, pids_limit: Option<i64>,
+    /// Set only by the blueprint endpoint (never from the request body).
+    #[serde(skip_deserializing)] blueprint: Option<Value>,
 }
 
 pub(super) async fn free_port(_st: &St, preferred: i64, used: &[i64]) -> i64 {
@@ -25,7 +27,16 @@ pub(super) async fn free_port(_st: &St, preferred: i64, used: &[i64]) -> i64 {
     }
 }
 
-pub(super) async fn servers_create(State(st): State<St>, user: User, Json(mut r): Json<CreateReq>) -> ApiResult<(StatusCode, Json<Value>)> {
+pub(super) async fn servers_create(State(st): State<St>, user: User, Json(r): Json<CreateReq>) -> ApiResult<(StatusCode, Json<Value>)> { create_server(st, user, r).await }
+
+/// Creates a server from a JSON request body built inside Moss (blueprints, imports).
+pub async fn create_server_from_value(st: St, user: User, v: Value, blueprint: Option<Value>) -> ApiResult<(StatusCode, Json<Value>)> {
+    let mut r: CreateReq = serde_json::from_value(v).map_err(|e| ApiError::bad("validation", e.to_string()))?;
+    r.blueprint = blueprint;
+    create_server(st, user, r).await
+}
+
+async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(StatusCode, Json<Value>)> {
     user.require_admin()?;
     if let Some(t) = &r.modpack_token { (r.runtime, r.game_version, r.loader_version) = crate::content::modpack_create_params(&user, t, &r.runtime, &r.game_version, r.loader_version.as_deref())?; }
     let name = r.name.trim().to_string();
@@ -68,7 +79,14 @@ pub(super) async fn servers_create(State(st): State<St>, user: User, Json(mut r)
     tokio::fs::create_dir_all(s.dir(&st)).await?;
     if is_mc { st.audit(&user.actor(), "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
     st.audit(&user.actor(), "server.create", &name, &format!("{} {}", s.runtime, s.game_version), Some(&id)).await;
-    let op = ops::spawn_op(&st, "server.install", format!("Install {name}"), Some(&id), true, { let (id, tok, u) = (id.clone(), r.modpack_token.clone(), user.clone()); move |ctx| crate::content::install_then_import(ctx, id, tok, u) });
+    let op = ops::spawn_op(&st, "server.install", format!("Install {name}"), Some(&id), true, {
+        let (id, tok, u, bp) = (id.clone(), r.modpack_token.clone(), user.clone(), r.blueprint.clone());
+        move |ctx| async move {
+            crate::content::install_then_import(ctx.clone(), id.clone(), tok, u.clone()).await?;
+            if let Some(bp) = bp { crate::blueprints::apply_after_install(ctx, id, bp, u).await?; }
+            Ok(())
+        }
+    });
     Ok((StatusCode::ACCEPTED, Json(json!({"server": server::view(&s, &st), "operation": op}))))
 }
 

@@ -11,6 +11,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0004_content", include_str!("migrations/0004_content.sql")),
     ("0005_tokens", include_str!("migrations/0005_tokens.sql")),
     ("0006_modpacks", include_str!("migrations/0006_modpacks.sql")),
+    ("0010_userdata", include_str!("migrations/0010_userdata.sql")),
 ];
 
 /// Number of migrations this build knows (the `user_version` of an up-to-date database).

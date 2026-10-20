@@ -35,6 +35,7 @@ mod tokens;
 
 use access::*; use activity::*; use assets::static_files; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
 use {metrics::*, notifications::*, support::*};
+pub use servers::create_server_from_value;
 
 type Q = Query<HashMap<String, String>>;
 
@@ -46,10 +47,18 @@ pub fn take_ticket(st: &St, t: Option<&String>) -> ApiResult<User> {
 }
 
 pub fn router(st: St) -> Router {
-    use crate::{backups, cfgfiles, console, content, files, health, sched, undo};
+    use crate::{backups, blueprints, cfgfiles, console, content, files, health, sched, undo, userdata};
     let api = Router::new()
         .route("/auth/config", get(auth_config))
         .route("/me", get(me))
+        .route("/me/preferences", get(userdata::prefs_get).put(userdata::prefs_put))
+        .route("/views", get(userdata::views_list).post(userdata::views_create))
+        .route("/views/{id}", axum::routing::delete(userdata::views_delete))
+        .route("/blueprints", get(blueprints::list).post(blueprints::save))
+        .route("/blueprints/import", post(blueprints::import))
+        .route("/blueprints/{id}", axum::routing::delete(blueprints::delete))
+        .route("/blueprints/{id}/export", get(blueprints::export))
+        .route("/blueprints/{id}/create", post(blueprints::create))
         .route("/ticket", post(ticket))
         .route("/status", get(status))
         .route("/runtimes", get(runtimes_list))

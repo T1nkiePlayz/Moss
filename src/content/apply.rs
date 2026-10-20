@@ -225,3 +225,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+
+/// Installs a list of `(provider, project_id)` pairs onto a freshly created server in one step (used by blueprints).
+/// A project that cannot be resolved for this version is logged and skipped; the rest still install. Returns how many
+/// projects were installed.
+pub async fn install_many(ctx: OpCtx, id: &str, items: &[(String, String)], user: &User) -> Result<usize> {
+    let st = ctx.st.clone();
+    let s = crate::server::get(&st, id).await.map_err(|e| anyhow!(e.message))?;
+    let Some(c) = compat(&st, &s) else { return Ok(0) };
+    let _guard = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
+    let mut steps: Vec<Step> = vec![];
+    for (prov, pid) in items {
+        ctx.check()?;
+        let src = match src_for(&st, user, &c, Some(prov)) { Ok(s) => s, Err(e) => { ctx.log(format!("Skipped {pid}: {}", e.message)); continue } };
+        ctx.stage(&format!("Looking up {pid}"));
+        match build_plan(&st, &src, &s, &c, pid, None).await {
+            Ok((plan, _)) => for step in plan { if !steps.iter().any(|x| x.project_id == step.project_id) { steps.push(step); } },
+            Err(e) => ctx.log(format!("Skipped {pid}: {e}")),
+        }
+    }
+    if steps.is_empty() { return Ok(0); }
+    let n = steps.len();
+    execute(&ctx, &s, &c, &steps, user.token.as_deref(), &user.actor(), Labels { undo: Some("Install blueprint content".into()), audit: "content.install" }).await?;
+    Ok(n)
+}

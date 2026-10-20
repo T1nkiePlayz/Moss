@@ -1,6 +1,6 @@
 //! The SQLite handle: one WAL connection behind a mutex, history pruning, and the timestamp helper.
 //! Schema creation and upgrades live in `migrations`.
-mod migrations;
+pub(crate) mod migrations;
 
 /// Applies the schema to an in-memory connection (tests of other modules).
 #[cfg(test)]

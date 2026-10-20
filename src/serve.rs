@@ -33,16 +33,20 @@ pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     lifecycle::reconcile(&st).await?;
     lifecycle::spawn_background(&st);
     sched::spawn_background(&st);
+    crate::notify::spawn_background(&st);
+    crate::history::spawn_background(&st);
     let addr = format!("{}:{}", cfg.bind, cfg.port);
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}"))?;
     if cfg.dev() { tracing::warn!("AUTH DISABLED (dev mode) — anyone who can reach {addr} has full control"); }
     else if cfg.owner_email_list().is_empty() { tracing::warn!("MOSS_OWNER_EMAILS is not set: the first verified account to sign in becomes the owner. Set it to pin ownership."); }
     if !cfg.dev() && cfg.bind != "127.0.0.1" && cfg.bind != "::1" { tracing::warn!("listening on {addr}: put Moss behind a TLS reverse proxy before exposing it to a network"); }
     tracing::info!("Moss {} listening on http://{addr}  (data: {})", env!("CARGO_PKG_VERSION"), cfg.data_dir.display());
-    axum::serve(listener, api::router(st)).with_graceful_shutdown(async {
+    let st_exit = st.clone();
+    axum::serve(listener, api::router(st)).with_graceful_shutdown(async move {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("signal");
         tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
         tracing::info!("shutting down the controller — game servers keep running");
+        crate::history::flush(&st_exit, true).await;
     }).await?;
     Ok(())
 }

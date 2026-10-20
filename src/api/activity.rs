@@ -32,13 +32,19 @@ pub(super) async fn activity(State(st): State<St>, user: User, Query(q): Q) -> A
     Ok(Json(Value::Array(rows.into_iter().filter(|(_, s)| vis.as_ref().is_none_or(|v| s.as_ref().is_some_and(|s| v.contains(s)))).map(|(v, _)| v).take(limit as usize).collect())))
 }
 
+/// Server-sent events. A subscriber that fell behind the broadcast buffer gets `resync` (it must refetch its lists).
 pub(super) async fn events(State(st): State<St>, Query(q): Q) -> ApiResult<Response> {
     let user = take_ticket(&st, q.get("ticket"))?;
     let vis = auth::visible_servers(&st, &user).await?;
+    let admin = user.is_admin();
     let rx = st.bus.subscribe();
-    let hello = tokio_stream::once(Ok::<_, std::convert::Infallible>(sse::Event::default().event("hello").data("{}")));
+    let hello = tokio_stream::once(Ok::<_, std::convert::Infallible>(sse::Event::default().event("hello").data(json!({"server_time": crate::db::now()}).to_string())));
     let stream = BroadcastStream::new(rx).filter_map(move |e| {
-        let e = e.ok()?;
+        let e = match e {
+            Ok(e) => e,
+            Err(_lagged) => return Some(Ok(sse::Event::default().event("resync").data("{}"))),
+        };
+        if e.kind == "notification" && !admin && crate::notify::rules::is_admin_only(e.data["kind"].as_str().unwrap_or_default()) { return None; }
         let sid = e.data.get("server_id").and_then(|v| v.as_str()).or_else(|| (e.kind == "server").then(|| e.data["id"].as_str()).flatten()).map(String::from);
         if let Some(v) = &vis && !sid.as_ref().is_some_and(|s| v.contains(s)) { return None; }
         Some(Ok(sse::Event::default().event(e.kind).data(e.data.to_string())))

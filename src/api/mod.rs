@@ -21,11 +21,15 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 mod access;
 mod activity;
 mod assets;
+mod metrics;
+mod notifications;
 mod servers;
 mod session;
 mod settings;
+mod support;
 
 use access::*; use activity::*; use assets::static_files; use servers::*; use session::*; use settings::*;
+use {metrics::*, notifications::*, support::*};
 
 type Q = Query<HashMap<String, String>>;
 
@@ -73,11 +77,13 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/content/{item}/update", post(content::update))
         .route("/backups", get(backups::list_all))
         .route("/servers/{id}/backups", get(backups::list).post(backups::create))
-        .route("/backups/{id}", axum::routing::delete(backups::delete))
+        .route("/backups/{id}", patch(backups::patch).delete(backups::delete))
+        .route("/backups/{id}/preview", post(backups::preview))
         .route("/backups/{id}/verify", post(backups::verify))
         .route("/backups/{id}/restore", post(backups::restore))
         .route("/backups/{id}/download", get(backups::download))
         .route("/servers/{id}/schedules", get(sched::list).post(sched::create))
+        .route("/timezones", get(sched::timezones))
         .route("/schedules/{id}", patch(sched::patch).delete(sched::delete))
         .route("/schedules/{id}/run", post(sched::run_now))
         .route("/operations", get(operations_list))
@@ -90,6 +96,12 @@ pub fn router(st: St) -> Router {
         .route("/users", get(users_list).post(users_create))
         .route("/users/{id}", patch(users_patch).delete(users_delete))
         .route("/servers/{id}/access", get(access_get).put(access_put))
+        .route("/notifications", get(notifications_list))
+        .route("/notifications/read", post(notifications_read))
+        .route("/notifications/test", post(notifications_test))
+        .route("/servers/{id}/metrics", get(server_metrics))
+        .route("/metrics/host", get(host_metrics))
+        .route("/support-bundle", get(support_bundle))
         .route("/settings", get(settings_get).put(settings_put))
         .route("/events", get(events))
         .fallback(|| async { ApiError::not_found("endpoint") });

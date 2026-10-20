@@ -37,6 +37,9 @@ pub struct Config {
     /// Edge function URL for CurseForge; empty = `<SUPABASE_URL>/functions/v1/curseforge`, `off` disables CurseForge.
     #[arg(long, env = "MOSS_CURSEFORGE_PROXY", default_value = "")]
     pub curseforge_proxy: String,
+    /// Allow notification webhooks that resolve to private, loopback or link-local addresses (default: refuse, to prevent SSRF).
+    #[arg(long, env = "MOSS_ALLOW_PRIVATE_WEBHOOKS", default_value_t = false, action = clap::ArgAction::Set)]
+    pub allow_private_webhooks: bool,
     /// Expose the simulated game server runtime (development and demos).
     #[arg(long, env = "MOSS_DEV_RUNTIMES", default_value_t = false, action = clap::ArgAction::Set)]
     pub dev_runtimes: bool,

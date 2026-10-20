@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{io::{Read, Write}, path::{Path as FsPath, PathBuf}};
 
 pub const EXCLUDE_TOP: &[&str] = &[".moss", "logs", "cache"];
-const MANIFEST: &str = ".moss-manifest.json";
+pub const MANIFEST: &str = ".moss-manifest.json";
 
 struct HashW<W: Write> { inner: W, h: Sha256, n: u64 }
 impl<W: Write> Write for HashW<W> {
@@ -79,9 +79,24 @@ pub fn build_archive(root: PathBuf, out: PathBuf, manifest: String, token: tokio
     Ok((hex::encode(hw.h.finalize()), hw.n, files))
 }
 
-fn safe_entry_path(p: &FsPath) -> bool { p.components().all(|c| matches!(c, std::path::Component::Normal(_))) && p.components().count() > 0 }
+pub fn safe_entry_path(p: &FsPath) -> bool { p.components().all(|c| matches!(c, std::path::Component::Normal(_))) && p.components().count() > 0 }
 
-pub fn verify_archive(path: &FsPath, want: &str) -> Result<u64> {
+/// Top-level directories (not excluded ones) that contain a `level.dat`: the worlds of a server directory.
+pub fn worlds_of(root: &FsPath) -> Vec<String> {
+    let mut w: Vec<String> = std::fs::read_dir(root).into_iter().flatten().flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && e.path().join("level.dat").is_file())
+        .map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| !EXCLUDE_TOP.contains(&n.as_str())).collect();
+    w.sort();
+    w
+}
+
+/// First path component of an archive entry.
+pub fn top_name(p: &FsPath) -> Option<String> { p.components().next().map(|c| c.as_os_str().to_string_lossy().to_string()) }
+
+pub fn verify_archive(path: &FsPath, want: &str) -> Result<u64> { verify_archive_scan(path, want).map(|(n, _)| n) }
+
+/// Verify checksum and entry safety; also returns the top-level names present in the archive.
+pub fn verify_archive_scan(path: &FsPath, want: &str) -> Result<(u64, std::collections::BTreeSet<String>)> {
     let mut f = std::fs::File::open(path)?;
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 1 << 20];
@@ -89,18 +104,20 @@ pub fn verify_archive(path: &FsPath, want: &str) -> Result<u64> {
     let got = hex::encode(h.finalize());
     if !got.eq_ignore_ascii_case(want) { bail!("checksum mismatch: archive is corrupt (expected {}…, got {}…)", &want[..12.min(want.len())], &got[..12]); }
     let mut ar = tar::Archive::new(zstd::Decoder::new(std::fs::File::open(path)?)?);
-    let mut entries = 0;
+    let (mut entries, mut names) = (0, std::collections::BTreeSet::new());
     for e in ar.entries()? {
         let e = e?;
         let p = e.path()?.into_owned();
         if !safe_entry_path(&p) { bail!("archive contains an unsafe path: {}", p.display()); }
         if !matches!(e.header().entry_type(), tar::EntryType::Regular | tar::EntryType::Directory) { bail!("archive contains a non-regular entry: {}", p.display()); }
+        if p != FsPath::new(MANIFEST) && let Some(t) = top_name(&p) { names.insert(t); }
         entries += 1;
     }
-    Ok(entries)
+    Ok((entries, names))
 }
 
-pub fn extract_archive(path: &FsPath, dest: &FsPath, token: &tokio_util::sync::CancellationToken) -> Result<()> {
+/// Extract into `dest`; with `only`, just those top-level entries.
+pub fn extract_archive(path: &FsPath, dest: &FsPath, token: &tokio_util::sync::CancellationToken, only: Option<&[String]>) -> Result<()> {
     std::fs::create_dir_all(dest)?;
     let mut ar = tar::Archive::new(zstd::Decoder::new(std::fs::File::open(path)?)?);
     ar.set_preserve_permissions(false);
@@ -111,6 +128,7 @@ pub fn extract_archive(path: &FsPath, dest: &FsPath, token: &tokio_util::sync::C
         let mut e = e?;
         let p = e.path()?.into_owned();
         if p == FsPath::new(MANIFEST) { continue; }
+        if let Some(only) = only && !top_name(&p).is_some_and(|t| only.contains(&t)) { continue; }
         if !safe_entry_path(&p) || !matches!(e.header().entry_type(), tar::EntryType::Regular | tar::EntryType::Directory) { bail!("refusing unsafe archive entry {}", p.display()); }
         total += e.size();
         if total > (2u64 << 40) { bail!("archive expands beyond the safety limit"); }
@@ -142,9 +160,26 @@ mod tests {
         assert_eq!(files, 1);
         assert!(verify_archive(&out, &sha).is_ok());
         assert!(verify_archive(&out, &"0".repeat(64)).is_err());
-        extract_archive(&out, &dst, &tok).unwrap();
+        extract_archive(&out, &dst, &tok, None).unwrap();
         assert_eq!(std::fs::read(dst.join("world/level.dat")).unwrap(), b"data");
         assert!(!dst.join(".moss").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn worlds_and_selective_extraction() {
+        let base = std::env::temp_dir().join(format!("moss-bk-sel-{}", std::process::id()));
+        let (src, out, dst) = (base.join("src"), base.join("a.tar.zst"), base.join("dst"));
+        for d in ["world", "world_nether", "plugins", "logs"] { std::fs::create_dir_all(src.join(d)).unwrap(); }
+        for f in ["world/level.dat", "world_nether/level.dat", "plugins/a.jar", "server.properties", "logs/level.dat"] { std::fs::write(src.join(f), b"x").unwrap(); }
+        assert_eq!(worlds_of(&src), vec!["world", "world_nether"]);
+        let tok = tokio_util::sync::CancellationToken::new();
+        let (sha, ..) = build_archive(src.clone(), out.clone(), "{}".into(), tok.clone()).unwrap();
+        let (_, names) = verify_archive_scan(&out, &sha).unwrap();
+        assert_eq!(names.into_iter().collect::<Vec<_>>(), vec!["plugins", "server.properties", "world", "world_nether"]);
+        extract_archive(&out, &dst, &tok, Some(&["world_nether".to_string(), "server.properties".to_string()])).unwrap();
+        assert!(dst.join("world_nether/level.dat").is_file() && dst.join("server.properties").is_file());
+        assert!(!dst.join("world").exists() && !dst.join("plugins").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 }

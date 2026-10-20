@@ -5,11 +5,14 @@
   import { api, download, fileDownloadPath, errMsg, type FileEntry, type FileList, type Server } from '../../lib/api';
   import { bytes, relTime } from '../../lib/format';
   import { confirmDialog, toast, toastError, undoToast } from '../../lib/stores.svelte';
+  import Lazy from '../../components/Lazy.svelte';
   import { can } from '../../lib/auth.svelte';
 
   let { server: s }: { server: Server } = $props();
   const canWrite = $derived(can('files.write'));
 
+  let view = $state<'browse' | 'config'>('browse');
+  const loadConfig = () => import('../../components/ConfigEditor.svelte');
   let path = $state('');
   let listing = $state<FileList | null>(null);
   let err = $state('');
@@ -105,7 +108,16 @@
   function go(p: string) { path = p; }
 </script>
 
-{#if open}
+{#if !open}
+  <div class="row g6" role="group" aria-label="Files view" style="margin-bottom:12px">
+    <button class="chip" aria-pressed={view === 'browse'} onclick={() => (view = 'browse')}><Icon name="folder" size={14} />Browse</button>
+    <button class="chip" aria-pressed={view === 'config'} onclick={() => (view = 'config')}><Icon name="sliders" size={14} />Configuration</button>
+  </div>
+{/if}
+
+{#if !open && view === 'config'}
+  <Lazy load={loadConfig} props={{ server: s }} />
+{:else if open}
   <section class="card ed">
     <div class="row wrap between">
       <div class="row g6" style="min-width:0">

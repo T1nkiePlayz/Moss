@@ -96,6 +96,14 @@ export interface Operation {
   state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; stage: string; progress: number | null;
   log: string[]; error: string | null; created_at: string; started_at: string | null; ended_at: string | null; cancellable: boolean;
 }
+export interface ConfigFileInfo { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean }
+export interface ConfigField {
+  key: string; type: 'bool' | 'int' | 'float' | 'string' | 'enum' | string; default: unknown; group: string; description: string; min: number | null; max: number | null; options: string[];
+  restart: boolean; secret: boolean; danger: boolean; mixed: boolean; present: boolean; value: unknown;
+}
+export interface ConfigSnapshot { id: string; title: string; created_at: string }
+export interface ConfigFile { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean; raw: string; parse_error: string | null; fields: ConfigField[]; history: ConfigSnapshot[] }
+export interface ConfigDiff { current: string; previous: string | null; snapshot: ConfigSnapshot | null }
 export interface UndoEntry { id: string; title: string; created_at: string; files: string[] }
 export interface Activity { id: string; time: string; actor: string; action: string; target: string; detail: string }
 export interface Finding {
@@ -273,6 +281,10 @@ export const api = {
 
   operations: (limit = 50, server_id?: string) => get<Operation[]>(`/operations${q({ limit, server_id })}`),
   cancelOp: (id: string) => send('POST', `/operations/${e(id)}/cancel`),
+  configFiles: (id: string) => get<{ files: ConfigFileInfo[] }>(`/servers/${e(id)}/config`),
+  configFile: (id: string, file: string) => get<ConfigFile>(`/servers/${e(id)}/config/${e(file)}`),
+  saveConfig: (id: string, file: string, body: { raw: string } | { set?: Record<string, unknown>; unset?: string[] }) => send<{ undo_id: string | null; changed: boolean }>('PUT', `/servers/${e(id)}/config/${e(file)}`, body),
+  configDiff: (id: string, file: string, snapshot?: string) => get<ConfigDiff>(`/servers/${e(id)}/config/${e(file)}/diff${q({ snapshot })}`),
   undoList: (id: string) => get<UndoEntry[]>(`/servers/${e(id)}/undo`),
   revert: (id: string) => send<{ ok: boolean }>('POST', `/undo/${e(id)}/revert`),
   activity: (limit = 100, server_id?: string) => get<Activity[]>(`/activity${q({ limit, server_id })}`),

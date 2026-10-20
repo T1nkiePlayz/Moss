@@ -4,7 +4,7 @@
 
 Please report vulnerabilities privately. Do not open a public issue or pull request for them.
 
-Use GitHub's private vulnerability reporting: open the **Security** tab of this repository and choose **Report a vulnerability**. Include the Moss version (shown in Settings and in `moss --version`), your operating system, how you run Moss (process or container mode, behind a reverse proxy or not), and steps to reproduce. A proof of concept helps; please do not include real credentials or other people's data.
+Use GitHub's private vulnerability reporting: open the **Security** tab of this repository and choose **Report a vulnerability**. Include the Moss version (`moss --version`), your operating system, how you run Moss (process or container mode, behind a reverse proxy or not), and steps to reproduce. A proof of concept helps; please do not include real credentials or other people's data.
 
 ## Supported versions
 

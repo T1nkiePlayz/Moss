@@ -75,16 +75,16 @@ async fn latest_version(st: &St, user: &User, provider: &str, pid: &str) -> Resu
 
 async fn installed_items(st: &St, install: &str) -> Result<Vec<Installed>> {
     let i = install.to_string();
-    Ok(st.db.call(move |c| {
+    st.db.call(move |c| {
         let mut q = c.prepare("SELECT c.id,c.provider,c.project_id,c.version_id,c.title,c.version_number,c.dir,c.filename,c.pinned,c.sha512 FROM modpack_items m JOIN content_items c ON c.id=m.content_item_id WHERE m.install_id=?")?;
         q.query_map([i], |r| Ok(Installed { item_id: r.get(0)?, provider: r.get(1)?, project: r.get(2)?, version_id: r.get(3)?, title: r.get(4)?, version: r.get(5)?,
             path: format!("{}/{}", r.get::<_, String>(6)?, r.get::<_, String>(7)?), pinned: r.get(8)?, sha512: r.get(9)? }))?.collect()
-    }).await?)
+    }).await
 }
 
 async fn recorded_sums(st: &St, install: &str) -> Result<HashMap<String, String>> {
     let i = install.to_string();
-    Ok(st.db.call(move |c| { let mut q = c.prepare("SELECT path,sha256 FROM modpack_files WHERE install_id=?")?; q.query_map([i], |r| Ok((r.get(0)?, r.get(1)?)))?.collect() }).await?)
+    st.db.call(move |c| { let mut q = c.prepare("SELECT path,sha256 FROM modpack_files WHERE install_id=?")?; q.query_map([i], |r| Ok((r.get(0)?, r.get(1)?)))?.collect() }).await
 }
 
 /// Checksums of the override files inside the archive (what the new version would write).
@@ -315,18 +315,23 @@ async fn apply_inner(ctx: &OpCtx, s: &Srv, c: &Compat, row: &InstallRow, pack_pa
     Ok(())
 }
 
+/// (item id, file name, new version id, title, sha512)
+type UpdRow = (String, String, Option<String>, String, Option<String>);
+/// (new item id, provider, project, version, title, file name, sha512)
+type AddRow = (String, String, Option<String>, Option<String>, String, String, Option<String>);
+
 #[allow(clippy::too_many_arguments)]
 async fn record_update(st: &St, s: &Srv, c: &Compat, row: &InstallRow, p: &Plan, fetched: &[Fetched], identity: Option<store::Identity>, written: &[String]) -> Result<()> {
     let d = &p.diff;
     let now = crate::db::now();
     let (sid, dir, kind, install) = (s.id.clone(), c.dir.clone(), c.kind.to_string(), row.id.clone());
     let version_of = |path: &str| fetched.iter().find(|f| f.file.path == path).map(|f| (f.file.provider.clone(), f.file.sha512.clone()));
-    let upd: Vec<(String, String, Option<String>, String, Option<String>)> = d.files.updated.iter().filter_map(|u| {
+    let upd: Vec<UpdRow> = d.files.updated.iter().filter_map(|u| {
         let (prov, sha) = version_of(&u.path)?;
         let fname = u.path.rsplit('/').next()?.to_string();
         Some((u.item_id.clone()?, fname.clone(), prov.map(|x| x.2), fname, sha))
     }).collect();
-    let add: Vec<(String, String, Option<String>, Option<String>, String, String, Option<String>)> = d.files.added.iter().filter_map(|a| {
+    let add: Vec<AddRow> = d.files.added.iter().filter_map(|a| {
         let f = fetched.iter().find(|f| f.file.path == a.path)?;
         let fname = a.path.rsplit('/').next()?.to_string();
         let (prov, project, version) = match &f.file.provider { Some((x, y, z)) => (x.clone(), Some(y.clone()), Some(z.clone())), None => ("manual".into(), None, None) };

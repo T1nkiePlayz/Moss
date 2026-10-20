@@ -144,9 +144,7 @@ pub async fn discard_run(State(st): State<St>, user: User, Path((id, run)): Path
     let r = run_for(&st, &id, &run).await?;
     let s = origin_for(&st, &user, &id, false).await?;
     st.audit(&user.actor(), "staging.discard", &s.name, &r.kind, Some(&id)).await;
-    if r.active() {
-        if let Some(op) = &r.op_id && ops::cancel(&st, op) { return Ok((StatusCode::ACCEPTED, Json(json!({"state": "cancelling"})))); }
-    }
+    if r.active() && let Some(op) = &r.op_id && ops::cancel(&st, op) { return Ok((StatusCode::ACCEPTED, Json(json!({"state": "cancelling"})))); }
     discard(&st, &run).await?;
     Ok((StatusCode::OK, Json(json!({"state": "discarded"}))))
 }

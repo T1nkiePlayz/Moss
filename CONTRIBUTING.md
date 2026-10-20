@@ -26,6 +26,8 @@ npx playwright install chromium && npm run test:ui   # every page renders cleanl
 node ../scripts/bundle-budget.mjs                   # first-load JavaScript budget
 ```
 
+The API is covered by a stability policy ([docs/api-policy.md](docs/api-policy.md)): `tests/api_compat.rs` fails if you remove or break anything in `docs/openapi.frozen.json`. After adding routes or fields, run `node scripts/api-freeze.mjs` to extend the snapshot and commit it.
+
 Every new HTTP route goes in `src/api/mod.rs` (the single route list), `docs/openapi.json` and `docs/api.md`; `tests/openapi.rs` enforces this. Database changes are a new numbered file in `src/db/migrations/` appended to `MIGRATIONS`. Read [docs/architecture.md](docs/architecture.md), [docs/threat-model.md](docs/threat-model.md) and the notes in [docs/adr](docs/adr) before large changes.
 
 Layout: `src/` (`api/`, `auth/`, `lifecycle/`, `container/`, `content/`, `backups/`, `platform/`, `runtimes/`, `installer/`, `providers/`, `notify/`, `jars/`, `cfgfiles/`, `cli/`, `db/` plus single-purpose modules), `web/`, `supabase/` (the CurseForge relay function and its test: `node supabase/functions/curseforge/index.test.mts`, Node 22.18+), `docs/`, `packaging/`, `scripts/`, `tests/`.

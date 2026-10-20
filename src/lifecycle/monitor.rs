@@ -34,7 +34,7 @@ fn supervise(st: &St) {
                 if restart_due {
                     st1.live.lock().unwrap().entry(s.id.clone()).or_default().restart_at = None;
                     st1.timeline(&s.id, "restart", "automatic restart after crash").await;
-                    if let Err(e) = start(&st1, s, "system").await { set_detail(&st1, &s.id, &format!("automatic restart failed: {}", e.message)); }
+                    if let Err(e) = start(&st1, s, "system").await { set_detail(&st1, &s.id, &format!("automatic restart failed: {}", e.message)); crate::notify::restart_failed(&st1, s, &e.message).await; }
                 }
                 server::note_state(&st1, s);
             }

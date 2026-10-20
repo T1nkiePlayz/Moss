@@ -179,7 +179,7 @@ pub(super) async fn server_command(State(st): State<St>, user: User, Path(id): P
     authz(&st, &user, &id, "server.console.write").await?;
     let s = server::get(&st, &id).await?;
     lifecycle::send_command(&st, &s, &r.command).await?;
-    st.audit(&user.email, "console.command", &s.name, &r.command, Some(&id)).await;
+    st.audit_command(&user.email, &s.name, &r.command, &id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

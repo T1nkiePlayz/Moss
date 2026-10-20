@@ -1,6 +1,6 @@
 //! Moss entry point: module tree, CLI definition and command dispatch. Each command lives in its own module.
 mod api; mod auth; mod backups; mod config; mod console; mod content; mod db; mod doctor; mod dotenv; mod download; mod error; mod files;
-mod health; mod installer; mod java; mod lifecycle; mod mcping; mod ops; mod platform; mod providers; mod runtimes; mod sched; mod serve; mod server; mod sim; mod state; mod undo;
+mod health; mod history; mod installer; mod java; mod lifecycle; mod mcping; mod notify; mod ops; mod platform; mod providers; mod runtimes; mod sched; mod serve; mod server; mod sim; mod state; mod undo;
 
 use clap::{Parser, Subcommand};
 

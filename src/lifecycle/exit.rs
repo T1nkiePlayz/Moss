@@ -50,6 +50,7 @@ pub async fn handle_exit(st: &St, id: &str) {
     } else {
         st.timeline(id, "crash", audit_msg.as_deref().unwrap_or("")).await;
         st.audit("system", "server.crash", &s.name, audit_msg.as_deref().unwrap_or(""), Some(id)).await;
+        crate::notify::server_crashed(st, &s, audit_msg.as_deref().unwrap_or(""), restart_in.is_none() && s.restart_enabled).await;
         if restart_in.is_none() { server::set_desired(st, id, "stopped").await; }
     }
     if let Ok(fresh) = server::get(st, id).await { server::note_state(st, &fresh); }

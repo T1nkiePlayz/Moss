@@ -1,47 +1,60 @@
-//! Restoring a backup, either in place (safety backup, staged extraction, directory swap keeping the old one)
-//! or as a brand-new server on a free port.
-use super::{archive::{extract_archive, verify_archive}, create::{archive_path, do_backup}, find};
+//! Restoring a backup, either in place (safety backup, staged extraction, then a directory swap or, with `only`,
+//! a swap of just the named top-level entries; the previous contents are kept) or as a brand-new server on a free port.
+use super::{archive::{extract_archive, verify_archive_scan}, create::archive_path, find, pre_change_forced, swap::{swap_selected, validate_only}};
 use crate::{auth::User, error::{ApiError, ApiResult}, ops, server, state::St};
 use anyhow::anyhow;
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-#[derive(Deserialize)] pub struct RestoreReq { mode: String }
+#[derive(Deserialize)] pub struct RestoreReq { mode: String, only: Option<Vec<String>> }
 pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, Json(r): Json<RestoreReq>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (sid, sha, sname, rt, gv) = find(&st, &user, &bid, "backup.manage").await?;
     let existing = server::get(&st, &sid).await.ok();
     let in_place = match r.mode.as_str() { "in_place" => true, "new_server" => false, _ => return Err(ApiError::bad("validation", "mode must be new_server or in_place")) };
+    if let Some(only) = &r.only {
+        if !in_place { return Err(ApiError::bad("validation", "only is for in-place restores").field("only", "not allowed with new_server")); }
+        validate_only(only)?;
+    }
     if in_place {
         let s = existing.as_ref().ok_or_else(|| ApiError::conflict("server.gone", "the original server no longer exists; restore as a new server"))?;
         if crate::lifecycle::process_alive(s) { return Err(ApiError::conflict("server.running", "stop the server before restoring in place")); }
     } else { user.require_admin()?; }
     let actor = user.email.clone();
     let b = bid.clone();
+    let only = r.only.clone();
     let op = ops::spawn_op(&st, "backup.restore", format!("Restore {sname}"), Some(&sid.clone()), true, move |ctx| async move {
         let st = ctx.st.clone();
         ctx.stage("Verifying archive before touching anything");
         let p = archive_path(&st, &sid, &b);
         let (p2, sha2) = (p.clone(), sha.clone());
-        tokio::task::spawn_blocking(move || verify_archive(&p2, &sha2)).await??;
+        let (_, names) = tokio::task::spawn_blocking(move || verify_archive_scan(&p2, &sha2)).await??;
+        if let Some(missing) = only.iter().flatten().find(|n| !names.contains(*n)) { return Err(anyhow!("\"{missing}\" is not in this backup")); }
         ctx.check()?;
         if in_place {
             let s = existing.unwrap();
             ctx.stage("Taking a safety backup of the current state");
-            do_backup(&ctx, &st, &s, "pre-change", "before restore", None).await?;
+            pre_change_forced(&st, &s, "restore", &ctx).await?;
             let _g = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
             ctx.stage("Extracting to a staging directory");
             let stage = st.cfg.servers_dir().join(format!(".restore-{}", uuid::Uuid::now_v7()));
-            let (p3, stage2, tok) = (p.clone(), stage.clone(), ctx.token.clone());
-            if let Err(e) = tokio::task::spawn_blocking(move || extract_archive(&p3, &stage2, &tok)).await? { let _ = tokio::fs::remove_dir_all(&stage).await; return Err(e); }
-            ctx.stage("Swapping directories (the previous one is kept)");
+            let (p3, stage2, tok, only2) = (p.clone(), stage.clone(), ctx.token.clone(), only.clone());
+            if let Err(e) = tokio::task::spawn_blocking(move || extract_archive(&p3, &stage2, &tok, only2.as_deref())).await? { let _ = tokio::fs::remove_dir_all(&stage).await; return Err(e); }
+            ctx.stage("Swapping in the restored files (the previous ones are kept)");
             let (dir, kept) = (s.dir(&st), st.cfg.data_dir.join("removed").join(format!("{}-pre-restore-{}", s.id, chrono::Utc::now().format("%Y%m%d-%H%M%S"))));
-            tokio::fs::create_dir_all(kept.parent().unwrap()).await?;
-            tokio::fs::rename(&dir, &kept).await?;
-            if let Err(e) = tokio::fs::rename(&stage, &dir).await { let _ = tokio::fs::rename(&kept, &dir).await; return Err(e.into()); }
-            let _ = tokio::fs::rename(kept.join(".moss"), dir.join(".moss")).await;
+            if let Some(only) = &only {
+                let (stage2, dir2, kept2, only2) = (stage.clone(), dir.clone(), kept.clone(), only.clone());
+                let r = tokio::task::spawn_blocking(move || swap_selected(&stage2, &dir2, &kept2, &only2)).await?;
+                let _ = tokio::fs::remove_dir_all(&stage).await;
+                r?;
+            } else {
+                tokio::fs::create_dir_all(kept.parent().unwrap()).await?;
+                tokio::fs::rename(&dir, &kept).await?;
+                if let Err(e) = tokio::fs::rename(&stage, &dir).await { let _ = tokio::fs::rename(&kept, &dir).await; return Err(e.into()); }
+                let _ = tokio::fs::rename(kept.join(".moss"), dir.join(".moss")).await;
+            }
             ctx.log(format!("previous contents kept at {}", kept.display()));
-            st.audit(&actor, "backup.restore", &s.name, "in place", Some(&s.id)).await;
+            st.audit(&actor, "backup.restore", &s.name, &only.as_ref().map_or("in place".to_string(), |o| format!("in place: {}", o.join(", "))), Some(&s.id)).await;
         } else {
             ctx.stage("Creating a new server from the backup");
             let nid = uuid::Uuid::now_v7().to_string();
@@ -51,7 +64,7 @@ pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, 
             let dir = st.cfg.servers_dir().join(&nid);
             let (p3, d2, tok) = (p.clone(), dir.clone(), ctx.token.clone());
             ctx.stage("Extracting");
-            if let Err(e) = tokio::task::spawn_blocking(move || extract_archive(&p3, &d2, &tok)).await? { let _ = tokio::fs::remove_dir_all(&dir).await; return Err(e); }
+            if let Err(e) = tokio::task::spawn_blocking(move || extract_archive(&p3, &d2, &tok, None)).await? { let _ = tokio::fs::remove_dir_all(&dir).await; return Err(e); }
             let _ = tokio::fs::create_dir_all(dir.join(".moss")).await;
             let (n2, e) = (format!("{sname} (restored)"), existing.clone());
             let (rt2, gv2, nid2) = (rt.clone(), gv.clone(), nid.clone());

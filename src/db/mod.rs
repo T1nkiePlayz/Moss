@@ -39,7 +39,8 @@ pub fn prune_history(c: &Connection) -> rusqlite::Result<()> {
         "DELETE FROM operations WHERE state NOT IN ('queued','running') AND id NOT IN (SELECT id FROM operations ORDER BY created_at DESC LIMIT 1000);
          DELETE FROM activity WHERE id <= (SELECT COALESCE(MAX(id),0) - 20000 FROM activity);
          DELETE FROM timeline WHERE id <= (SELECT COALESCE(MAX(id),0) - 20000 FROM timeline);",
-    )
+    )?;
+    crate::history::prune(c)
 }
 
 pub fn now() -> String {

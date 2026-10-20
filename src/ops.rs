@@ -37,6 +37,9 @@ pub struct OpCtx {
 }
 
 impl OpCtx {
+    /// A context that belongs to no registered operation: stage/log/progress calls are no-ops. For helpers that
+    /// share operation code without being an operation themselves.
+    pub fn detached(st: &St) -> OpCtx { OpCtx { st: st.clone(), id: String::new(), token: CancellationToken::new() } }
     fn update(&self, f: impl FnOnce(&mut Operation), persist: bool, force: bool) {
         let snapshot = {
             let mut r = self.st.ops.lock().unwrap();
@@ -118,6 +121,7 @@ where
     persist_op(st, &op);
     st.emit("op", serde_json::to_value(&op).unwrap());
     let ctx = OpCtx { st: st.clone(), id: op.id.clone(), token };
+    let (kind, title, server_id) = (op.kind.clone(), op.title.clone(), op.server_id.clone());
     tokio::spawn(async move {
         ctx.update(|o| { o.state = "running".into(); o.started_at = Some(now()); o.stage = "Starting".into(); }, true, true);
         // run in its own task so a panic becomes a failed operation instead of one stuck "running" forever
@@ -132,6 +136,10 @@ where
             }
         }, true, true);
         ctx.st.ops.lock().unwrap().tokens.remove(&ctx.id);
+        if let Err(e) = &res && !cancelled && kind != "backup.create" {
+            // backup creation raises its own, more specific `backup_failed` notification
+            crate::notify::operation_failed(&ctx.st, &title, &format!("{e:#}"), server_id.as_deref()).await;
+        }
     });
     op
 }

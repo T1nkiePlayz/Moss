@@ -1,28 +1,29 @@
-//! Scheduler: interval or daily-at schedules with an explicit UTC offset. After downtime a missed schedule runs
+//! Scheduler: interval or daily-at schedules in an IANA time zone (`zone`). After downtime a missed schedule runs
 //! once and is rescheduled from now (a backlog of runs is never replayed).
 use crate::{api::server_for, auth::User, error::{ApiError, ApiResult}, lifecycle, ops, server, state::St};
 use axum::{Json, extract::{Path, State}, http::StatusCode};
-use chrono::{DateTime, Duration as CD, NaiveTime, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-fn parse_hhmm(s: &str) -> Option<NaiveTime> { NaiveTime::parse_from_str(s, "%H:%M").ok() }
+mod zone;
+pub use zone::{Zone, next_run, parse_hhmm, zone_names};
 
-pub fn next_run(every: Option<i64>, daily: Option<&str>, tz_min: i64, from: DateTime<Utc>) -> Option<DateTime<Utc>> {
-    if let Some(m) = every { return Some(from + CD::minutes(m.max(1))); }
-    let t = parse_hhmm(daily?)?;
-    let local = from + CD::minutes(tz_min);
-    let mut cand = local.date_naive().and_time(t);
-    if cand <= local.naive_utc() { cand += CD::days(1); }
-    Some(DateTime::<Utc>::from_naive_utc_and_offset(cand, Utc) - CD::minutes(tz_min))
-}
+const SEL: &str = "SELECT id,server_id,kind,command,every_minutes,daily_at,tz_offset_min,enabled,keep,last_run,next_run,last_status,tz FROM schedules";
 
-const SEL: &str = "SELECT id,server_id,kind,command,every_minutes,daily_at,tz_offset_min,enabled,keep,last_run,next_run,last_status FROM schedules";
+/// The zone a stored row means: its `tz` name, falling back to the legacy fixed offset.
+fn row_zone(tz: &str, off_min: i64) -> Zone { Zone::parse(tz).or_else(|| Zone::fixed_minutes(off_min)).unwrap_or(Zone::UTC) }
+
 fn row_json(r: &rusqlite::Row) -> rusqlite::Result<Value> {
+    let (tz, off) = (r.get::<_, String>(12)?, r.get::<_, i64>(6)?);
+    let zone = row_zone(&tz, off);
     Ok(json!({"id": r.get::<_, String>(0)?, "server_id": r.get::<_, String>(1)?, "kind": r.get::<_, String>(2)?, "command": r.get::<_, Option<String>>(3)?, "every_minutes": r.get::<_, Option<i64>>(4)?,
-        "daily_at": r.get::<_, Option<String>>(5)?, "tz_offset_min": r.get::<_, i64>(6)?, "enabled": r.get::<_, bool>(7)?, "keep": r.get::<_, Option<i64>>(8)?,
+        "daily_at": r.get::<_, Option<String>>(5)?, "tz": zone.name(), "tz_offset_min": zone.offset_min_at(Utc::now()), "enabled": r.get::<_, bool>(7)?, "keep": r.get::<_, Option<i64>>(8)?,
         "last_run": r.get::<_, Option<String>>(9)?, "next_run": r.get::<_, Option<String>>(10)?, "last_status": r.get::<_, Option<String>>(11)?}))
 }
+
+/// `GET /timezones`
+pub async fn timezones(_u: User) -> Json<Value> { Json(json!({"zones": zone_names()})) }
 
 pub async fn list(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     server_for(&st, &user, &id, "server.view").await?;
@@ -31,7 +32,7 @@ pub async fn list(State(st): State<St>, user: User, Path(id): Path<String>) -> A
 }
 
 #[derive(Deserialize)]
-pub struct Req { kind: Option<String>, command: Option<String>, every_minutes: Option<i64>, daily_at: Option<String>, tz_offset_min: Option<i64>, enabled: Option<bool>, keep: Option<i64> }
+pub struct Req { kind: Option<String>, command: Option<String>, every_minutes: Option<i64>, daily_at: Option<String>, tz: Option<String>, tz_offset_min: Option<i64>, enabled: Option<bool>, keep: Option<i64> }
 
 fn validate(r: &Req, creating: bool) -> ApiResult<()> {
     if creating {
@@ -44,7 +45,13 @@ fn validate(r: &Req, creating: bool) -> ApiResult<()> {
     if let Some(m) = r.every_minutes && !(5..=525_600).contains(&m) { return Err(ApiError::bad("validation", "interval must be 5 minutes to 1 year").field("every_minutes", "5–525600")); }
     if let Some(d) = &r.daily_at && parse_hhmm(d).is_none() { return Err(ApiError::bad("validation", "use HH:MM").field("daily_at", "HH:MM")); }
     if let Some(t) = r.tz_offset_min && !(-840..=840).contains(&t) { return Err(ApiError::bad("validation", "offset out of range").field("tz_offset_min", "-840–840")); }
+    if let Some(t) = &r.tz && Zone::parse(t).is_none() { return Err(ApiError::bad("validation", "unknown time zone").field("tz", "IANA name such as Europe/Berlin")); }
     Ok(())
+}
+
+/// The zone requested by a body: `tz` wins over the legacy `tz_offset_min`.
+fn requested_zone(r: &Req) -> Option<Zone> {
+    r.tz.as_deref().and_then(Zone::parse).or_else(|| r.tz_offset_min.and_then(Zone::fixed_minutes))
 }
 
 pub async fn create(State(st): State<St>, user: User, Path(id): Path<String>, Json(r): Json<Req>) -> ApiResult<(StatusCode, Json<Value>)> {
@@ -52,10 +59,11 @@ pub async fn create(State(st): State<St>, user: User, Path(id): Path<String>, Js
     let s = server_for(&st, &user, &id, if r.kind.as_deref() == Some("backup") { "backup.manage" } else { "server.power" }).await?;
     if r.kind.as_deref() == Some("command") { crate::auth::authz(&st, &user, &id, "server.console.write").await?; }
     let sid = uuid::Uuid::now_v7().to_string();
-    let tz = r.tz_offset_min.unwrap_or(0);
-    let next = next_run(r.every_minutes, r.daily_at.as_deref(), tz, Utc::now()).map(|t| t.to_rfc3339());
+    let zone = requested_zone(&r).unwrap_or(Zone::UTC);
+    let (tz, tz_off) = (zone.name(), zone.offset_min_at(Utc::now()));
+    let next = next_run(r.every_minutes, r.daily_at.as_deref(), &zone, Utc::now()).map(|t| t.to_rfc3339());
     let (i, srv, kind, cmd, ev, da, en, keep) = (sid.clone(), id.clone(), r.kind.clone().unwrap(), r.command.clone(), r.every_minutes, r.daily_at.clone(), r.enabled.unwrap_or(true), r.keep.map(|k| k.clamp(1, 365)));
-    st.db.call(move |c| c.execute("INSERT INTO schedules(id,server_id,kind,command,every_minutes,daily_at,tz_offset_min,enabled,keep,next_run) VALUES (?,?,?,?,?,?,?,?,?,?)", rusqlite::params![i, srv, kind, cmd, ev, da, tz, en, keep, next])).await?;
+    st.db.call(move |c| c.execute("INSERT INTO schedules(id,server_id,kind,command,every_minutes,daily_at,tz_offset_min,tz,enabled,keep,next_run) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rusqlite::params![i, srv, kind, cmd, ev, da, tz_off, tz, en, keep, next])).await?;
     st.audit(&user.email, "schedule.create", &s.name, r.kind.as_deref().unwrap_or(""), Some(&id)).await;
     let v = get_one(&st, &sid).await?;
     Ok((StatusCode::CREATED, Json(v)))
@@ -78,11 +86,12 @@ pub async fn patch(State(st): State<St>, user: User, Path(id): Path<String>, Jso
     validate(&r, false)?;
     let every = r.every_minutes.or(cur["every_minutes"].as_i64()).filter(|_| r.daily_at.is_none());
     let daily = r.daily_at.clone().or(cur["daily_at"].as_str().map(String::from)).filter(|_| r.every_minutes.is_none());
-    let tz = r.tz_offset_min.or(cur["tz_offset_min"].as_i64()).unwrap_or(0);
-    let next = next_run(every, daily.as_deref(), tz, Utc::now()).map(|t| t.to_rfc3339());
+    let zone = requested_zone(&r).unwrap_or_else(|| row_zone(cur["tz"].as_str().unwrap_or("UTC"), 0));
+    let (tz, tz_off) = (zone.name(), zone.offset_min_at(Utc::now()));
+    let next = next_run(every, daily.as_deref(), &zone, Utc::now()).map(|t| t.to_rfc3339());
     let i = id.clone();
-    st.db.call(move |c| c.execute("UPDATE schedules SET command=COALESCE(?,command), every_minutes=?, daily_at=?, tz_offset_min=?, enabled=COALESCE(?,enabled), keep=COALESCE(?,keep), next_run=? WHERE id=?",
-        rusqlite::params![r.command, every, daily, tz, r.enabled, r.keep.map(|k| k.clamp(1, 365)), next, i])).await?;
+    st.db.call(move |c| c.execute("UPDATE schedules SET command=COALESCE(?,command), every_minutes=?, daily_at=?, tz_offset_min=?, tz=?, enabled=COALESCE(?,enabled), keep=COALESCE(?,keep), next_run=? WHERE id=?",
+        rusqlite::params![r.command, every, daily, tz_off, tz, r.enabled, r.keep.map(|k| k.clamp(1, 365)), next, i])).await?;
     Ok(Json(get_one(&st, &id).await?))
 }
 
@@ -121,8 +130,8 @@ async fn execute(st: &St, sc: &Value, actor: &str) {
             match res { Ok(m) => m, Err(e) => format!("skipped: {e}") }
         }
     };
-    let (every, daily, tz) = (sc["every_minutes"].as_i64(), sc["daily_at"].as_str().map(String::from), sc["tz_offset_min"].as_i64().unwrap_or(0));
-    let next = next_run(every, daily.as_deref(), tz, Utc::now()).map(|t| t.to_rfc3339());
+    let (every, daily, zone) = (sc["every_minutes"].as_i64(), sc["daily_at"].as_str().map(String::from), Zone::parse(sc["tz"].as_str().unwrap_or("UTC")).unwrap_or(Zone::UTC));
+    let next = next_run(every, daily.as_deref(), &zone, Utc::now()).map(|t| t.to_rfc3339());
     let _ = st.db.call(move |c| c.execute("UPDATE schedules SET last_run=?, last_status=?, next_run=? WHERE id=?", rusqlite::params![crate::db::now(), status, next, id])).await;
 }
 
@@ -136,30 +145,4 @@ pub fn spawn_background(st: &St) {
             for sc in due { execute(&st, &sc, "schedule").await; }
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::TimeZone;
-
-    #[test]
-    fn interval_schedules_add_minutes() {
-        let t = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
-        assert_eq!(next_run(Some(30), None, 0, t).unwrap(), t + CD::minutes(30));
-    }
-
-    #[test]
-    fn daily_respects_utc_offset() {
-        // 03:00 at UTC+8 is 19:00 UTC the previous day
-        let t = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
-        let n = next_run(None, Some("03:00"), 480, t).unwrap();
-        assert_eq!(n, Utc.with_ymd_and_hms(2026, 1, 1, 19, 0, 0).unwrap());
-        // already past today's slot -> tomorrow
-        let t2 = Utc.with_ymd_and_hms(2026, 1, 1, 20, 0, 0).unwrap();
-        assert_eq!(next_run(None, Some("03:00"), 480, t2).unwrap(), Utc.with_ymd_and_hms(2026, 1, 2, 19, 0, 0).unwrap());
-    }
-
-    #[test]
-    fn invalid_time_is_rejected() { assert!(next_run(None, Some("25:99"), 0, Utc::now()).is_none()); }
 }

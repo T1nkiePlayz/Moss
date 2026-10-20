@@ -54,6 +54,27 @@ pub fn prime(st: &St, id: &str, log: &FsPath) -> Arc<Hub> {
     h
 }
 
+/// How long to wait before the next poll: fast while output flows or the server runs, backing off to about a
+/// second when idle and the server is not running.
+pub fn next_poll_ms(alive: bool, idle_polls: u32) -> u64 {
+    if alive { return if idle_polls < 100 { 120 } else { 250 }; }
+    match idle_polls { 0 | 1 => 120, 2 => 250, 3 => 500, _ => 1000 }
+}
+
+/// What the activity log records for a console command. `redacted` (default) hides the arguments of commands that
+/// carry credentials, `all` logs everything and `off` logs nothing. `None` means: do not write an entry.
+pub fn audit_command_detail(mode: &str, cmd: &str) -> Option<String> {
+    const SENSITIVE: &[&str] = &["login", "l", "register", "reg", "password", "changepassword", "changepass", "authme", "2fa", "rcon", "auth", "setpassword", "unregister", "forcelogin"];
+    match mode {
+        "off" => None,
+        "all" => Some(cmd.to_string()),
+        _ => {
+            let first = cmd.split_whitespace().next().unwrap_or("").trim_start_matches('/').to_lowercase();
+            if SENSITIVE.contains(&first.as_str()) { Some(format!("[redacted: {first}]")) } else { Some(cmd.to_string()) }
+        }
+    }
+}
+
 /// Tail the log from `offset` until the process is gone and the file is drained. Calls `on_line` for readiness detection.
 pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool) {
     let h = prime(st, &id, &log);
@@ -63,6 +84,7 @@ pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool
         let mut off = if from_end { std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0) } else { 0 };
         let mut partial = String::new();
         let mut idle_after_exit = 0;
+        let mut idle_polls = 0u32;
         loop {
             let (new_off, chunk) = tokio::task::spawn_blocking({
                 let (log, off) = (log.clone(), off);
@@ -79,6 +101,7 @@ pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool
             off = new_off;
             if !chunk.is_empty() {
                 idle_after_exit = 0;
+                idle_polls = 0;
                 partial.push_str(&String::from_utf8_lossy(&chunk));
                 while let Some(i) = partial.find('\n') {
                     let line: String = partial.drain(..=i).collect();
@@ -94,7 +117,8 @@ pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool
                 idle_after_exit += 1;
                 if idle_after_exit > 5 { if !partial.is_empty() { push(&h, std::mem::take(&mut partial)); } break; }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            idle_polls = idle_polls.saturating_add(1);
+            tokio::time::sleep(std::time::Duration::from_millis(next_poll_ms(alive, idle_polls))).await;
         }
         h.tailing.store(false, std::sync::atomic::Ordering::SeqCst);
     });
@@ -139,7 +163,7 @@ async fn handle(st: St, s: crate::server::Srv, user: User, can_write: bool, mut 
                         && let Some(cmd) = v["d"].as_str() {
                             if let Err(e) = crate::lifecycle::send_command(&st, &s, cmd).await {
                                 let _ = sock.send(Message::Text(serde_json::json!({"t":"line","d":format!("\x1b[31m[moss] {}\x1b[0m", e.message)}).to_string().into())).await;
-                            } else { st.audit(&user.email, "console.command", &s.name, cmd, Some(&s.id)).await; }
+                            } else { st.audit_command(&user.email, &s.name, cmd, &s.id).await; }
                         }
                 }
                 Some(Ok(Message::Ping(p))) => { let _ = sock.send(Message::Pong(p)).await; }
@@ -147,5 +171,42 @@ async fn handle(st: St, s: crate::server::Srv, user: User, can_write: bool, mut 
                 _ => {}
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polling_is_fast_while_busy_and_backs_off_when_idle_and_stopped() {
+        assert_eq!(next_poll_ms(true, 0), 120);
+        assert_eq!(next_poll_ms(true, 99), 120);
+        assert_eq!(next_poll_ms(true, 500), 250);
+        assert_eq!(next_poll_ms(false, 0), 120);
+        let mut prev = 0;
+        for i in 0..8 { let d = next_poll_ms(false, i); assert!(d >= prev && d <= 1000); prev = d; }
+        assert_eq!(next_poll_ms(false, 50), 1000);
+    }
+
+    #[test]
+    fn sensitive_commands_are_redacted_by_default() {
+        for c in ["login hunter2", "/login hunter2", "LOGIN x", "/Register a a", "l pw", "2fa 123456", "authme reload", "rcon pw", "forcelogin Bob", "unregister pw"] {
+            let got = audit_command_detail("redacted", c).unwrap();
+            assert!(got.starts_with("[redacted: ") && !got.contains("hunter2") && !got.contains("123456") && !got.contains("pw"), "{c} -> {got}");
+        }
+        assert_eq!(audit_command_detail("redacted", "rcon-pass").unwrap(), "rcon-pass");
+        assert_eq!(audit_command_detail("redacted", "/login pw").unwrap(), "[redacted: login]");
+        assert_eq!(audit_command_detail("redacted", "  Register   a b").unwrap(), "[redacted: register]");
+        assert_eq!(audit_command_detail("redacted", "say hello").unwrap(), "say hello");
+        assert_eq!(audit_command_detail("redacted", "").unwrap(), "");
+    }
+
+    #[test]
+    fn all_and_off_modes() {
+        assert_eq!(audit_command_detail("all", "login pw").unwrap(), "login pw");
+        assert!(audit_command_detail("off", "say hi").is_none());
+        // an unknown stored value behaves like the safe default
+        assert_eq!(audit_command_detail("garbage", "login pw").unwrap(), "[redacted: login]");
     }
 }

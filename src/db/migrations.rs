@@ -4,8 +4,10 @@
 //! (schema present, `user_version` 0) are adopted without change.
 use rusqlite::Connection;
 
-const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("migrations/0001_init.sql")),
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init", include_str!("migrations/0001_init.sql")),
     ("0002_limits", include_str!("migrations/0002_limits.sql")),
+    ("0003_ops", include_str!("migrations/0003_ops.sql")),
 ];
 
 pub fn run(c: &Connection) -> rusqlite::Result<()> {

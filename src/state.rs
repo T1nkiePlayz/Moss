@@ -115,6 +115,14 @@ impl Inner {
         self.emit("activity", serde_json::json!({"id": id, "time": time, "actor": a, "action": ac, "target": t, "detail": d, "server_id": s}));
     }
 
+    /// Audit a console command according to the `audit_console_commands` setting (redacted by default).
+    pub async fn audit_command(&self, actor: &str, server_name: &str, cmd: &str, server_id: &str) {
+        let mode = self.setting("audit_console_commands", "redacted").await;
+        if let Some(detail) = crate::console::audit_command_detail(&mode, cmd) {
+            self.audit(actor, "console.command", server_name, &detail, Some(server_id)).await;
+        }
+    }
+
     pub async fn timeline(&self, server_id: &str, kind: &str, detail: &str) {
         let (s, k, d, t) = (server_id.to_string(), kind.to_string(), detail.to_string(), crate::db::now());
         let _ = self.db.call(move |c| c.execute("INSERT INTO timeline(server_id,time,kind,detail) VALUES (?,?,?,?)", rusqlite::params![s, t, k, d])).await;

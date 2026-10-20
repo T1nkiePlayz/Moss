@@ -12,6 +12,7 @@ anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws", "multipart", "macros"] }
 base64 = "0.23.1"
 chrono = { version = "0.4.45", features = ["serde"] }
+chrono-tz = "0.10"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 flate2 = "1.1.10"
 futures-util = "0.3.34"
@@ -20,6 +21,7 @@ jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
 libc = "0.2.191"
 mime_guess = "2.0.5"
 rand = "0.10.3"
+regex = "1"
 reqwest = { version = "0.13.5", features = ["rustls", "json", "stream", "query"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rust-embed = "8.13.0"
@@ -36,6 +38,7 @@ tower-http = { version = "0.7.1", features = ["compression-gzip", "compression-b
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.28.0", features = ["v4", "v7"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 zstd = { version = "0.14.3", features = ["zstdmt"] }
 
 [profile.release]

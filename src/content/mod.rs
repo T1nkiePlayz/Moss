@@ -22,6 +22,7 @@ mod modrinth;
 mod mrpack;
 mod plan;
 mod search;
+mod staged;
 mod toggle;
 mod update_all;
 mod upgrade;
@@ -35,6 +36,7 @@ pub use inventory::{installed, patch_item, remove, resync};
 pub use modpack::{create_params as modpack_create_params, export as modpack_export, import_start as modpack_import, inspect as modpack_inspect, install_then_import};
 pub use plan::plan;
 pub use search::{project, providers, search};
+pub use staged::{discard_all_for as staging_discard_all_for, discard_run as staging_discard, estimate as staging_estimate, get_run_json as staging_get, list_runs as staging_list, log as staging_log, promote as staging_promote, recover as staging_recover, spawn_background as staging_spawn_background, start as staging_start};
 pub use upgrade::{maybe_backup, upgrade_plan, upgrade_start};
 use inventory::*; use modrinth::*; use plan::*; use search::*;
 

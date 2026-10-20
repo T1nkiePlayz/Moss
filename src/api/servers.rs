@@ -1,10 +1,25 @@
 //! Server resource handlers: list/create/get/patch/delete, power actions, console commands, stats and timeline.
 use super::*;
 
-pub(super) async fn servers_list(State(st): State<St>, user: User) -> ApiResult<Json<Value>> {
+pub(super) async fn servers_list(State(st): State<St>, user: User, Query(q): Q) -> ApiResult<Json<Value>> {
     let vis = auth::visible_servers(&st, &user).await?;
     let all = server::list(&st).await?;
-    Ok(Json(Value::Array(all.iter().filter(|s| vis.as_ref().is_none_or(|v| v.contains(&s.id))).map(|s| server::view(s, &st)).collect())))
+    let mut out: Vec<Value> = all.iter().filter(|s| vis.as_ref().is_none_or(|v| v.contains(&s.id))).map(|s| server::view(s, &st)).collect();
+    // Test copies are hidden unless asked for; each one says which server it was made from.
+    if q.get("include_staging").is_some_and(|v| v == "true") {
+        let origins: HashMap<String, String> = st.db.call(|c| { let mut s = c.prepare("SELECT id,origin_id FROM staging_runs")?; s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect() }).await?;
+        for s in server::list_all(&st).await? {
+            let Some(origin) = origins.get(&s.id) else { continue };
+            if vis.as_ref().is_none_or(|v| v.contains(origin)) { let mut v = server::view(&s, &st); v["staging_of"] = json!(origin); out.push(v); }
+        }
+    }
+    Ok(Json(Value::Array(out)))
+}
+
+/// A test copy is driven by its staged run, never by hand.
+async fn not_staging(st: &St, id: &str) -> ApiResult<()> {
+    if server::is_staging(st, id).await { return Err(ApiError::conflict("staging.managed", "this is a temporary test copy managed by a staged update; discard it from the server it was made from")); }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -89,6 +104,7 @@ pub(super) struct PatchReq {
 
 pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Path<String>, Json(p): Json<PatchReq>) -> ApiResult<Json<Value>> {
     authz(&st, &user, &id, "config.write").await?;
+    not_staging(&st, &id).await?;
     let s = server::get(&st, &id).await?;
     if let Some(n) = &p.name && (n.trim().is_empty() || n.chars().count() > 48) { return Err(ApiError::bad("validation", "invalid name").field("name", "1–48 characters")); }
     if let Some(m) = p.memory_mb && !(256..=262144).contains(&m) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", "256–262144")); }
@@ -130,9 +146,11 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
 #[derive(Deserialize)] pub(super) struct DelQ { #[serde(default)] delete_data: bool }
 pub(super) async fn server_delete(State(st): State<St>, user: User, Path(id): Path<String>, Query(q): Query<DelQ>) -> ApiResult<StatusCode> {
     authz(&st, &user, &id, "server.delete").await?;
+    not_staging(&st, &id).await?;
     let s = server::get(&st, &id).await?;
     if lifecycle::process_alive(&s) { return Err(ApiError::conflict("server.running", "stop the server before deleting it")); }
     let guard = st.lock_for(&id).try_lock_owned().map_err(|_| ApiError::conflict("server.locked", "another operation is changing this server"))?;
+    crate::content::staging_discard_all_for(&st, &id).await;
     let dir = s.dir(&st);
     if q.delete_data {
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -163,6 +181,7 @@ pub(super) async fn server_delete(State(st): State<St>, user: User, Path(id): Pa
 
 pub(super) async fn server_action(State(st): State<St>, user: User, Path((id, action)): Path<(String, String)>) -> ApiResult<Json<Value>> {
     authz(&st, &user, &id, "server.power").await?;
+    if matches!(action.as_str(), "start" | "restart") { not_staging(&st, &id).await?; }
     let s = server::get(&st, &id).await?;
     match action.as_str() {
         "start" => lifecycle::start(&st, &s, &user.actor()).await?,

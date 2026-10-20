@@ -101,10 +101,14 @@ Releases carry `moss-<tag>-linux-x86_64`, `moss-<tag>-macos-aarch64` and `moss-<
 ```bash
 sha256sum -c SHA256SUMS.txt                      # macOS: shasum -a 256 -c SHA256SUMS.txt
 gh attestation verify moss-*-linux-x86_64.tar.gz --repo T1nkiePlayz/Moss
+# the checksum file itself is signed too (cosign, keyless; releases of public repositories):
+cosign verify-blob --bundle SHA256SUMS.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/T1nkiePlayz/Moss/\.github/workflows/release\.yml@refs/(tags/v.+|heads/.+)$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS.txt
 tar xzf moss-*-linux-x86_64.tar.gz && cd moss-*-linux-x86_64
 ```
 
-Or use the installer, which verifies the checksum and installs one file ([`scripts/install.sh`](scripts/install.sh); read it first):
+Or use the installer, which verifies the checksum (and the cosign signature when `cosign` is installed; it is never required) and installs one file ([`scripts/install.sh`](scripts/install.sh); read it first):
 
 ```bash
 sh install.sh --prefix "$HOME/.local"

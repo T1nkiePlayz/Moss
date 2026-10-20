@@ -13,6 +13,7 @@
 #   MOSS_VERSION        same as --version
 #   MOSS_REPO           owner/name on GitHub (default T1nkiePlayz/Moss)
 #   GITHUB_TOKEN        needed while the repository is private (uses the API to fetch the assets)
+#   MOSS_SKIP_COSIGN    set to 1 to skip the optional signature check (done only when cosign is installed)
 #   MOSS_RELEASE_BASE   alternative download root laid out as <base>/<tag>/<asset> (plus <base>/LATEST naming the
 #                       newest tag); used for mirrors and tests. Accepts http(s):// and file:// URLs.
 set -eu
@@ -30,7 +31,8 @@ usage() {
 Usage: install.sh [--version TAG] [--prefix DIR]
   --version TAG   install this release (default: the latest published release)
   --prefix DIR    install to DIR/bin (default /usr/local/bin, using sudo when it is not writable)
-Environment: MOSS_VERSION, MOSS_REPO, GITHUB_TOKEN (private repo), MOSS_RELEASE_BASE (mirror or test directory).
+Environment: MOSS_VERSION, MOSS_REPO, GITHUB_TOKEN (private repo), MOSS_RELEASE_BASE (mirror or test directory),
+  MOSS_SKIP_COSIGN=1 (skip the optional cosign signature check).
 EOT
 }
 
@@ -132,6 +134,27 @@ get_asset "$TARBALL"
 get_asset "SHA256SUMS.txt"
 
 # --- verify -----------------------------------------------------------------------------------------------------
+# Optional: when cosign is installed and the release carries a signature bundle, check that SHA256SUMS.txt was signed
+# by this repository's release workflow (Sigstore keyless). cosign is never required; a release without a bundle
+# (older releases, private repositories) is installed on the checksum alone. A bundle that does not verify is fatal.
+if [ "${MOSS_SKIP_COSIGN:-}" = 1 ]; then
+  say "Skipping the signature check (MOSS_SKIP_COSIGN=1)"
+elif command -v cosign >/dev/null 2>&1; then
+  if ( get_asset "SHA256SUMS.txt.sigstore.json" ) >/dev/null 2>&1; then
+    _repo_re="$(printf '%s' "$REPO" | sed 's/[.[\*^$+?(){}|]/\\&/g')"
+    cosign verify-blob --bundle "$TMP/SHA256SUMS.txt.sigstore.json" \
+      --certificate-identity-regexp "^https://github\.com/$_repo_re/\.github/workflows/release\.yml@refs/(tags/v.+|heads/.+)\$" \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      "$TMP/SHA256SUMS.txt" >/dev/null 2>&1 \
+      || die "the signature on SHA256SUMS.txt did not verify; nothing was installed (run cosign verify-blob by hand to see why, or set MOSS_SKIP_COSIGN=1 to skip this check)"
+    say "Signature OK (cosign, signed by the $REPO release workflow)"
+  else
+    say "No signature bundle in this release; relying on the checksum only"
+  fi
+else
+  say "cosign is not installed; skipping the optional signature check (checksum is still verified)"
+fi
+
 want="$(awk -v f="$TARBALL" '{ n=$2; sub(/^\*/, "", n); if (n == f) { print $1; exit } }' "$TMP/SHA256SUMS.txt")"
 [ -n "$want" ] || die "SHA256SUMS.txt has no entry for $TARBALL"
 have="$($SUM "$TMP/$TARBALL" | awk '{print $1}')"

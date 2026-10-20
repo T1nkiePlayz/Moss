@@ -7,9 +7,14 @@
   import Modal from '../../components/Modal.svelte';
   import States from '../../components/States.svelte';
   import PlanModal from '../../components/PlanModal.svelte';
-  import { api, errMsg, type ChangePlan, type ContentItem, type Hit, type Project, type ProviderId, type ProviderInfo, type SearchResult, type Server } from '../../lib/api';
+  import OpCard from '../../components/OpCard.svelte';
+  import InstalledList from '../../components/content/InstalledList.svelte';
+  import CompatPanel from '../../components/content/CompatPanel.svelte';
+  import ItemDrawer from '../../components/content/ItemDrawer.svelte';
+  import { api, download, errMsg, modpackExportPath, type ChangePlan, type ContentFinding, type ContentItem, type Hit, type Operation, type Project, type ProviderId, type ProviderInfo, type SearchResult, type Server } from '../../lib/api';
+  import { normalizeItem, removalConflicts } from '../../lib/content';
   import { compact, bytes, relTime, num, initials } from '../../lib/format';
-  import { onOp, toast, toastError, trackOp, undoToast } from '../../lib/stores.svelte';
+  import { onOp, ops, toast, toastError, trackOp, undoToast } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';
 
   let { server: s }: { server: Server } = $props();
@@ -23,6 +28,16 @@
   let iErr = $state('');
   let updates = $state<Record<string, { latest: string; version_id: string }>>({});
   let checking = $state(false);
+  let toggling = $state<Record<string, boolean>>({});
+  let drawerId = $state<string | null>(null);
+  let reloadKey = $state(0);
+  let busyFinding = $state<string | null>(null);
+  let tracked = $state<string[]>([]);
+  let importer = $state<import('svelte').Component<any> | null>(null);
+  let exporting = $state(false);
+  const drawer = $derived(items?.find((i) => i.id === drawerId) ?? null);
+  const updateCount = $derived((items ?? []).filter((i) => updates[i.id] && !i.pinned).length);
+  const identifying = $derived(tracked.some((id) => ops.list.find((o) => o.id === id && o.kind.includes('identify'))?.state === 'running' || ops.list.find((o) => o.id === id && o.kind.includes('identify'))?.state === 'queued'));
   // browse
   let providers = $state<ProviderInfo[]>([]);
   let chosen = $state<ProviderId>(remembered);
@@ -31,7 +46,6 @@
   const multi = $derived(avail.length > 1);
   const provider = $derived<ProviderId>(providers.find((p) => p.id === chosen && usable(p))?.id ?? providers.find(usable)?.id ?? 'modrinth');
   const pname = $derived(providers.find((p) => p.id === provider)?.name ?? 'Modrinth');
-  const pLabel = (id: string) => (id === 'curseforge' ? 'CurseForge' : id === 'modrinth' ? 'Modrinth' : 'Manual');
   $effect(() => { s.id; api.providers(s.id).then((r) => (providers = r.providers), () => (providers = [])); });
   function pick(id: ProviderId) {
     if (id === provider) return;
@@ -51,11 +65,11 @@
   let sErr = $state('');
   let searching = $state(false);
   let detail = $state<{ hit: Hit; project: Project | null; err: string } | null>(null);
-  let plan = $state<null | { plan: ChangePlan; title: string; label: string; run: () => Promise<{ operation: import('../../lib/api').Operation }> }>(null);
+  let plan = $state<null | { plan: ChangePlan; title: string; label: string; run: () => Promise<Operation | Operation[]> }>(null);
   let applying = $state(false);
 
-  async function loadItems() { iErr = ''; try { items = (await api.content(s.id)).items; } catch (e) { iErr = errMsg(e); } }
-  $effect(() => { s.id; items = null; loadItems(); });
+  async function loadItems() { iErr = ''; try { items = (await api.content(s.id)).items.map(normalizeItem); reloadKey++; } catch (e) { iErr = errMsg(e); } }
+  $effect(() => { s.id; items = null; updates = {}; tracked = []; drawerId = null; loadItems(); });
 
   // debounced search
   let timer: ReturnType<typeof setTimeout>;
@@ -75,7 +89,7 @@
 
   // react to finished operations for this server
   $effect(() => onOp(async (o) => {
-    if (o.server_id !== s.id || !o.kind.startsWith('content') || o.state !== 'completed') return;
+    if (o.server_id !== s.id || !/^(content|modpack|upgrade)/.test(o.kind) || o.state !== 'completed') return;
     await loadItems();
     try {
       const u = (await api.undoList(s.id))[0];
@@ -85,29 +99,45 @@
 
   const installedIds = $derived(new Set((items ?? []).filter((i) => i.provider === provider).map((i) => i.project_id).filter(Boolean)));
 
+  function track(o: Operation | Operation[]) {
+    for (const x of [o].flat()) { trackOp(x); tracked = [x.id, ...tracked].slice(0, 4); }
+  }
   async function review(hit: { project_id: string; title: string }, version_id?: string) {
     try {
       const p = await api.plan(s.id, hit.project_id, version_id, provider);
-      plan = { plan: p, title: `Install ${hit.title}`, label: 'Install', run: () => api.install(s.id, hit.project_id, version_id, provider) };
+      plan = { plan: p, title: `Install ${hit.title}`, label: 'Install', run: async () => (await api.install(s.id, hit.project_id, version_id, provider)).operation };
     } catch (e) { toastError(e, 'Could not build a plan'); }
   }
-  function reviewRemove(it: ContentItem) {
+  function reviewRemove(its: ContentItem[]) {
+    const what = its.length === 1 ? its[0].title : `${its.length} ${label.toLowerCase()}`;
     plan = {
-      plan: { items: [{ action: 'remove', title: it.title, filename: it.filename, size: 0, reason: 'Data and config directories are kept.' }], warnings: s.state === 'running' ? ['The server is running; the add-on stays loaded until restart.'] : [], requires_restart: true },
-      title: `Remove ${it.title}`, label: 'Remove', run: () => api.removeContent(s.id, it.id),
+      plan: {
+        items: its.map((it) => ({ action: 'remove' as const, title: it.title, filename: it.filename, size: 0, reason: 'Data and config directories are kept.' })),
+        warnings: s.state === 'running' ? ['The server is running; the add-on stays loaded until restart.'] : [], requires_restart: true,
+        conflicts: removalConflicts(items ?? [], its),
+      },
+      title: `Remove ${what}`, label: 'Remove',
+      run: async () => { const out: Operation[] = []; for (const it of its) out.push((await api.removeContent(s.id, it.id)).operation); return out; },
     };
   }
   function reviewUpdate(it: ContentItem) {
     const u = updates[it.id];
     plan = {
-      plan: { items: [{ action: 'replace', title: it.title, filename: it.filename, size: 0, reason: `${it.version_number} → ${u.latest}` }], warnings: [], requires_restart: true },
-      title: `Update ${it.title}`, label: 'Update', run: () => api.updateContent(s.id, it.id),
+      plan: { items: [{ action: 'replace', title: it.title, filename: it.filename, size: 0, reason: u ? 'Newer compatible version found.' : 'Update to the latest compatible version.', version: u?.latest, from_version: it.version_number }], warnings: [], requires_restart: true },
+      title: `Update ${it.title}`, label: 'Update', run: async () => (await api.updateContent(s.id, it.id)).operation,
     };
+  }
+  async function reviewUpdateAll() {
+    try {
+      const p = await api.updateAllPlan(s.id);
+      if (!p.items.length) { toast('success', 'Everything is up to date'); updates = {}; return; }
+      plan = { plan: p, title: `Update ${p.items.length} ${p.items.length === 1 ? 'item' : 'items'}`, label: 'Update all', run: async () => (await api.updateAll(s.id)).operation };
+    } catch (e) { toastError(e, 'Could not build the update plan'); }
   }
   async function apply() {
     if (!plan) return;
     applying = true;
-    try { const r = await plan.run(); trackOp(r.operation); plan = null; detail = null; view = 'installed'; toast('info', 'Working on it', { body: 'Progress is in the operations panel.' }); } catch (e) { toastError(e, 'Could not apply'); }
+    try { track(await plan.run()); plan = null; detail = null; drawerId = null; view = 'installed'; toast('info', 'Working on it', { body: 'Progress is shown here and in the operations panel.' }); } catch (e) { toastError(e, 'Could not apply'); }
     applying = false;
   }
   async function check() {
@@ -122,6 +152,61 @@
   async function togglePin(it: ContentItem) {
     try { await api.pin(s.id, it.id, !it.pinned); it.pinned = !it.pinned; } catch (e) { toastError(e); }
   }
+  // Optimistic enable/disable with rollback; returns whether the server says a restart is needed.
+  async function toggleOne(it: ContentItem, enabled: boolean): Promise<{ ok: boolean; restart: boolean }> {
+    const prev = it.enabled, id = it.id;
+    it.enabled = enabled; toggling[id] = true;
+    try {
+      const r = await api.toggleContent(s.id, id, enabled);
+      const i = items?.findIndex((x) => x.id === id) ?? -1;
+      if (items && i >= 0 && r?.item) items[i] = normalizeItem({ ...items[i], ...r.item, enabled });
+      return { ok: true, restart: !!r?.requires_restart };
+    } catch (e) {
+      it.enabled = prev;
+      toastError(e, `Could not ${enabled ? 'enable' : 'disable'} ${it.title}`);
+      return { ok: false, restart: false };
+    } finally { delete toggling[id]; }
+  }
+  let refreshT: ReturnType<typeof setTimeout>;
+  const refreshSoon = () => { clearTimeout(refreshT); refreshT = setTimeout(loadItems, 500); };
+  $effect(() => () => clearTimeout(refreshT));
+  const restartNote = (n: number) => { if (n && (s.state === 'running' || s.state === 'starting')) toast('info', 'Restart needed', { body: 'The change takes effect the next time the server starts.' }); };
+  async function toggle(it: ContentItem, enabled: boolean) {
+    const r = await toggleOne(it, enabled);
+    if (r.ok) { restartNote(+r.restart); refreshSoon(); }
+  }
+  async function bulkToggle(its: ContentItem[], enabled: boolean) {
+    const rs = await Promise.all(its.map((it) => toggleOne(it, enabled)));
+    const ok = rs.filter((r) => r.ok).length;
+    if (ok) { toast('success', `${enabled ? 'Enabled' : 'Disabled'} ${ok} ${ok === 1 ? 'item' : 'items'}`); restartNote(rs.filter((r) => r.restart).length); refreshSoon(); }
+  }
+  async function identify() {
+    try { track((await api.identify(s.id)).operation); } catch (e) { toastError(e, 'Could not start identification'); }
+  }
+  async function openImport() {
+    try { importer = (await import('../../components/content/ModpackImport.svelte')).default; } catch (e) { toastError(e, 'Could not load the importer'); }
+  }
+  async function exportPack() {
+    exporting = true;
+    try { await download(modpackExportPath(s.id), `${s.name.replace(/[^\w.-]+/g, '-')}.mrpack`); } catch (e) { toastError(e, 'Export failed'); }
+    exporting = false;
+  }
+  // Compatibility finding actions
+  async function runFinding(f: ContentFinding) {
+    const a = f.action;
+    if (!a) return;
+    const it = items?.find((i) => i.id === (a.item ?? f.item));
+    busyFinding = f.id;
+    try {
+      if (a.kind === 'toggle' && it) await toggle(it, !it.enabled);
+      else if (a.kind === 'install' && a.project_id) await review({ project_id: a.project_id, title: f.title.replace(/^Missing (required )?(dependency )?/i, '') || a.project_id });
+      else if (a.kind === 'remove' && it) reviewRemove([it]);
+      else if (a.kind === 'update' && it) reviewUpdate(it);
+      else if (a.kind === 'open' && it) drawerId = it.id;
+      else if (a.kind === 'open' && a.project_id) window.open(`https://modrinth.com/project/${encodeURIComponent(a.project_id)}`, '_blank', 'noopener,noreferrer');
+      else toast('warn', 'That item is no longer installed', { body: 'Re-check compatibility to refresh the list.' });
+    } finally { busyFinding = null; }
+  }
   async function openDetail(hit: Hit) {
     detail = { hit, project: null, err: '' };
     try { const p = await api.project(hit.project_id, s.id, provider); if (detail?.hit === hit) detail.project = p; } catch (e) { if (detail?.hit === hit) detail.err = errMsg(e); }
@@ -130,7 +215,7 @@
 
 <div class="row between wrap" style="margin-bottom:16px">
   <div class="row g6" role="group" aria-label="View">
-    <button class="chip" aria-pressed={view === 'installed'} onclick={() => (view = 'installed')}>Installed{#if items}<span class="tnum faint">{items.length}</span>{/if}</button>
+    <button class="chip" aria-pressed={view === 'installed'} onclick={() => (view = 'installed')}>Installed{#if items}<span class="tnum faint">{items.length}</span>{/if}{#if updateCount}<span class="badge info" title="{updateCount} update{updateCount === 1 ? '' : 's'} available">{updateCount}<span class="sr"> updates available</span></span>{/if}</button>
     <button class="chip" aria-pressed={view === 'browse'} onclick={() => (view = 'browse')}><Icon name="search" size={14} />Browse{multi ? '' : ' ' + pname}</button>
   </div>
   {#if view === 'browse' && multi}
@@ -140,39 +225,34 @@
       {/each}
     </div>
   {/if}
-  {#if view === 'installed' && canManage}<button class="btn" disabled={checking} onclick={check}><Icon name="refresh" size={15} />{checking ? 'Checking…' : 'Check for updates'}</button>{/if}
+  {#if view === 'installed' && canManage}
+    <div class="row g6 wrap">
+      {#if s.content_kind === 'mods'}
+        <button class="btn" onclick={openImport}><Icon name="upload" size={15} />Import modpack</button>
+        <button class="btn" disabled={exporting} onclick={exportPack}><Icon name="download" size={15} />{exporting ? 'Exporting…' : 'Export .mrpack'}</button>
+      {/if}
+      <button class="btn" class:spin={checking} disabled={checking} onclick={check}><Icon name="refresh" size={15} />{checking ? 'Checking…' : 'Check for updates'}</button>
+      {#if updateCount}<button class="btn primary" onclick={reviewUpdateAll}>Review updates<span class="cnt tnum">{updateCount}</span></button>{/if}
+    </div>
+  {/if}
 </div>
 
 {#if view === 'installed'}
   {#if iErr}<States kind="error" text={iErr} retry={loadItems} />
   {:else if !items}<States kind="loading" rows={4} />
-  {:else if !items.length}
-    <States kind="empty" icon="puzzle" title="No {label.toLowerCase()} installed" text="Browse for {label.toLowerCase()} that match this server's version and loader."><button class="btn primary" onclick={() => (view = 'browse')}><Icon name="search" size={15} />Browse</button></States>
   {:else}
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Name</th><th>Source</th><th>Version</th><th>Installed</th><th></th></tr></thead>
-        <tbody>
-          {#each items as it (it.id)}
-            <tr>
-              <td><div class="ellipsis" style="max-width:260px"><b>{it.title}</b></div><div class="xs faint mono ellipsis" style="max-width:260px">{it.filename}</div></td>
-              <td><span class="badge {it.source === 'moss' ? 'ok' : ''}" title={it.source === 'moss' ? `Installed by Moss from ${pLabel(it.provider)}` : 'Dropped in manually; Moss cannot update it'}>{pLabel(it.provider)}</span></td>
-              <td class="tnum">{it.version_number ?? '—'}{#if updates[it.id]}<span class="badge info" style="margin-left:6px">→ {updates[it.id].latest}</span>{/if}</td>
-              <td class="muted">{relTime(it.installed_at)}</td>
-              <td class="num">
-                <span class="row g4 end" style="justify-content:flex-end">
-                  {#if canManage && it.provider === 'modrinth'}
-                    <button class="btn ghost icon sm" aria-pressed={it.pinned} aria-label="{it.pinned ? 'Unpin' : 'Pin'} {it.title}" title={it.pinned ? 'Pinned: updates skip this' : 'Pin version'} onclick={() => togglePin(it)} style={it.pinned ? 'color:var(--a-text)' : ''}><Icon name="pin" size={14} /></button>
-                  {/if}
-                  {#if canManage && updates[it.id] && !it.pinned}<button class="btn sm primary" onclick={() => reviewUpdate(it)}>Update</button>{/if}
-                  {#if canManage}<button class="btn ghost icon sm" aria-label="Remove {it.title}" onclick={() => reviewRemove(it)}><Icon name="trash" size={14} /></button>{/if}
-                </span>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+    <CompatPanel serverId={s.id} {items} {reloadKey} busy={busyFinding} onaction={runFinding} />
+    {#each tracked as id (id)}
+      {@const o = ops.list.find((x) => x.id === id)}
+      {#if o}
+        <div class="trk"><OpCard op={o} open={o.kind.includes('identify') || o.kind.includes('modpack')} />{#if o.state !== 'running' && o.state !== 'queued'}<button class="btn ghost icon sm x" aria-label="Dismiss" onclick={() => (tracked = tracked.filter((t) => t !== id))}><Icon name="x" size={14} /></button>{/if}</div>
+      {/if}
+    {/each}
+    {#if !items.length}
+      <States kind="empty" icon="puzzle" title="No {label.toLowerCase()} installed" text="Browse for {label.toLowerCase()} that match this server's version and loader{s.content_kind === 'mods' && canManage ? ', or import a modpack' : ''}."><button class="btn primary" onclick={() => (view = 'browse')}><Icon name="search" size={15} />Browse</button>{#if s.content_kind === 'mods' && canManage}<button class="btn" onclick={openImport}><Icon name="upload" size={15} />Import modpack</button>{/if}</States>
+    {:else}
+      <InstalledList {items} {updates} {canManage} {toggling} {identifying} onopen={(it) => (drawerId = it.id)} ontoggle={toggle} onbulktoggle={bulkToggle} onbulkremove={reviewRemove} onupdate={reviewUpdate} onpin={togglePin} onremove={(it) => reviewRemove([it])} onidentify={identify} />
+    {/if}
   {/if}
 {:else}
   <div class="row wrap" style="margin-bottom:12px">
@@ -248,9 +328,21 @@
   </Modal>
 {/if}
 
+{#if drawer}
+  <ItemDrawer item={drawer} {canManage} latest={updates[drawer.id]?.latest ?? null} onclose={() => (drawerId = null)} onaction={(f) => { drawerId = null; void runFinding(f); }} ontoggle={(it) => toggle(it, !it.enabled)} onupdate={(it) => { drawerId = null; reviewUpdate(it); }} onremove={(it) => { drawerId = null; reviewRemove([it]); }} />
+{/if}
+
+{#if importer}
+  {@const Importer = importer}
+  <Importer server={s} onclose={() => (importer = null)} onstarted={(o: Operation) => { importer = null; track(o); view = 'installed'; }} />
+{/if}
+
 {#if plan}<PlanModal plan={plan.plan} title={plan.title} confirmLabel={plan.label} busy={applying} onconfirm={apply} oncancel={() => (plan = null)} />{/if}
 
 <style>
+  .cnt { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--a-ink); color: var(--a-text); font-size: 11px; margin-left: 2px; }
+  .trk { position: relative; margin-bottom: 12px; }
+  .trk .x { position: absolute; bottom: 8px; right: 10px; }
   .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--s2); }
   .segb { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
   .segb[aria-checked='true'] { background: var(--a-soft); color: var(--a-text); font-weight: 600; }

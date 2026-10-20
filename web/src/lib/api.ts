@@ -14,7 +14,7 @@ export interface Runtime {
   id: string; name: string; category: 'official' | 'plugins' | 'modded' | 'proxy' | 'custom';
   tier: 'stable' | 'experimental' | 'planned'; content_kind: ContentKind; description: string; installable: boolean;
 }
-export interface Versions { versions: { id: string; stable: boolean }[]; recommended: string }
+export interface Versions { versions: { id: string; stable: boolean }[]; recommended: string; loader_versions?: Record<string, { id: string; recommended: boolean }[]> }
 export interface JavaInstall { major: number; path: string; managed: boolean; version: string }
 export interface Server {
   id: string; name: string; runtime: string; game_version: string; loader_version: string | null; java_major: number;
@@ -27,7 +27,7 @@ export interface Server {
 }
 export interface CreateServer {
   name: string; runtime: string; game_version: string; loader_version?: string; memory_mb: number; port?: number;
-  accept_eula: boolean; flags_profile?: string; autostart?: boolean; custom?: { command: string[] };
+  accept_eula: boolean; flags_profile?: string; autostart?: boolean; custom?: { command: string[] }; modpack_token?: string;
 }
 export interface StatSample { t: number; cpu: number; mem: number; players: number | null }
 export interface TimelineEvent { time: string; kind: 'start' | 'ready' | 'stop' | 'crash' | 'restart' | 'backup' | 'install' | 'update' | 'undo'; detail: string }
@@ -50,11 +50,38 @@ export interface Project {
   project_id: string; title: string; description: string; body: string; icon_url: string | null;
   links: { source?: string; issues?: string; wiki?: string; page?: string }; license: string; gallery: string[]; versions: ProjectVersion[];
 }
+export type ContentSeverity = 'info' | 'warn' | 'critical';
+/** Content finding (GET content/check, plan conflicts, item issues); distinct from the host-level health Finding. */
+export interface ContentFinding {
+  id: string; severity: ContentSeverity; item: string | null; title: string; detail: string; evidence: string[];
+  action: { label: string; kind: 'toggle' | 'install' | 'remove' | 'update' | 'open'; item?: string; project_id?: string } | null;
+}
+export type ContentLoader = 'fabric' | 'quilt' | 'forge' | 'neoforge' | 'paper' | 'spigot' | 'bukkit' | 'velocity' | 'bungee' | 'datapack' | 'unknown';
+export interface ContentMeta {
+  id: string; name: string; version: string; authors: string[]; description: string; loader: ContentLoader;
+  environment: 'server' | 'client' | 'both' | 'unknown'; depends: { id: string; required: boolean; range: string | null }[]; breaks: string[];
+}
 export interface ContentItem {
   id: string; provider: ProviderId | 'manual'; project_id: string | null; version_id: string | null; title: string;
-  version_number: string | null; filename: string; kind: string; sha512: string | null; installed_at: string; pinned: boolean; source: 'moss' | 'manual';
+  version_number: string | null; filename: string; kind: string; sha512: string | null; installed_at: string; pinned: boolean;
+  source: 'moss' | 'manual' | 'identified' | 'modpack'; enabled: boolean; identified: boolean; meta: ContentMeta | null; issues: ContentFinding[];
 }
-export interface ChangePlan { items: { action: 'install' | 'replace' | 'remove'; title: string; filename: string; size: number; reason: string }[]; warnings: string[]; requires_restart: boolean }
+export interface ChangePlan {
+  items: { action: 'install' | 'replace' | 'remove'; title: string; filename: string; size: number; reason: string; version?: string; from_version?: string | null }[];
+  warnings: string[]; requires_restart: boolean; conflicts?: ContentFinding[];
+}
+export interface UpgradePlan {
+  from: { game_version: string; loader_version: string | null }; to: { game_version: string; loader_version: string | null };
+  java: { from: number; to: number; installed: boolean }; server_jar: { available: boolean; note: string | null };
+  content: { item: string; title: string; status: 'ok' | 'update' | 'missing' | 'unknown'; current: string | null; target: string | null; version_id: string | null; reason: string | null }[];
+  blockers: string[]; warnings: string[]; can_proceed: boolean;
+}
+export type UpgradeContent = 'update' | 'disable_incompatible' | 'keep';
+export interface ModpackInspect {
+  token: string; format: 'mrpack' | 'curseforge'; name: string; version: string; summary: string | null; game_version: string;
+  loader: { id: string; version: string | null }; files: { total: number; server: number; client_only: number; unavailable: number };
+  unavailable: { name: string; reason: string; url?: string | null }[]; overrides: { files: number; size: number }; size: number; warnings: string[];
+}
 export interface Backup {
   id: string; server_id: string; created_at: string; size: number; sha256: string; status: 'running' | 'ok' | 'failed' | 'verifying';
   verified_at: string | null; note: string; kind: 'manual' | 'scheduled' | 'pre-change'; consistent: boolean; files: number;
@@ -219,6 +246,16 @@ export const api = {
   checkUpdates: (id: string) => send<{ updates: { item_id: string; title: string; current: string; latest: string; version_id: string }[] }>('POST', `/servers/${e(id)}/content/check-updates`),
   updateContent: (id: string, item: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/content/${e(item)}/update`),
   pin: (id: string, item: string, pinned: boolean) => send('PATCH', `/servers/${e(id)}/content/${e(item)}`, { pinned }),
+  // WP-A v2: toggle, identify, compatibility check, update-all, upgrade assistant, modpacks
+  toggleContent: (id: string, item: string, enabled: boolean) => send<{ item: ContentItem; requires_restart?: boolean }>('POST', `/servers/${e(id)}/content/${e(item)}/toggle`, { enabled }),
+  identify: (id: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/content/identify`),
+  contentCheck: (id: string) => get<{ findings: ContentFinding[]; checked_at: string }>(`/servers/${e(id)}/content/check`),
+  updateAllPlan: (id: string) => send<ChangePlan>('POST', `/servers/${e(id)}/content/update-all/plan`),
+  updateAll: (id: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/content/update-all`),
+  upgradePlan: (id: string, game_version: string, loader_version?: string) => send<UpgradePlan>('POST', `/servers/${e(id)}/upgrade/plan`, { game_version, loader_version }),
+  upgrade: (id: string, b: { game_version: string; loader_version?: string; content: UpgradeContent; backup: true; confirm_downgrade?: boolean }) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/upgrade`, b),
+  inspectModpack: (b: { provider: ProviderId; project_id: string; version_id?: string }) => send<ModpackInspect>('POST', '/modpacks/inspect', b),
+  importModpack: (id: string, token: string, mode: 'add' | 'replace') => send<{ operation: Operation }>('POST', `/servers/${e(id)}/modpacks`, { token, mode }),
 
   backups: (id: string) => get<Backup[]>(`/servers/${e(id)}/backups`),
   allBackups: () => get<Backup[]>('/backups'),
@@ -268,6 +305,10 @@ export function saveBlob(blob: Blob, filename: string) {
 }
 export const fileDownloadPath = (id: string, path: string) => `/servers/${e(id)}/files/download${q({ path })}`;
 export const backupDownloadPath = (id: string) => `/backups/${e(id)}/download`;
+export const modpackExportPath = (id: string) => `/servers/${e(id)}/modpacks/export`;
+/** Small helpers for lib/upload.ts (XHR upload with progress, lazy-loaded). */
+export const apiUrl = (p: string) => BASE + p;
+export const authToken = () => getToken();
 
 async function ticket(): Promise<string> {
   const r = await exec<{ ticket: string }>('POST', '/ticket');

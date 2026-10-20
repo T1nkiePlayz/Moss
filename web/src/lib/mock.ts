@@ -1,6 +1,7 @@
 // In-memory backend for `VITE_MOCK=1`. Never imported in production builds.
 import type * as A from './api';
 import { ApiError } from './api';
+import { extraRuntimes, handleContent, inspectModpack, itemsFromPack, NONE, seedContent, versionsFor } from './mock-content';
 
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
@@ -38,10 +39,8 @@ const runtimes: A.Runtime[] = [
   { id: 'fabric', name: 'Fabric', category: 'modded', tier: 'stable', content_kind: 'mods', description: 'Lightweight, fast-updating mod loader.', installable: true },
   { id: 'velocity', name: 'Velocity', category: 'proxy', tier: 'stable', content_kind: 'proxy_plugins', description: 'Modern proxy to link several servers together.', installable: true },
   { id: 'custom', name: 'Custom command', category: 'custom', tier: 'experimental', content_kind: 'none', description: 'Run any command in a managed directory.', installable: true },
-  { id: 'neoforge', name: 'NeoForge', category: 'modded', tier: 'planned', content_kind: 'mods', description: 'Planned.', installable: false },
-  { id: 'forge', name: 'Forge', category: 'modded', tier: 'planned', content_kind: 'mods', description: 'Planned.', installable: false },
+  ...extraRuntimes,
 ];
-const vlist = ['1.21.4', '1.21.3', '1.21.1', '1.20.6', '1.20.4', '1.19.4', '1.18.2', '25w05a', '24w46a'];
 
 // ---- operations & events ----
 const ops: A.Operation[] = [];
@@ -126,14 +125,8 @@ function listDir(id: string, path: string): A.FileList {
 
 // ---- other fixtures ----
 const content: Record<string, A.ContentItem[]> = {};
-function seedContent(s: A.Server) {
-  const mkI = (title: string, filename: string, v: string, source: 'moss' | 'manual', pinned = false): A.ContentItem => ({ id: uid(), provider: source === 'moss' ? 'modrinth' : 'manual', project_id: source === 'moss' ? title.toLowerCase().replace(/\W/g, '') : null, version_id: source === 'moss' ? uid() : null, title, version_number: v, filename, kind: s.content_kind, sha512: source === 'moss' ? 'a1b2c3'.repeat(10) : null, installed_at: ago(4 * DAY), pinned, source });
-  content[s.id] =
-    s.content_kind === 'mods' ? [mkI('Fabric API', 'fabric-api-0.114.jar', '0.114.0', 'moss', true), mkI('Sodium', 'sodium-fabric-0.6.jar', '0.6.0', 'moss'), mkI('Lithium', 'lithium-fabric-0.14.jar', '0.14.3', 'moss'), mkI('my-custom-tweaks', 'my-custom-tweaks.jar', '', 'manual')]
-    : s.content_kind === 'plugins' || s.content_kind === 'proxy_plugins' ? [mkI('LuckPerms', 'LuckPerms-5.4.jar', '5.4.145', 'moss', true), mkI('Chunky', 'Chunky-1.4.jar', '1.4.28', 'moss'), mkI('EssentialsX', 'EssentialsX.jar', '2.20.1', 'manual')]
-    : [];
-}
-servers.forEach(seedContent);
+function seedContentFor(s: A.Server) { content[s.id] = seedContent(s); }
+servers.forEach(seedContentFor);
 
 const backups: A.Backup[] = [];
 function seedBackups(s: A.Server, n: number) {
@@ -296,7 +289,8 @@ export async function handle(method: string, rawPath: string, body: unknown): Pr
   if (p === '/ticket') return { ticket: 'mock' };
   if (p === '/status') return { version: '0.1.0-mock', uptime_s: 9 * 86400 + 4000, auth_mode: 'dev', host: { cpu_pct: 24 + Math.random() * 12, mem_total: 16e9, mem_used: 7.4e9 + Math.random() * 3e8, disk_total: 500e9, disk_free: 312e9, load1: 0.84, hostname: 'moss-host' }, counts: { servers: servers.length, running: servers.filter((s) => s.state === 'running').length, players: servers.reduce((n, s) => n + (s.players?.online ?? 0), 0) } };
   if (p === '/runtimes') return runtimes;
-  if (M(/^\/runtimes\/([^/]+)\/versions$/)) return { versions: vlist.map((id) => ({ id, stable: /^\d+\.\d+(\.\d+)?$/.test(id) })), recommended: '1.21.4' };
+  if (M(/^\/runtimes\/([^/]+)\/versions$/)) return versionsFor(m![1]);
+  if (p === '/modpacks/inspect') return inspectModpack(body);
   if (p === '/java' && method === 'GET') return { installs: javaInstalls };
   if (p === '/java/install') return op('java.install', `Installing Java ${b.major}`, null, ['Resolving build', 'Downloading JDK', 'Verifying checksum', 'Extracting'], { done: () => javaInstalls.push({ major: b.major, path: `/var/lib/moss/java/${b.major}`, managed: true, version: `${b.major}.0.1` }) });
   if (p === '/health') return health();
@@ -324,8 +318,8 @@ export async function handle(method: string, rawPath: string, body: unknown): Pr
 
   if (p === '/servers') {
     if (method === 'GET') return servers;
-    const s = mk({ name: b.name, runtime: b.runtime, game_version: b.game_version, memory_mb: b.memory_mb, port: b.port ?? 25570 + servers.length, desired: 'stopped', state: 'installing', content_kind: runtimes.find((r) => r.id === b.runtime)?.content_kind ?? 'none', eula_accepted: !!b.accept_eula });
-    servers.push(s); seedFs(s); content[s.id] = []; emitServer(s);
+    const s = mk({ name: b.name, runtime: b.runtime, game_version: b.game_version, loader_version: b.loader_version ?? null, memory_mb: b.memory_mb, port: b.port ?? 25570 + servers.length, desired: 'stopped', state: 'installing', content_kind: runtimes.find((r) => r.id === b.runtime)?.content_kind ?? 'none', eula_accepted: !!b.accept_eula });
+    servers.push(s); seedFs(s); content[s.id] = b.modpack_token ? itemsFromPack(s, b.modpack_token) : []; emitServer(s);
     log('server.create', s.name);
     const o = startOp('server.install', `Installing ${s.name}`, s.id, ['Resolving build', 'Downloading server jar', 'Verifying checksum', 'Writing config', 'First-run setup'], { done: () => setState(s, 'stopped') });
     return { server: s, operation: o };
@@ -363,23 +357,10 @@ export async function handle(method: string, rawPath: string, body: unknown): Pr
     if (sub === '/files/mkdir') { fs[s.id][b.path + '/'] = ''; return; }
     if (sub === '/files/rename') { for (const k of Object.keys(fs[s.id])) if (k === b.from || k.startsWith(b.from + '/')) { fs[s.id][b.to + k.slice(b.from.length)] = fs[s.id][k]; delete fs[s.id][k]; } return; }
     if (sub === '/files/upload') { const pth = qs.get('path') ?? ''; for (const f of (body as FormData).getAll('file') as File[]) fs[s.id][(pth ? pth + '/' : '') + f.name] = BIN.test(f.name) ? '\0'.repeat(Math.min(f.size, 5000)) : await f.text(); return; }
-    if (sub === '/content' && method === 'GET') return { items: content[s.id] ?? [] };
-    if (sub === '/content/plan') {
-      const h = [...hits, ...cfHits].find((x) => x.project_id === b.project_id);
-      return { items: [{ action: 'install', title: h?.title ?? b.project_id, filename: `${b.project_id}-2.4.1.jar`, size: 2.1e6, reason: 'Selected by you' }, ...(b.project_id === 'worldedit' ? [{ action: 'install', title: 'FastAsyncWorldEdit support lib', filename: 'lib-1.0.jar', size: 420000, reason: 'Required dependency' }] : [])], warnings: s.state === 'running' ? ['The server is running; a restart is needed to load it.'] : [], requires_restart: true };
+    if (/^\/(content|upgrade|modpacks)(\/|$)/.test(sub)) {
+      const r = await handleContent({ uid, now, ago, op: (...a) => startOp(...a), hits, cfHits, log, pushUndo, backups, content, emitServer }, s, sub, method, b);
+      if (r !== NONE) return r;
     }
-    if (sub === '/content' && method === 'POST') {
-      const h = [...hits, ...cfHits].find((x) => x.project_id === b.project_id);
-      return op('content.install', `Installing ${h?.title ?? b.project_id}`, s.id, ['Resolving dependencies', 'Downloading', 'Verifying sha512', 'Placing files'], { done: () => { content[s.id].push({ id: uid(), provider: b.provider ?? 'modrinth', project_id: b.project_id, version_id: b.version_id ?? uid(), title: h?.title ?? b.project_id, version_number: '2.4.1', filename: `${b.project_id}-2.4.1.jar`, kind: s.content_kind, sha512: 'ff00'.repeat(20), installed_at: now(), pinned: false, source: 'moss' }); pushUndo(s.id, `Installed ${h?.title}`, [`plugins/${b.project_id}.jar`]); log('content.install', s.name, h?.title ?? ''); } });
-    }
-    if (S(/^\/content\/([^/]+)$/)) {
-      const list = content[s.id]; const i = list.findIndex((x) => x.id === mm![1]);
-      if (method === 'PATCH') { list[i].pinned = b.pinned; return; }
-      const it = list[i];
-      return op('content.remove', `Removing ${it.title}`, s.id, ['Backing up files', 'Removing'], { done: () => { list.splice(list.indexOf(it), 1); pushUndo(s.id, `Removed ${it.title}`, [it.filename]); } });
-    }
-    if (sub === '/content/check-updates') return { updates: (content[s.id] ?? []).filter((x) => x.source === 'moss' && !x.pinned).slice(0, 1).map((x) => ({ item_id: x.id, title: x.title, current: x.version_number!, latest: '9.9.9', version_id: uid() })) };
-    if (S(/^\/content\/([^/]+)\/update$/)) { const it = content[s.id].find((x) => x.id === mm![1])!; return op('content.update', `Updating ${it.title}`, s.id, ['Downloading', 'Replacing'], { done: () => { it.version_number = '9.9.9'; } }); }
     if (sub === '/backups') {
       if (method === 'GET') return backups.filter((x) => x.server_id === s.id).sort((a, b) => b.created_at.localeCompare(a.created_at));
       return op('backup.create', `Backing up ${s.name}`, s.id, ['Flushing world', 'Archiving', 'Hashing'], { indeterminate: true, done: () => { backups.push({ id: uid(), server_id: s.id, created_at: now(), size: 1.3e9, sha256: 'ab'.repeat(32), status: 'ok', verified_at: null, note: b.note ?? '', kind: 'manual', consistent: true, files: 1900 }); } });

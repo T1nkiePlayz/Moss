@@ -2,7 +2,8 @@
   import Icon from '../components/Icon.svelte';
   import States from '../components/States.svelte';
   import OpCard from '../components/OpCard.svelte';
-  import { api, ApiError, errMsg, type Runtime, type Versions, type JavaInstall } from '../lib/api';
+  import Lazy from '../components/Lazy.svelte';
+  import { api, ApiError, errMsg, type Runtime, type Versions, type JavaInstall, type ModpackInspect } from '../lib/api';
   import { host, ops, trackOp, toastError } from '../lib/stores.svelte';
   import { bytes } from '../lib/format';
   import { navigate } from '../lib/router.svelte';
@@ -16,6 +17,12 @@
   let vErr = $state('');
   let vFilter = $state<'stable' | 'all'>('stable');
   let version = $state('');
+  let loaderVer = $state('');
+  // "From modpack" path: pick/inspect a pack first; its runtime, game version and loader then come from the pack.
+  let fromPack = $state(false);
+  let pack = $state<ModpackInspect | null>(null);
+  let packReady = $state(false);
+  let packErr = $state('');
   let name = $state('');
   let memory = $state(2048);
   let port = $state<number | null>(null);
@@ -36,14 +43,33 @@
   }
   void loadRt();
 
+  // One entry per id; an installable entry wins over a "planned" placeholder of the same runtime.
+  const usableRuntimes = $derived.by(() => {
+    const m = new Map<string, Runtime>();
+    for (const r of runtimes ?? []) { const o = m.get(r.id); if (!o || (!o.installable && r.installable)) m.set(r.id, r); }
+    return [...m.values()];
+  });
   const grouped = $derived.by(() => {
     const g: Record<string, Runtime[]> = {};
-    for (const r of runtimes ?? []) (g[r.category] ??= []).push(r);
+    for (const r of usableRuntimes) (g[r.category] ??= []).push(r);
     return Object.entries(g);
   });
+  const loaders = $derived(versions?.loader_versions?.[version] ?? []);
+  $effect(() => { const l = loaders; if (!fromPack) loaderVer = l.find((x) => x.recommended)?.id ?? l[0]?.id ?? ''; });
+
+  function startPack() { fromPack = true; pack = null; packReady = false; packErr = ''; runtime = null; versions = null; version = ''; step = 2; }
+  function onPack(m: ModpackInspect | null) {
+    pack = m; packErr = '';
+    if (!m) return;
+    const r = usableRuntimes.find((x) => x.id === m.loader.id);
+    if (!r || !r.installable) { packErr = `This pack needs ${m.loader.id}, which Moss cannot install yet.`; return; }
+    runtime = r; version = m.game_version; loaderVer = m.loader.version ?? '';
+    name = m.name.slice(0, 48); memory = Math.max(memory, 4096);
+  }
 
   async function pick(r: Runtime) {
-    if (r.tier === 'planned' || !r.installable) return;
+    if (!r.installable) return;
+    fromPack = false; pack = null; packReady = false;
     runtime = r;
     versions = null; vErr = ''; version = '';
     if (r.id !== 'custom') {
@@ -68,7 +94,7 @@
   const javaOk = $derived(java?.some((j) => j.major >= javaNeed));
   const nameOk = $derived(name.trim().length >= 1 && name.length <= 48);
   const portOk = $derived(port == null || (port >= 1024 && port <= 65535));
-  const canNext2 = $derived(nameOk && portOk && (runtime?.id === 'custom' ? command.trim().length > 0 : !!version));
+  const canNext2 = $derived(nameOk && portOk && (runtime?.id === 'custom' ? command.trim().length > 0 : !!version) && (!fromPack || !!pack));
 
   async function toReview() {
     step = 3;
@@ -85,6 +111,8 @@
       const r = await api.createServer({
         name: name.trim(), runtime: runtime.id, game_version: runtime.id === 'custom' ? 'custom' : version, memory_mb: memory,
         port: port ?? undefined, accept_eula: needsEula ? eula : false,
+        ...((fromPack || loaders.length) && loaderVer ? { loader_version: loaderVer } : {}),
+        ...(fromPack && pack ? { modpack_token: pack.token } : {}),
         ...(runtime.id === 'custom' ? { custom: { command: command.trim().split(/\s+/) } } : {}),
       });
       trackOp(r.operation);
@@ -116,15 +144,25 @@
   {#if rtErr}<States kind="error" text={rtErr} retry={loadRt} />
   {:else if !runtimes}<States kind="loading" rows={3} />
   {:else}
+    <h3 class="cat">Start from a modpack</h3>
+    <div class="grid cols-auto" style="--gap:12px">
+      <button class="card hover rt" onclick={startPack}>
+        <div class="row between" style="align-items:flex-start"><div class="rico"><Icon name="package" size={20} /></div><span class="badge info">New</span></div>
+        <h3>From modpack</h3>
+        <p class="muted sm">Upload a .mrpack or CurseForge .zip, or paste a Modrinth/CurseForge link. Moss sets up the right loader, version and mods.</p>
+        <div class="xs faint">Mods</div>
+      </button>
+    </div>
     {#each grouped as [cat, list]}
       <h3 class="cat">{catLabel[cat] ?? cat}</h3>
       <div class="grid cols-auto" style="--gap:12px">
         {#each list as r (r.id)}
-          {@const off = r.tier === 'planned' || !r.installable}
-          <button class="card hover rt" class:off class:sel={runtime?.id === r.id} disabled={off} onclick={() => pick(r)} aria-label="{r.name}, {r.tier}">
+          {@const off = !r.installable}
+          {@const tier = r.tier === 'planned' && r.installable ? 'experimental' : r.tier}
+          <button class="card hover rt" class:off class:sel={runtime?.id === r.id} disabled={off} onclick={() => pick(r)} aria-label="{r.name}, {tier}">
             <div class="row between" style="align-items:flex-start">
               <div class="rico"><Icon name={r.category === 'proxy' ? 'link' : r.category === 'modded' ? 'puzzle' : r.category === 'custom' ? 'terminal' : 'cube'} size={20} /></div>
-              <span class="badge {r.tier === 'stable' ? 'ok' : r.tier === 'experimental' ? 'warn' : ''}">{r.tier === 'planned' ? 'Planned' : r.tier === 'stable' ? 'Stable' : 'Experimental'}</span>
+              <span class="badge {tier === 'stable' ? 'ok' : tier === 'experimental' ? 'warn' : ''}">{tier === 'planned' ? 'Planned' : tier === 'stable' ? 'Stable' : 'Experimental'}</span>
             </div>
             <h3>{r.name}</h3>
             <p class="muted sm">{r.description}</p>
@@ -134,10 +172,20 @@
       </div>
     {/each}
   {/if}
+{:else if step === 2 && fromPack && !packReady}
+  <div class="card form" style="max-width:760px">
+    <div class="row between"><h2>From modpack</h2><button class="btn ghost sm" onclick={() => { fromPack = false; pack = null; step = 1; }}><Icon name="chevron-left" size={14} />Change</button></div>
+    <Lazy load={() => import('../components/content/ModpackPicker.svelte')} props={{ onresult: onPack }} />
+    {#if packErr}<div class="banner danger" role="alert"><Icon name="x-circle" size={16} />{packErr}</div>{/if}
+    <div class="row end"><button class="btn primary" disabled={!pack || !!packErr} onclick={() => (packReady = true)}>Continue<Icon name="chevron-right" size={15} /></button></div>
+  </div>
 {:else if step === 2 && runtime}
   <div class="card form">
-    <div class="row between"><h2>{runtime.name}</h2><button class="btn ghost sm" onclick={() => (step = 1)}><Icon name="chevron-left" size={14} />Change</button></div>
-    {#if runtime.id !== 'custom'}
+    <div class="row between"><h2>{runtime.name}</h2><button class="btn ghost sm" onclick={() => (fromPack ? (packReady = false) : (step = 1))}><Icon name="chevron-left" size={14} />{fromPack ? 'Change pack' : 'Change'}</button></div>
+    {#if fromPack && pack}
+      <div class="banner" style="align-items:center"><Icon name="package" size={18} /><div class="grow"><b>{pack.name}</b> {pack.version}<div class="xs muted">{pack.loader.id}{pack.loader.version ? ' ' + pack.loader.version : ''} · Minecraft {pack.game_version} · {pack.files.server} server mods</div></div></div>
+      {#if pack.files.unavailable}<div class="banner warn"><Icon name="alert" size={16} />{pack.files.unavailable} file{pack.files.unavailable === 1 ? '' : 's'} cannot be downloaded automatically; you can add {pack.files.unavailable === 1 ? 'it' : 'them'} in Files afterwards.</div>{/if}
+    {:else if runtime.id !== 'custom'}
       <div class="field">
         <div class="row between wrap">
           <label for="ver">Version</label>
@@ -156,6 +204,15 @@
         {/if}
         {#if fieldErr.game_version}<span class="err">{fieldErr.game_version}</span>{/if}
       </div>
+      {#if loaders.length}
+        <div class="field">
+          <label for="lver">{runtime.name} version</label>
+          <select id="lver" class="select" bind:value={loaderVer}>
+            {#each loaders as l (l.id)}<option value={l.id}>{l.id}{l.recommended ? ' (recommended)' : ''}</option>{/each}
+          </select>
+          {#if fieldErr.loader_version}<span class="err">{fieldErr.loader_version}</span>{/if}
+        </div>
+      {/if}
     {:else}
       <div class="field"><label for="cmd">Command</label><textarea id="cmd" class="textarea mono" rows="2" bind:value={command}></textarea><span class="hint">Runs in the server directory. Split on spaces.</span></div>
     {/if}
@@ -183,7 +240,8 @@
     <h2>Review</h2>
     <dl class="sum">
       <dt>Name</dt><dd>{name}</dd>
-      <dt>Runtime</dt><dd>{runtime.name}{runtime.id !== 'custom' ? ' ' + version : ''}</dd>
+      <dt>Runtime</dt><dd>{runtime.name}{runtime.id !== 'custom' ? ' ' + version : ''}{loaderVer && runtime.id !== 'custom' ? ` · loader ${loaderVer}` : ''}</dd>
+      {#if fromPack && pack}<dt>Modpack</dt><dd>{pack.name} {pack.version}<div class="xs muted">{pack.files.server} server mods will be downloaded and installed</div></dd>{/if}
       <dt>Memory</dt><dd class="tnum">{memory} MB</dd>
       <dt>Port</dt><dd class="tnum">{port ?? 'Auto'}</dd>
       <dt>Add-ons</dt><dd>{kindLabel[runtime.content_kind]}</dd>

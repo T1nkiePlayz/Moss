@@ -33,6 +33,7 @@
     if (c.includes('files')) t.push({ id: 'files', label: 'Files', icon: 'folder' });
     if (c.includes('properties')) t.push({ id: 'config', label: 'Config', icon: 'sliders' });
     if (c.includes('content') && s.content_kind !== 'none') t.push({ id: 'content', label: kindName[s.content_kind] ?? 'Content', icon: 'puzzle' });
+    if (s.runtime !== 'custom' || s.content_kind !== 'none') t.push({ id: 'upgrade', label: 'Upgrade', icon: 'arrow-up' });
     if (c.includes('backups')) t.push({ id: 'backups', label: 'Backups', icon: 'archive' });
     if (isAdmin()) t.push({ id: 'access', label: 'Access', icon: 'shield' });
     t.push({ id: 'settings', label: 'Settings', icon: 'settings' });
@@ -43,6 +44,7 @@
     files: () => import('./server/Files.svelte'),
     config: () => import('./server/Config.svelte'),
     content: () => import('./server/Content.svelte'),
+    upgrade: () => import('./server/Upgrade.svelte'),
     backups: () => import('./server/Backups.svelte'),
     access: () => import('./server/Access.svelte'),
     settings: () => import('./server/Settings.svelte'),

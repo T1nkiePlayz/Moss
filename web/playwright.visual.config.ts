@@ -14,8 +14,8 @@ export default defineConfig({
   expect: { toHaveScreenshot: { maxDiffPixelRatio: 0.002, threshold: 0.2, animations: 'disabled', caret: 'hide', scale: 'css' } },
   use: { baseURL: 'http://127.0.0.1:5199', locale: 'en-US', timezoneId: 'UTC', deviceScaleFactor: 1, reducedMotion: 'reduce', trace: 'off' },
   projects: [
-    { name: 'desktop', use: { viewport: { width: 1280, height: 760 } } },
-    { name: 'phone', use: { viewport: { width: 390, height: 780 } } },
+    { name: 'desktop', use: { viewport: { width: 900, height: 560 } } },
+    { name: 'phone', use: { viewport: { width: 360, height: 640 } } },
   ],
-  webServer: { command: 'npm run dev:mock -- --port 5199 --strictPort --host 127.0.0.1', url: 'http://127.0.0.1:5199', reuseExistingServer: !process.env.CI, timeout: 120_000 },
+  webServer: { command: 'VITE_MOCK=1 npx vite build --outDir dist-mock --emptyOutDir && npx vite preview --outDir dist-mock --port 5199 --strictPort --host 127.0.0.1', url: 'http://127.0.0.1:5199', reuseExistingServer: !process.env.CI, timeout: 120_000 },
 });

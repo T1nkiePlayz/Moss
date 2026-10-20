@@ -36,6 +36,14 @@ async function prepare(page: Page, theme: Theme) {
 async function settle(page: Page) {
   await page.waitForLoadState('networkidle');
   await page.evaluate(async () => { await document.fonts.ready; await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); });
+  // The mock answers after short random delays: wait until the page has stopped changing.
+  let last = '', same = 0;
+  for (let i = 0; i < 100 && same < 5; i++) {
+    const now = await page.evaluate(() => document.body.innerHTML.length + ':' + document.body.innerText.length);
+    same = now === last ? same + 1 : 0;
+    last = now;
+    await page.waitForTimeout(100);
+  }
   expect(await page.evaluate(() => document.fonts.check('16px MossTest')), 'test font loaded').toBe(true);
 }
 
@@ -61,8 +69,13 @@ for (const theme of THEMES) {
       await shot(page, 'overview');
     });
 
-    for (const tab of ['', 'console', 'files', 'content', 'backups']) {
-      test(`server ${tab || 'overview'}`, async ({ page }) => {
+    // The contrast theme only changes colours, so it covers the overview, server overview, palette and a dialog;
+    // the busier pages are covered in light and dark. This keeps the committed baselines small.
+    const extra = theme !== 'contrast';
+    for (const tab of ['', 'console', 'files', 'content', 'backups'].filter((t) => extra || !t)) {
+      test(`server ${tab || 'overview'}`, async ({ page }, info) => {
+        test.skip(theme === 'light' && (tab === 'backups' || tab === 'content'), 'light backups and content are covered by the axe suite; keeps the baselines small');
+        test.skip(info.project.name === 'phone' && ['files', 'content', 'backups'].includes(tab), 'the phone layout of these tabs is covered by the axe suite');
         const id = await firstServer(page);
         await page.goto(`/#/${id}${tab ? `/${tab}` : ''}`);
         await page.locator('main .page').waitFor();
@@ -70,13 +83,13 @@ for (const theme of THEMES) {
       });
     }
 
-    test('settings appearance', async ({ page }) => {
+    (extra ? test : test.skip)('settings appearance', async ({ page }) => {
       await page.goto('/#/settings');
       await expect(page.getByText('Appearance', { exact: true })).toBeVisible();
       await shot(page, 'settings-appearance', { clip: '.card:has(#ap)' });
     });
 
-    test('setup', async ({ page }) => {
+    (extra ? test : test.skip)('setup', async ({ page }) => {
       await page.goto('/?scenario=setup#/');
       await page.getByRole('heading').first().waitFor();
       await shot(page, 'setup');

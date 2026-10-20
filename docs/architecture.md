@@ -64,7 +64,7 @@ Before Moss changes a file (editor save, `server.properties`, plugin install/rep
 
 ## Not yet built
 
-Event workflows, multi-node. See [PLAN.md](PLAN.md).
+Event workflows, multi-node, extensions. See the roadmap in the README.
 
 ## Code layout
 

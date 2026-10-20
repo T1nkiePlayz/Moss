@@ -17,7 +17,7 @@ fn supervise(st: &St) {
         loop {
             tick.tick().await;
             n += 1;
-            let Ok(servers) = server::list(&st1).await else { continue };
+            let Ok(servers) = server::list_all(&st1).await else { continue };
             for s in servers.iter().filter(|s| s.installed) {
                 let alive = process_alive(s);
                 let (was, ready, restart_due, started) = {
@@ -48,7 +48,7 @@ fn sample(st: &St) {
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         loop {
             tick.tick().await;
-            let Ok(servers) = server::list(&st2).await else { continue };
+            let Ok(servers) = server::list_all(&st2).await else { continue };
             // One scan of the process table for every server, plus host CPU and cgroup memory. On macOS these spawn
             // `ps`, so none of it runs on an async worker thread.
             let (st3, ids) = (st2.clone(), servers.iter().filter(|s| s.pid.is_some()).map(|s| s.id.clone()).collect::<Vec<_>>());

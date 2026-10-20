@@ -58,7 +58,7 @@ pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, 
         } else {
             ctx.stage("Creating a new server from the backup");
             let nid = uuid::Uuid::now_v7().to_string();
-            let used: Vec<i64> = server::list(&st).await?.iter().map(|x| x.port).collect();
+            let used: Vec<i64> = server::list_all(&st).await?.iter().map(|x| x.port).collect();
             let mut port = existing.as_ref().map_or(25565, |e| e.port);
             while used.contains(&port) || tokio::net::TcpListener::bind(("0.0.0.0", port as u16)).await.is_err() { port += 1; }
             let dir = st.cfg.servers_dir().join(&nid);

@@ -49,8 +49,11 @@ pub async fn handle_exit(st: &St, id: &str) {
         st.timeline(id, "stop", &code.map_or(String::new(), |c| format!("exit {c}"))).await;
     } else {
         st.timeline(id, "crash", audit_msg.as_deref().unwrap_or("")).await;
-        st.audit("system", "server.crash", &s.name, audit_msg.as_deref().unwrap_or(""), Some(id)).await;
-        crate::notify::server_crashed(st, &s, audit_msg.as_deref().unwrap_or(""), restart_in.is_none() && s.restart_enabled).await;
+        // A crashing staging copy is a test finding, not an incident: no audit entry, no notification.
+        if !server::is_staging(st, id).await {
+            st.audit("system", "server.crash", &s.name, audit_msg.as_deref().unwrap_or(""), Some(id)).await;
+            crate::notify::server_crashed(st, &s, audit_msg.as_deref().unwrap_or(""), restart_in.is_none() && s.restart_enabled).await;
+        }
         if restart_in.is_none() { server::set_desired(st, id, "stopped").await; }
     }
     if let Ok(fresh) = server::get(st, id).await { server::note_state(st, &fresh); }

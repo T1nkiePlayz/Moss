@@ -193,7 +193,7 @@ pub async fn props_put(State(st): State<St>, user: User, Path(id): Path<String>,
     let port = entries.iter().find(|e| e["key"] == "server-port").and_then(|e| e["value"].as_str()).and_then(|v| v.trim().parse::<i64>().ok());
     if let Some(p) = port {
         if !(1..=65535).contains(&p) { return Err(ApiError::bad("validation", "invalid server-port").field("server-port", "1–65535")); }
-        if crate::server::list(&st).await?.iter().any(|o| o.id != id && o.port == p) { return Err(ApiError::conflict("port.taken", "server-port is assigned to another Moss server")); }
+        if crate::server::list_all(&st).await?.iter().any(|o| o.id != id && o.port == p) { return Err(ApiError::conflict("port.taken", "server-port is assigned to another Moss server")); }
     }
     let undo_id = undo::snapshot(&st, &s, "Edit server.properties", &["server.properties".into()]).await?;
     let (p, raw) = (s.dir(&st).join("server.properties"), r.raw.clone());

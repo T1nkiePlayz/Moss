@@ -49,7 +49,7 @@ pub(super) async fn servers_create(State(st): State<St>, user: User, Json(mut r)
     let lim = limits::LimitsPatch { memory: Some(r.memory_limit_mb), cpu: Some(r.cpu_limit_pct), pids: Some(r.pids_limit) };
     limits::validate_now(&lim)?;
     let flags = r.flags_profile.filter(|f| f == "balanced" || f == "minimal").unwrap_or_else(|| "balanced".into());
-    let existing: Vec<i64> = server::list(&st).await?.iter().map(|s| s.port).collect();
+    let existing: Vec<i64> = server::list_all(&st).await?.iter().map(|s| s.port).collect();
     let default_port = if r.runtime == "velocity" { 25577 } else { 25565 };
     let port = match r.port {
         Some(p) if !(1..=65535).contains(&p) => return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")),
@@ -97,7 +97,7 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     if let Some(f) = &p.flags_profile && f != "balanced" && f != "minimal" { return Err(ApiError::bad("validation", "unknown flags profile").field("flags_profile", "balanced | minimal")); }
     if let Some(port) = p.port {
         if !(1..=65535).contains(&port) { return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")); }
-        if server::list(&st).await?.iter().any(|o| o.id != id && o.port == port) { return Err(ApiError::conflict("port.taken", "port already assigned to another Moss server").field("port", "already assigned")); }
+        if server::list_all(&st).await?.iter().any(|o| o.id != id && o.port == port) { return Err(ApiError::conflict("port.taken", "port already assigned to another Moss server").field("port", "already assigned")); }
     }
     let now = crate::db::now();
     let (i, p2, now2) = (id.clone(), (p.name.clone(), p.memory_mb, p.port, p.flags_profile.clone(), p.autostart, p.restart_policy.as_ref().map(|r| (r.enabled, r.max_per_10m.clamp(0, 20))), p.tags.clone().map(|t| serde_json::to_string(&t.into_iter().map(|x| x.trim().chars().take(32).collect::<String>()).filter(|x| !x.is_empty()).take(12).collect::<Vec<_>>()).unwrap()), p.notes.clone(), p.accept_eula), now);

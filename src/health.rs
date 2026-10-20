@@ -17,6 +17,15 @@ fn limits_finding(s: &Srv) -> Option<Value> {
     Some(finding(format!("{}:limits", s.id), "info", Some(&s.id), "Resource limits are not enforced", format!("Limits are saved for this server but cannot be applied on this host: {why}"), vec![format!("backend: {}", v["backend"].as_str().unwrap_or("none"))], None))
 }
 
+/// Critical when a server is set to container isolation but no usable Docker or Podman is reachable.
+async fn container_finding(st: &St, s: &Srv) -> Option<Value> {
+    if s.isolation != "container" && !s.in_container { return None; }
+    let why = crate::container::engine(st).await.err()?;
+    Some(finding(format!("{}:container", s.id), "critical", Some(&s.id), "Container engine not available",
+        format!("This server is set to run in a container, but it cannot start that way: {why}"), vec!["isolation: container".into(), "no usable Docker or Podman found".into()],
+        Some(json!({"label": "Open settings", "kind": "open_tab", "tab": "settings"}))))
+}
+
 pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
     let mut f = vec![];
     let (state, detail) = server::state_of(s, st);
@@ -30,6 +39,7 @@ pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
         f.push(finding(format!("{}:crash", s.id), "critical", Some(&s.id), if state == "crashed" { "Server crashed" } else { "Install failed" }, detail.clone().unwrap_or_default(), vec![format!("state: {state}")], Some(json!({"label": "Open console", "kind": "open_tab", "tab": "console"}))));
     }
     f.extend(limits_finding(s));
+    f.extend(container_finding(st, s).await);
     if all.iter().any(|o| o.id != s.id && o.port == s.port) {
         f.push(finding(format!("{}:port", s.id), "warn", Some(&s.id), "Port shared with another server", format!("Port {} is assigned to more than one Moss server; only one can run at a time.", s.port), vec![format!("port {}", s.port)], Some(json!({"label": "Open settings", "kind": "open_tab", "tab": "settings"}))));
     }

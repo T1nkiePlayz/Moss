@@ -40,10 +40,23 @@ async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     if std::fs::metadata(&log).map(|m| m.len() > 0).unwrap_or(false) { let _ = std::fs::rename(&log, mdir.join("console.log.1")); }
     std::fs::write(&log, format!("[moss] starting {} ({} {})\n", s.name, s.runtime, s.game_version))?;
 
+    let ctr = s.isolation == "container";
+    let (pid, pstart) = if ctr {
+        super::ctr::spawn(st, s, argv).await.inspect_err(|e| crate::console::push(&crate::console::hub(st, &s.id), format!("\x1b[31m[moss] {}\x1b[0m", e.message)))?
+    } else {
+        spawn_process(st, s, &argv, &dir, &mdir)?
+    };
+    server::save_pid(st, &s.id, Some(pid), Some(pstart), None).await;
+    if !ctr { server::set_in_container(st, &s.id, false).await; }
+    finish_start(st, s, actor, log).await
+}
+
+/// Launch the detached wrapper shell (process mode); returns the PID and its start time.
+fn spawn_process(st: &St, s: &Srv, argv: &[String], dir: &std::path::Path, mdir: &std::path::Path) -> ApiResult<(i64, i64)> {
     let cg_dir = limit_cgroup(st, s);
     let mut cmd = tokio::process::Command::new("/bin/sh");
-    cmd.arg("-c").arg(RUN_SCRIPT).arg("moss-run").args(&argv).current_dir(&dir).env_clear()
-        .env("PATH", platform::GAME_PATH).env("HOME", &dir).env("LANG", platform::GAME_LANG).env("MOSS_DIR", &mdir)
+    cmd.arg("-c").arg(RUN_SCRIPT).arg("moss-run").args(argv).current_dir(dir).env_clear()
+        .env("PATH", platform::GAME_PATH).env("HOME", &dir).env("LANG", platform::GAME_LANG).env("MOSS_DIR", mdir)
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     if let Some(d) = &cg_dir { cmd.env("MOSS_CGROUP", d); }
     unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
@@ -51,8 +64,10 @@ async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     let pid = child.id().unwrap_or(0) as i64;
     let pstart = platform::pid_start(pid).unwrap_or(0) as i64;
     tokio::spawn(async move { let _ = child.wait().await; }); // reap while the controller lives
+    Ok((pid, pstart))
+}
 
-    server::save_pid(st, &s.id, Some(pid), Some(pstart), None).await;
+async fn finish_start(st: &St, s: &Srv, actor: &str, log: std::path::PathBuf) -> ApiResult<()> {
     {
         let mut live = st.live.lock().unwrap();
         let l = live.entry(s.id.clone()).or_default();

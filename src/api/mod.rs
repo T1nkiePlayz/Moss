@@ -21,6 +21,7 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 mod access;
 mod activity;
 mod assets;
+mod container;
 mod java;
 mod limits;
 mod metrics;
@@ -33,7 +34,7 @@ mod setup;
 mod support;
 mod tokens;
 
-use access::*; use activity::*; use assets::static_files; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
+use access::*; use activity::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
 use {metrics::*, notifications::*, support::*};
 
 type Q = Query<HashMap<String, String>>;
@@ -59,6 +60,8 @@ pub fn router(st: St) -> Router {
         .route("/java/{major}", axum::routing::delete(java_delete))
         .route("/servers", get(servers_list).post(servers_create))
         .route("/servers/{id}", get(server_get).patch(server_patch).delete(server_delete))
+        .route("/container/status", get(container_status))
+        .route("/servers/{id}/container/pull", post(container_pull))
         .route("/servers/{id}/actions/reinstall", post(server_reinstall))
         .route("/servers/{id}/actions/{action}", post(server_action))
         .route("/servers/{id}/command", post(server_command))

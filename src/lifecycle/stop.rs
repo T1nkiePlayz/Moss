@@ -1,5 +1,5 @@
 //! Graceful stop, escalation to SIGTERM/SIGKILL, force kill and restart.
-use super::{exit::handle_exit, process_alive, set_detail, start::{send_command, start}};
+use super::{ctr, exit::handle_exit, process_alive, set_detail, start::{send_command, start}};
 use crate::{error::ApiResult, server::{self, Srv}, state::St};
 use std::time::{Duration, Instant};
 
@@ -12,10 +12,24 @@ pub async fn stop_and_wait(st: &St, s: &Srv, graceful: Duration) {
     let _ = send_command(st, s, stop_command(s)).await;
     let wait = |d: Duration| async move {
         let end = Instant::now() + d;
-        while Instant::now() < end { if !process_alive(s) { return true; } tokio::time::sleep(Duration::from_millis(400)).await; }
+        while Instant::now() < end {
+            let gone = if s.in_container { !ctr::running_now(st, s).await } else { !process_alive(s) };
+            if gone { if s.in_container { crate::container::set_alive(&crate::container::container_name(&s.id), false); } return true; }
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
         false
     };
     if wait(graceful).await { return; }
+    if s.in_container {
+        // `docker stop`: SIGTERM, then SIGKILL after its own grace period
+        crate::console::push(&crate::console::hub(st, &s.id), "\x1b[33m[moss] graceful stop timed out — stopping the container\x1b[0m".into());
+        ctr::stop_container(st, s, 15).await;
+        if wait(Duration::from_secs(25)).await { return; }
+        crate::console::push(&crate::console::hub(st, &s.id), "\x1b[31m[moss] still running — killing the container\x1b[0m".into());
+        ctr::kill_container(st, s).await;
+        wait(Duration::from_secs(5)).await;
+        return;
+    }
     if let Some(p) = s.pid {
         crate::console::push(&crate::console::hub(st, &s.id), "\x1b[33m[moss] graceful stop timed out — sending SIGTERM\x1b[0m".into());
         kill_group(p, libc::SIGTERM);
@@ -51,7 +65,11 @@ pub async fn stop(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
 
 pub async fn kill(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     server::set_desired(st, &s.id, "stopped").await;
-    if let Some(p) = s.pid.filter(|_| process_alive(s)) {
+    if s.in_container && process_alive(s) {
+        st.live.lock().unwrap().entry(s.id.clone()).or_default().stopping = true;
+        ctr::kill_container(st, s).await;
+        crate::container::set_alive(&crate::container::container_name(&s.id), false);
+    } else if let Some(p) = s.pid.filter(|_| process_alive(s)) {
         st.live.lock().unwrap().entry(s.id.clone()).or_default().stopping = true;
         kill_group(p, libc::SIGKILL);
     }

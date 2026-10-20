@@ -84,6 +84,8 @@ pub(super) struct PatchReq {
     #[serde(default, deserialize_with = "limits::double_option")] memory_limit_mb: Option<Option<i64>>,
     #[serde(default, deserialize_with = "limits::double_option")] cpu_limit_pct: Option<Option<i64>>,
     #[serde(default, deserialize_with = "limits::double_option")] pids_limit: Option<Option<i64>>,
+    isolation: Option<String>,
+    #[serde(default, deserialize_with = "limits::double_option")] container_image: Option<Option<String>>,
 }
 #[derive(Deserialize)] struct RestartPolicy { enabled: bool, max_per_10m: i64 }
 
@@ -99,6 +101,7 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
         if !(1..=65535).contains(&port) { return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")); }
         if server::list(&st).await?.iter().any(|o| o.id != id && o.port == port) { return Err(ApiError::conflict("port.taken", "port already assigned to another Moss server").field("port", "already assigned")); }
     }
+    let iso = isolation_patch(&st, &user, &s, &p).await?;
     let now = crate::db::now();
     let (i, p2, now2) = (id.clone(), (p.name.clone(), p.memory_mb, p.port, p.flags_profile.clone(), p.autostart, p.restart_policy.as_ref().map(|r| (r.enabled, r.max_per_10m.clamp(0, 20))), p.tags.clone().map(|t| serde_json::to_string(&t.into_iter().map(|x| x.trim().chars().take(32).collect::<String>()).filter(|x| !x.is_empty()).take(12).collect::<Vec<_>>()).unwrap()), p.notes.clone(), p.accept_eula), now);
     st.db.call(move |c| {
@@ -115,6 +118,7 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
         Ok(())
     }).await?;
     limits::save(&st, &id, lim).await?;
+    if let Some((mode, image)) = iso { apply_isolation(&st, &user, &s, mode, image).await?; }
     if p.accept_eula == Some(true) && s.eula_at.is_none() {
         st.audit(&user.actor(), "eula.accept", &s.name, "Minecraft EULA accepted", Some(&id)).await;
         if s.installed { let _ = tokio::fs::write(s.dir(&st).join("eula.txt"), "# Accepted via Moss by the server owner (https://aka.ms/MinecraftEULA)\neula=true\n").await; }
@@ -125,6 +129,39 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     let v = server::view(&fresh, &st);
     st.emit("server", v.clone());
     Ok(Json(v))
+}
+
+/// Validate the isolation fields of a PATCH (admin only; engine must exist to enable). Returns the new (mode, image override).
+async fn isolation_patch(st: &St, user: &User, s: &Srv, p: &PatchReq) -> ApiResult<Option<(String, Option<String>)>> {
+    if p.isolation.is_none() && p.container_image.is_none() { return Ok(None); }
+    user.require_admin()?;
+    let mode = p.isolation.clone().unwrap_or_else(|| s.isolation.clone());
+    if mode != "process" && mode != "container" { return Err(ApiError::bad("validation", "unknown isolation mode").field("isolation", "process | container")); }
+    let image = match &p.container_image {
+        Some(Some(i)) if !i.trim().is_empty() => Some(crate::container::image::validate(i).map_err(|m| ApiError::bad("validation", m.clone()).field("container_image", &m))?),
+        Some(_) => None,
+        None => s.container_image.clone(),
+    };
+    if mode == "container" {
+        if !crate::container::supported(s, st.cfg.dev_runtimes) { return Err(ApiError::bad("container.unsupported", "only Minecraft servers can run in a container").field("isolation", "not available for this server type")); }
+        if s.isolation != "container" || p.container_image.is_some() {
+            crate::container::engine(st).await.map_err(|m| ApiError::conflict("container.engine_missing", m).field("isolation", "no container engine"))?;
+        }
+    }
+    Ok(Some((mode, image)))
+}
+
+async fn apply_isolation(st: &St, user: &User, s: &Srv, mode: String, image: Option<String>) -> ApiResult<()> {
+    let (i, m, img) = (s.id.clone(), mode.clone(), image.clone());
+    st.db.call(move |c| c.execute("UPDATE servers SET isolation=?, container_image=? WHERE id=?", rusqlite::params![m, img, i])).await?;
+    if mode != s.isolation || image != s.container_image {
+        st.audit(&user.actor(), "server.isolation", &s.name, &format!("{mode}{}", image.as_deref().map(|i| format!(" ({i})")).unwrap_or_default()), Some(&s.id)).await;
+        if mode == "container" {
+            let fresh = server::get(st, &s.id).await?;
+            super::container::spawn_pull(st, &fresh); // download the image now so the next start is quick
+        }
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)] pub(super) struct DelQ { #[serde(default)] delete_data: bool }
@@ -152,6 +189,7 @@ pub(super) async fn server_delete(State(st): State<St>, user: User, Path(id): Pa
         Ok(())
     }).await?;
     lifecycle::cleanup_cgroup(&id);
+    if s.isolation == "container" || s.in_container { lifecycle::ctr::remove(&st, &id).await; }
     st.live.lock().unwrap().remove(&id);
     st.hubs.lock().unwrap().remove(&id);
     st.stats.lock().unwrap().remove(&id);

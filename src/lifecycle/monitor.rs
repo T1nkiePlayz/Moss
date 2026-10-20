@@ -18,6 +18,7 @@ fn supervise(st: &St) {
             tick.tick().await;
             n += 1;
             let Ok(servers) = server::list(&st1).await else { continue };
+            if n.is_multiple_of(2) { super::ctr::refresh(&st1, &servers).await; } // one `ps` for every container server
             for s in servers.iter().filter(|s| s.installed) {
                 let alive = process_alive(s);
                 let (was, ready, restart_due, started) = {
@@ -51,7 +52,9 @@ fn sample(st: &St) {
             let Ok(servers) = server::list(&st2).await else { continue };
             // One scan of the process table for every server, plus host CPU and cgroup memory. On macOS these spawn
             // `ps`, so none of it runs on an async worker thread.
-            let (st3, ids) = (st2.clone(), servers.iter().filter(|s| s.pid.is_some()).map(|s| s.id.clone()).collect::<Vec<_>>());
+            let (st3, ids) = (st2.clone(), servers.iter().filter(|s| s.pid.is_some() && !s.in_container).map(|s| s.id.clone()).collect::<Vec<_>>());
+            // Container servers: one batched `stats --no-stream` for all of them.
+            let cstats = super::ctr::stats(&st2, servers.iter().filter(|s| s.in_container && process_alive(s)).map(|s| crate::container::container_name(&s.id)).collect()).await;
             let Ok((usage, cg_mem)) = tokio::task::spawn_blocking(move || {
                 st3.host.lock().unwrap().sample();
                 let cg = platform::cgroup::backend().ok();
@@ -60,12 +63,22 @@ fn sample(st: &St) {
             }).await else { continue };
             for s in servers.iter().filter(|s| s.installed && s.pid.is_some()) {
                 let Some(pid) = s.pid else { continue };
-                let Some(&(cpu_secs, rss)) = usage.get(&pid) else { continue };
-                let rss = cg_mem.get(&s.id).copied().unwrap_or(rss); // cgroup memory (incl. page cache of the game) when present
+                let from_engine = s.in_container.then(|| cstats.get(&crate::container::container_name(&s.id)).copied());
+                let (cpu_secs, rss) = match from_engine {
+                    Some(Some(c)) => (0.0, c.mem_bytes),
+                    Some(None) => continue,
+                    None => {
+                        let Some(&(cpu_secs, rss)) = usage.get(&pid) else { continue };
+                        (cpu_secs, cg_mem.get(&s.id).copied().unwrap_or(rss)) // cgroup memory (incl. page cache of the game) when present
+                    }
+                };
                 let (ready, cpu) = {
                     let mut live = st2.live.lock().unwrap();
                     let l = live.entry(s.id.clone()).or_default();
-                    let cpu = l.cpu_prev.map(|(prev, at)| 100.0 * (cpu_secs - prev).max(0.0) / at.elapsed().as_secs_f64().max(0.1));
+                    let cpu = match from_engine {
+                        Some(Some(c)) => Some(c.cpu_pct), // the engine already reports a percentage
+                        _ => l.cpu_prev.map(|(prev, at)| 100.0 * (cpu_secs - prev).max(0.0) / at.elapsed().as_secs_f64().max(0.1)),
+                    };
                     l.cpu_prev = Some((cpu_secs, Instant::now()));
                     if let Some(c) = cpu { l.cpu = Some((c * 10.0).round() / 10.0); }
                     l.mem = Some(rss);

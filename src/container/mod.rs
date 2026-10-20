@@ -9,6 +9,7 @@ use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, Mutex, Onc
 pub mod args;
 pub mod cli;
 pub mod image;
+pub mod pull;
 #[cfg(test)]
 pub mod fake;
 

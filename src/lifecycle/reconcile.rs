@@ -8,7 +8,12 @@ pub async fn reconcile(st: &St) -> anyhow::Result<()> {
     let servers = server::list(st).await?;
     let mut to_start = vec![];
     for s in servers.iter().filter(|s| s.installed) {
-        if process_alive(s) {
+        // A container server is re-attached by name + inspect (the PID of a container means nothing to a new controller).
+        let (alive, unknown) = if s.in_container {
+            let p = super::ctr::probe(st, s).await;
+            (p.unwrap_or(true), p.is_none())
+        } else { (process_alive(s), false) };
+        if alive {
             let started = st.db.call({ let id = s.id.clone(); move |c| c.query_row("SELECT started_at FROM servers WHERE id=?", [id], |r| r.get::<_, Option<String>>(0)) }).await.ok().flatten();
             let age = started.and_then(|t| chrono::DateTime::parse_from_rfc3339(&t).ok()).map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds().max(0) as u64).unwrap_or(60);
             let ready = crate::mcping::ping(s.port as u16).await.is_ok() || !s.is_mc() && s.runtime != "sim";
@@ -18,6 +23,7 @@ pub async fn reconcile(st: &St) -> anyhow::Result<()> {
                 l.alive = true; l.started = Some(Instant::now() - Duration::from_secs(age));
                 l.ready = ready;
             }
+            if unknown { set_detail(st, &s.id, "the container engine is not reachable right now; Moss will pick the server up when it is"); }
             crate::console::start_tailer(st, s.id.clone(), s.moss_dir(st).join("console.log"), true);
             st.timeline(&s.id, "reattach", "controller restarted; server kept running").await;
             tracing::info!(server = %s.name, pid = ?s.pid, "re-attached to running server");

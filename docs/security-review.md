@@ -18,6 +18,15 @@ Scope: the Rust controller (`src/`), the embedded UI's interaction with it, the 
 | 8 | Webhook SSRF | The address filter treated the local-use NAT64 prefix `64:ff9b:1::/48` as public. | Low | Fixed. | `webhook::tests::local_use_nat64_prefix_is_not_public` |
 | 9 | Container network | Container servers could always reach the internet and the local network. | Design gap | Mitigated: optional `game-only` network (see [architecture](architecture.md)); Docker only; never silently downgraded. | `container::stub_tests`, `lifecycle::ctr::tests`, `tests/container.rs` |
 
+| 10 | Dependencies | `cargo audit` (RustSec database, 2026-10-20) flagged `rustls-webpki` 0.103.15 (RUSTSEC-2026-0382) and `webpki-root-certs` 1.0.9 (RUSTSEC-2026-0383), both certificate-trust issues in TLS clients (webhooks, S3, CurseForge). | Medium | Fixed: `Cargo.lock` updated to 0.103.16 and 1.0.10. | `cargo audit` in CI |
+
+## Dependency advisories accepted
+
+- **RUSTSEC-2023-0071 (`rsa` Marvin timing attack).** Reached only through `jsonwebtoken`. Moss verifies tokens with public keys and never signs or decrypts with an RSA private key, which is the affected operation. No fixed release exists. Listed in `.cargo/audit.toml` and `deny.toml`.
+- **RUSTSEC-2024-0449 (`unsafe-libyaml` unmaintained, via `serde_yaml_ng`).** No known vulnerability; parses administrator-edited files capped at 1 MiB. Revisit when a maintained YAML parser is a drop-in.
+
+`npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities for the production dependencies (the UI is built into static files, so development-only packages never ship). The checks run weekly and on lockfile changes in `.github/workflows/audit.yml`; `deny.toml` also enforces the licence allow-list and bans unknown registries and git sources.
+
 ## Reviewed and found sound
 
 - **SQL.** All values are bound parameters. The only formatted SQL is column lists and fixed table names from constants (`COLS`, `SEL`, migrations tests); no request data reaches a SQL string.

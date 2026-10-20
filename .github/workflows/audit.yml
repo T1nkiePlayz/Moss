@@ -1,0 +1,62 @@
+name: Moss audit
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  pull_request:
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - deny.toml
+      - web/package-lock.json
+      - web/package.json
+      - .github/workflows/audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned tool versions. Bump deliberately; the install is --locked.
+  CARGO_AUDIT_VERSION: "0.22.2"
+  CARGO_DENY_VERSION: "0.20.2"
+
+jobs:
+  rust:
+    name: Rust advisories and licences
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+      - name: Cache Rust
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install cargo-audit and cargo-deny
+        run: |
+          cargo install --locked cargo-audit --version "$CARGO_AUDIT_VERSION"
+          cargo install --locked cargo-deny --version "$CARGO_DENY_VERSION"
+      - name: cargo audit
+        run: cargo audit --deny warnings
+      - name: cargo deny
+        run: cargo deny check
+
+  web:
+    name: npm advisories (production dependencies)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: lts/*
+      - name: npm audit
+        run: npm audit --omit=dev --audit-level=high

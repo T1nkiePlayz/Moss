@@ -1,0 +1,12 @@
+# Accepted advisories. Each entry needs a reason and is listed in
+# docs/security-review.md. Keep deny.toml [advisories].ignore in sync.
+[advisories]
+ignore = [
+    # rsa: Marvin timing attack on private-key operations. Pulled in only by
+    # jsonwebtoken, which Moss uses to VERIFY tokens with public keys; Moss
+    # never decrypts or signs with an RSA private key. No fixed release exists.
+    "RUSTSEC-2023-0071",
+    # unsafe-libyaml (via serde_yaml_ng): unmaintained, no known vulnerability.
+    # Used to parse administrator-edited config files capped at 1 MiB.
+    "RUSTSEC-2024-0449",
+]

@@ -46,7 +46,7 @@ pub async fn collect(st: &St, user: &User) -> ApiResult<Vec<Value>> {
     let mut out = vec![];
     for s in all.iter().filter(|s| vis.as_ref().is_none_or(|v| v.contains(&s.id))) { out.extend(for_server(st, s, &all).await); }
     if user.is_admin() {
-        let (total, free) = crate::metrics::disk(&st.cfg.data_dir);
+        let (total, free) = crate::platform::disk(&st.cfg.data_dir);
         if total > 0 {
             let pct = free as f64 / total as f64 * 100.0;
             if pct < 5.0 || free < (2 << 30) { out.push(finding("host:disk".into(), "critical", None, "Disk almost full", format!("Only {:.1} GiB free on the data volume. Backups and world saves may fail.", free as f64 / (1u64 << 30) as f64), vec![format!("{pct:.1}% free")], None)); }

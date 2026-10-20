@@ -43,7 +43,7 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
-panic = "abort"
+panic = "unwind" # a panicking request or job must never take the controller (and its view of running servers) down
 
 [profile.dev]
 debug = 0

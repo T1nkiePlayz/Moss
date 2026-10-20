@@ -37,7 +37,7 @@ pub struct Live {
     pub crashes: Vec<Instant>,
     pub restart_at: Option<Instant>,
     pub last_state: String,
-    pub cpu_prev: Option<(u64, Instant)>,
+    pub cpu_prev: Option<(f64, Instant)>,
     pub exiting: bool,
     /// A start is in progress; stops two quick Start clicks (or an autostart racing a click) from launching twice.
     pub starting: bool,
@@ -66,8 +66,8 @@ pub struct Inner {
     pub cache: Mutex<HashMap<String, (Instant, Value)>>,
     pub users: Mutex<HashMap<String, (Instant, crate::auth::User)>>,
     pub jwks: Mutex<Option<(Instant, Value)>>,
-    pub host: Mutex<crate::metrics::HostSampler>,
-    pub cf: Mutex<crate::curseforge::Limiter>,
+    pub host: Mutex<crate::platform::HostSampler>,
+    pub cf: Mutex<crate::providers::curseforge::Limiter>,
     pub cf_sem: tokio::sync::Semaphore,
 }
 

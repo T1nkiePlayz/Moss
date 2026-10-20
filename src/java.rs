@@ -1,5 +1,5 @@
 //! Java discovery and managed Temurin runtimes (downloaded on demand, verified by checksum).
-use crate::{download, ops::OpCtx, state::St};
+use crate::{download, ops::OpCtx, platform, state::St};
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 use std::{path::{Path, PathBuf}, sync::Mutex, time::Instant};
@@ -20,12 +20,8 @@ fn probe(path: &Path) -> Option<(u32, String)> {
 fn scan(st: &St) -> Vec<Install> {
     let mut found: Vec<Install> = vec![];
     let mut cands: Vec<(PathBuf, bool)> = vec![];
-    if let Ok(rd) = std::fs::read_dir(st.cfg.java_dir()) { for e in rd.flatten() { cands.push((e.path().join("bin/java"), true)); } }
-    if let Ok(h) = std::env::var("JAVA_HOME") { cands.push((PathBuf::from(h).join("bin/java"), false)); }
-    for base in ["/usr/lib/jvm", "/usr/lib64/jvm", "/opt/java", "/opt"] {
-        if let Ok(rd) = std::fs::read_dir(base) { for e in rd.flatten() { cands.push((e.path().join("bin/java"), false)); } }
-    }
-    cands.push((PathBuf::from("/usr/bin/java"), false));
+    if let Ok(rd) = std::fs::read_dir(st.cfg.java_dir()) { for e in rd.flatten() { cands.push((e.path().join(platform::JAVA_BIN_IN_HOME), true)); } }
+    cands.extend(platform::system_java_candidates().into_iter().map(|p| (p, false)));
     for (p, managed) in cands {
         if !p.exists() { continue; }
         let real = std::fs::canonicalize(&p).unwrap_or(p.clone());
@@ -56,9 +52,9 @@ pub fn json_list(st: &St, force: bool) -> Value {
 
 pub async fn install_managed(ctx: OpCtx, major: u32) -> Result<()> {
     let st = ctx.st.clone();
-    let arch = match std::env::consts::ARCH { "x86_64" => "x64", "aarch64" => "aarch64", a => bail!("no Temurin build for architecture {a}") };
+    let Some(arch) = platform::adoptium_arch() else { bail!("no Temurin build for architecture {}", std::env::consts::ARCH) };
     ctx.stage("Looking up the latest Temurin release");
-    let url = format!("https://api.adoptium.net/v3/assets/latest/{major}/hotspot?architecture={arch}&image_type=jre&os=linux");
+    let url = format!("https://api.adoptium.net/v3/assets/latest/{major}/hotspot?architecture={arch}&image_type=jre&os={}", platform::ADOPTIUM_OS);
     let v: Value = st.http.get(url).send().await?.error_for_status()?.json().await?;
     let pkg = &v[0]["binary"]["package"];
     let (link, sum, name) = (pkg["link"].as_str(), pkg["checksum"].as_str(), pkg["name"].as_str());

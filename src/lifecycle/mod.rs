@@ -1,9 +1,11 @@
 //! Server lifecycle. Game processes are launched detached (own session, stdin = a FIFO the game itself holds open,
 //! stdout/stderr appended to a log file), so they are NOT children of the controller: killing or upgrading Moss never
-//! stops a server, and on restart Moss re-attaches by PID + start-time and resumes tailing the log.
+//! stops a server, and on restart Moss re-attaches by PID + start-time and resumes tailing the log. Servers set to
+//! container isolation run the same way inside a container instead and are re-attached by container name (`ctr`).
 use crate::{platform, server::{self, Srv}, state::St};
 
 mod command;
+pub(crate) mod ctr;
 mod exit;
 mod monitor;
 mod reconcile;
@@ -52,6 +54,7 @@ pub fn mark_ready(st: &St, id: &str) {
 }
 
 pub fn process_alive(s: &Srv) -> bool {
+    if s.in_container { return crate::container::is_alive(&crate::container::container_name(&s.id)); }
     match (s.pid, s.pid_start) {
         (Some(p), Some(t)) => platform::pid_start(p) == Some(t as u64),
         _ => false,

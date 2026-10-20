@@ -198,6 +198,17 @@ Repeated invalid credentials from one address (30 a minute) answer 429 `auth.thr
 ### Not-invited experience
 `GET /auth/config` gains `access_message:string` (from the setting) so the login screen can tell people whom to ask.
 
+## Container isolation
+
+Optional per-server mode. Server object gains `isolation:"process"|"container"` (default `process`, unchanged behaviour) and `container:{image, image_override|null, running_in_container:boolean, restart_needed:boolean}`. `image` is the effective image (`docker.io/library/eclipse-temurin:<java>-jre` unless overridden). `restart_needed` is true while a running server was launched in the other mode than the one now configured.
+
+- `GET /container/status` (any signed-in user) → `{available:boolean, engine:"docker"|"podman"|null, version|null, rootless:boolean|null, message|null, outbound_restricted:false, default_image}`. Never an error: when neither Docker nor Podman is usable `available` is false and `message` says what to do. Calling it forces a fresh detection.
+- `PATCH /servers/{id}` accepts `isolation:"process"|"container"` and `container_image:string|null` (null = default image). **Admin only** (403 otherwise). 400 `validation` for an unknown mode or an image outside the allow-list (`docker.io/library/eclipse-temurin`, `docker.io/azul/zulu-openjdk`, `docker.io/library/amazoncorretto`, anything under `ghcr.io/`; a tag or sha256 digest is required; references are normalised to a fully qualified form); 400 `container.unsupported` for custom servers; 409 `container.engine_missing` when enabling without a usable engine. The change applies on the next start. Enabling it (or changing the image) starts a `container.pull` operation so the image is ready.
+- `POST /servers/{id}/container/pull` (admin) → 202 `{operation}` (kind `container.pull`, cancellable, log shows pull progress). 409 `container.not_enabled` / `container.engine_missing`.
+- `POST /servers/{id}/actions/start` in container mode can return 409 `container.image_missing` (download it first), `container.engine_missing` or `container.start_failed` (message carries the engine's last log line).
+- Health: finding `<server>:container` (critical, "Container engine not available") while a server is set to container mode and no engine is reachable. `moss doctor` prints the detected engine.
+- There is no parameter anywhere for flags, bind mounts, devices, capabilities, networks or privileged mode.
+
 ## Implementation notes and deviations
 - **Mods:** `/content/check` judges installed files by their own metadata; provider dependency data is enforced when a plan is built. Datapack `pack_format` is not checked. `meta` string fields are `""` when unknown. Update-all skips disabled items. `check-updates` entries also carry `project_id` and `provider`. Modpack `unavailable` entries may carry a `url` to the project page. `GET …/modpacks/export` sets `x-moss-skipped` (items left out). `POST /modpacks/inspect` needs an admin or a `manager` grant. Replace-mode modpack import returns 409 while the server runs. Items from a pack report `source:"modpack"` through the `modpack_items` table.
 - **Platform:** the wrapper shell moves itself into the server's cgroup before the game starts, so there is no unconfined window. Limits take effect at the next start. Under systemd they need version 254 or newer (`DelegateSubgroup`); otherwise they are reported as not enforced. `reinstall` defaults to `keep_data:true` (keeps `server.properties` and `eula.txt`); `false` wipes everything except `.moss`.

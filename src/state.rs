@@ -70,6 +70,7 @@ pub struct Inner {
     pub host: Mutex<crate::platform::HostSampler>,
     pub cf: Mutex<crate::providers::curseforge::Limiter>,
     pub cf_sem: tokio::sync::Semaphore,
+    pub container: crate::container::Handle,
 }
 
 pub type St = Arc<Inner>;

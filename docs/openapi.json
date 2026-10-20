@@ -252,6 +252,33 @@
             "items": {
               "type": "string"
             }
+          },
+          "isolation": {
+            "type": "string",
+            "enum": [
+              "process",
+              "container"
+            ]
+          },
+          "container": {
+            "type": "object",
+            "properties": {
+              "image": {
+                "type": "string"
+              },
+              "image_override": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "running_in_container": {
+                "type": "boolean"
+              },
+              "restart_needed": {
+                "type": "boolean"
+              }
+            }
           }
         },
         "additionalProperties": true
@@ -4500,6 +4527,123 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Any"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/container/status": {
+      "get": {
+        "tags": [
+          "container"
+        ],
+        "summary": "Container engine (Docker or Podman) availability",
+        "x-permission": "any signed-in user",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "engine": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "docker",
+                        "podman",
+                        null
+                      ]
+                    },
+                    "version": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rootless": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "message": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "outbound_restricted": {
+                      "type": "boolean"
+                    },
+                    "default_image": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/servers/{id}/container/pull": {
+      "post": {
+        "tags": [
+          "container"
+        ],
+        "summary": "Download the server's container image (operation)",
+        "x-permission": "admin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "$ref": "#/components/schemas/Operation"
+                    }
+                  }
                 }
               }
             }

@@ -68,8 +68,13 @@ fn cleanup_new(dir: &Path, before: &HashSet<String>) {
 
 /// Download the official installer, run it and verify it produced a launchable server. Cleans up on failure.
 pub async fn install(ctx: &OpCtx, st: &St, s: &Srv, r: &Resolved, dir: &Path) -> Result<()> {
-    let java = crate::java::find(st, r.java_major).ok_or_else(|| anyhow!("Java {} is needed to run the {} installer. Install it from Settings → Java, then retry.", r.java_major, s.runtime))?;
-    let tmp = st.cfg.tmp_dir().join(format!("installer-{}", uuid::Uuid::now_v7()));
+    // Servers set to container isolation run the third-party installer in a short-lived container as well.
+    let ctr = s.isolation == "container";
+    let java = if ctr { None } else {
+        Some(crate::java::find(st, r.java_major).ok_or_else(|| anyhow!("Java {} is needed to run the {} installer. Install it from Settings → Java, then retry.", r.java_major, s.runtime))?)
+    };
+    // In a container the jar must live inside the one mounted directory.
+    let tmp = if ctr { dir.join(".moss") } else { st.cfg.tmp_dir().join(format!("installer-{}", uuid::Uuid::now_v7())) };
     let jar = tmp.join("installer.jar");
     ctx.stage(if r.hash.is_some() { "Downloading the installer (checksum-verified)" } else { "Downloading the installer (upstream publishes no checksum)" });
     let c2 = ctx.clone();
@@ -78,15 +83,39 @@ pub async fn install(ctx: &OpCtx, st: &St, s: &Srv, r: &Resolved, dir: &Path) ->
         ctx.check()?;
         ctx.stage(&format!("Running the {} installer (this can take several minutes)", s.runtime));
         let before = top_level(dir);
-        let argv = installer_argv(&java.to_string_lossy(), &jar.to_string_lossy(), s);
         let c3 = ctx.clone();
-        let out = run_streamed(&argv, dir, TIMEOUT, &ctx.token, move |l| c3.log(l)).await.and_then(|()| verify(dir, s));
+        let run = match &java {
+            Some(java) => run_streamed(&installer_argv(&java.to_string_lossy(), &jar.to_string_lossy(), s), dir, TIMEOUT, &ctx.token, move |l| c3.log(l)).await,
+            None => run_in_container(ctx, st, s, r, dir).await,
+        };
+        let out = run.and_then(|()| verify(dir, s));
         if out.is_err() { cleanup_new(dir, &before); }
         out
     }.await;
-    let _ = tokio::fs::remove_dir_all(&tmp).await;
+    if ctr { let _ = tokio::fs::remove_file(&jar).await; } else { let _ = tokio::fs::remove_dir_all(&tmp).await; }
     res?;
     launch::write_user_jvm_args(dir, s)?;
+    Ok(())
+}
+
+/// Run the installer inside a short-lived container: same single mount and hardening as a game server, default
+/// network (installers download libraries), removed afterwards. Output streams into the operation log.
+async fn run_in_container(ctx: &OpCtx, st: &St, s: &Srv, r: &Resolved, dir: &Path) -> Result<()> {
+    use crate::container::{self, OnceSpec, image};
+    let image = image::for_java(s.container_image.as_deref(), r.java_major as i64);
+    container::pull::ensure(st, ctx, &image).await?;
+    let eng = container::engine(st).await.map_err(|m| anyhow!(m))?;
+    if !container::valid_id(&s.id) { bail!("this server cannot run in a container"); }
+    let spec = OnceSpec { name: format!("{}-installer", container::container_name(&s.id)), image, dir: dir.to_path_buf(), memory_mb: 3072, pids: 2048,
+        uid: unsafe { libc::getuid() }, gid: unsafe { libc::getgid() }, selinux: crate::lifecycle::ctr::selinux_enforcing(),
+        argv: installer_argv("java", "/data/.moss/installer.jar", s) };
+    ctx.log(format!("running the installer in a container ({})", spec.image));
+    let (c2, token) = (ctx.clone(), ctx.token.clone());
+    let code = tokio::task::spawn_blocking(move || {
+        let _ = eng.rm(&spec.name);
+        eng.run_once(&spec, &mut |l| { c2.log(l.to_string()); !token.is_cancelled() }, TIMEOUT)
+    }).await?.map_err(|e| if ctx.cancelled() { anyhow!("cancelled") } else { anyhow!("the installer container could not run: {e}") })?;
+    if code != 0 { bail!("the installer failed (exit code {code})"); }
     Ok(())
 }
 

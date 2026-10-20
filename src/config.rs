@@ -49,6 +49,9 @@ pub struct Config {
     /// Expose the simulated game server runtime (development and demos).
     #[arg(long, env = "MOSS_DEV_RUNTIMES", default_value_t = false, action = clap::ArgAction::Set)]
     pub dev_runtimes: bool,
+    /// Container engine CLI for servers set to container isolation: a name (`docker`, `podman`) or a path. Empty = detect (rootless Podman, then Docker, then Podman).
+    #[arg(long, env = "MOSS_CONTAINER_ENGINE", default_value = "")]
+    pub container_engine: String,
 }
 
 impl Config {

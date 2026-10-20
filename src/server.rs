@@ -31,9 +31,14 @@ pub struct Srv {
     pub memory_limit_mb: Option<i64>,
     pub cpu_limit_pct: Option<i64>,
     pub pids_limit: Option<i64>,
+    /// `process` (default) or `container`; applies on the next start.
+    pub isolation: String,
+    pub container_image: Option<String>,
+    /// The current run was launched in a container (survives a mode change until the next start).
+    pub in_container: bool,
 }
 
-pub const COLS: &str = "id,name,runtime,game_version,loader_version,java_major,port,memory_mb,flags_profile,autostart,restart_enabled,restart_max,eula_at,desired,installed,install_error,pid,pid_start,tags,notes,custom_cmd,created_at,memory_limit_mb,cpu_limit_pct,pids_limit";
+pub const COLS: &str = "id,name,runtime,game_version,loader_version,java_major,port,memory_mb,flags_profile,autostart,restart_enabled,restart_max,eula_at,desired,installed,install_error,pid,pid_start,tags,notes,custom_cmd,created_at,memory_limit_mb,cpu_limit_pct,pids_limit,isolation,container_image,in_container";
 
 impl Srv {
     pub fn from_row(r: &Row) -> rusqlite::Result<Srv> {
@@ -44,6 +49,7 @@ impl Srv {
             tags: serde_json::from_str(&r.get::<_, String>(18)?).unwrap_or_default(), notes: r.get(19)?,
             custom_cmd: r.get::<_, Option<String>>(20)?.and_then(|s| serde_json::from_str(&s).ok()), created_at: r.get(21)?,
             memory_limit_mb: r.get(22)?, cpu_limit_pct: r.get(23)?, pids_limit: r.get(24)?,
+            isolation: r.get(25)?, container_image: r.get(26)?, in_container: r.get(27)?,
         })
     }
     pub fn dir(&self, st: &Inner) -> PathBuf { st.cfg.servers_dir().join(&self.id) }
@@ -98,6 +104,12 @@ pub async fn save_pid(st: &St, id: &str, pid: Option<i64>, start: Option<i64>, l
         rusqlite::params![pid, start, pid, now, last_exit, i])).await;
 }
 
+/// Record whether the current run lives in a container (set at start, cleared when it exits).
+pub async fn set_in_container(st: &St, id: &str, on: bool) {
+    let i = id.to_string();
+    let _ = st.db.call(move |c| c.execute("UPDATE servers SET in_container=? WHERE id=?", rusqlite::params![on, i])).await;
+}
+
 pub async fn set_desired(st: &St, id: &str, desired: &str) {
     let (i, d) = (id.to_string(), desired.to_string());
     let _ = st.db.call(move |c| c.execute("UPDATE servers SET desired=? WHERE id=?", [d, i])).await;
@@ -136,6 +148,7 @@ pub fn view(s: &Srv, st: &Inner) -> Value {
         "motd": l.and_then(|l| l.motd.clone()), "cpu_pct": l.filter(|l| l.alive).and_then(|l| l.cpu), "mem_bytes": l.filter(|l| l.alive).and_then(|l| l.mem),
         "content_kind": s.content_kind(), "tags": s.tags, "notes": s.notes, "created_at": s.created_at, "capabilities": s.capabilities(),
         "limits": crate::platform::cgroup::limits_json(&s.requested_limits()),
+        "isolation": s.isolation, "container": crate::container::view(s),
     })
 }
 

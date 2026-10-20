@@ -14,9 +14,15 @@ pub async fn handle_exit(st: &St, id: &str) {
     }
     let Ok(s) = server::get(st, id).await else { return };
     if s.pid.is_none() || process_alive(&s) { st.live.lock().unwrap().entry(id.to_string()).or_default().exiting = false; return; }
-    let oom = super::finish_cgroup(id);
+    let (code, oom) = if s.in_container {
+        let r = super::ctr::collect_exit(st, &s).await;
+        server::set_in_container(st, id, false).await;
+        crate::container::forget_alive(&crate::container::container_name(id));
+        r
+    } else {
+        (std::fs::read_to_string(s.moss_dir(st).join("exit")).ok().and_then(|c| c.trim().parse::<i32>().ok()), super::finish_cgroup(id))
+    };
     if oom { crate::console::push(&crate::console::hub(st, id), "\x1b[31m[moss] the server was killed by the memory limit\x1b[0m".into()); }
-    let code = std::fs::read_to_string(s.moss_dir(st).join("exit")).ok().and_then(|c| c.trim().parse::<i32>().ok());
     server::save_pid(st, id, None, None, Some(code.map_or("unknown (killed)".into(), |c| c.to_string()))).await;
     let stopping = { let l = st.live.lock().unwrap(); l.get(id).is_some_and(|l| l.stopping) };
     let clean = stopping || s.desired == "stopped";

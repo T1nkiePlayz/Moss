@@ -16,6 +16,10 @@ pub async fn doctor(cfg: config::Config) -> anyhow::Result<()> {
         Err(e) => println!("[info] resource limits are not enforced: {e}"),
     }
     let st = build_state(cfg.clone()).await?;
+    match crate::container::engine(&st).await {
+        Ok(e) => { let i = e.info(); println!("[ok  ] container engine: {} {}{} (servers can use container isolation)", i.kind.name(), i.version, if i.rootless { ", rootless" } else { ", rootful" }); }
+        Err(m) => println!("[info] container engine: {m}"),
+    }
     let st2 = st.clone();
     let j = tokio::task::spawn_blocking(move || java::installs(&st2, true)).await?;
     if j.is_empty() { println!("[warn] no Java found — Moss can download Temurin from Settings → Java"); }

@@ -54,7 +54,7 @@ pub fn set(raw: &str, path: &[&str], lit: &str) -> Result<String, String> {
             return Err(format!("{name} spans several lines; edit it in the raw editor"));
         }
         let tail = comment_at(v).map(|c| format!("{}{}", &v[v[..c].trim_end().len()..c], &v[c..])).unwrap_or_default();
-        out[i] = format!("{} = {lit}{tail}{eol}", &b[..eq].trim_end());
+        out[i] = format!("{} = {lit}{tail}{eol}", b[..eq].trim_end());
         return Ok(out.concat());
     }
     // find the end of the table's key lines, or the place a new table would go

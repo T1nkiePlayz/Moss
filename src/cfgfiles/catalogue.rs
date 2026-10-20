@@ -66,10 +66,8 @@ impl Key {
             (Ty::Str, Value::String(_)) => return Err("must be a single line of at most 2000 characters".into()),
             _ => return Err(format!("must be a {}", self.ty.name())),
         }
-        if let Some(n) = v.as_f64() {
-            if self.min.is_some_and(|m| n < m) || self.max.is_some_and(|m| n > m) {
-                return Err(match (self.min, self.max) { (Some(a), Some(b)) => format!("must be between {a} and {b}"), (Some(a), None) => format!("must be at least {a}"), (None, Some(b)) => format!("must be at most {b}"), _ => unreachable!() });
-            }
+        if let Some(n) = v.as_f64() && (self.min.is_some_and(|m| n < m) || self.max.is_some_and(|m| n > m)) {
+            return Err(match (self.min, self.max) { (Some(a), Some(b)) => format!("must be between {a} and {b}"), (Some(a), None) => format!("must be at least {a}"), (None, Some(b)) => format!("must be at most {b}"), _ => unreachable!() });
         }
         if !self.options.is_empty() {
             let t = match v { Value::String(s) => s.clone(), o => o.to_string() };

@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 
 const axeSource = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const SERVER_TABS = ['', 'console', 'files', 'config', 'content', 'upgrade', 'backups', 'settings', 'access'];
-const PAGES = ['', 'servers', 'servers/new', 'backups', 'activity', 'users', 'settings'];
+const PAGES = ['', 'servers', 'servers/new', 'servers/import', 'backups', 'activity', 'users', 'settings'];
 
 async function audit(page: Page, label: string) {
   await page.addScriptTag({ path: axeSource });

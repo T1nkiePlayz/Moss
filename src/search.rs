@@ -29,8 +29,8 @@ pub fn find_files(root: &Path, needle: &str, max: usize) -> Vec<String> {
             if t.is_symlink() { continue; }
             if t.is_dir() {
                 if depth < 4 && !SKIP_DIRS.contains(&name.as_str()) { stack.push((e.path(), depth + 1)); }
-            } else if t.is_file() && name.to_lowercase().contains(needle) {
-                if let Ok(rel) = e.path().strip_prefix(root) { out.push(rel.to_string_lossy().replace('\\', "/")); }
+            } else if t.is_file() && name.to_lowercase().contains(needle) && let Ok(rel) = e.path().strip_prefix(root) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
             }
         }
     }

@@ -144,7 +144,7 @@ export interface GlobalCtx {
 }
 let prefs: { data: Record<string, unknown>; updated_at: string | null } = { data: {}, updated_at: null };
 const views: A.SavedView[] = [
-  { id: 'view-running', scope: 'servers', name: 'Running now', filters: { status: 'running' }, sort: '', created_at: new Date(Date.now() - 86400000).toISOString() },
+  { id: 'view-running', scope: 'servers', name: 'Running now', filters: { q: '', filter: 'running' }, sort: '', created_at: new Date(Date.now() - 86400000).toISOString() },
 ];
 const blueprints: (A.Blueprint & { doc: Record<string, any> })[] = [];
 const staged = new Map<string, A.ImportDetection>();

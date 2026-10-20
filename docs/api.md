@@ -198,6 +198,32 @@ Repeated invalid credentials from one address (30 a minute) answer 429 `auth.thr
 ### Not-invited experience
 `GET /auth/config` gains `access_message:string` (from the setting) so the login screen can tell people whom to ask.
 
+## 0.2 additions: configuration editors, personal data, blueprints, import, search
+
+### Configuration files
+Structured editors for `paper-global.yml`, `paper-world-defaults.yml`, per-world `paper-world.yml`, `spigot.yml`, `bukkit.yml`, `purpur.yml` (Purpur only) and `velocity.toml`. Edits change single lines of the text, so comments and unknown keys survive. Every change takes an undo snapshot (revert with `POST /undo/{id}/revert`).
+- `GET /servers/{id}/config` -> `{files:[{id,title,path,format:"yaml"|"toml",exists}]}` (`files.read`). Ids: `paper-global`, `paper-world-defaults`, `world--<name>`, `spigot`, `bukkit`, `purpur`, `velocity`.
+- `GET /servers/{id}/config/{file}` -> `{id,title,path,format,exists,raw,parse_error|null,fields:[{key,type:"bool"|"int"|"float"|"string"|"enum",default,group,description,min,max,options,restart,secret,danger,mixed,present,value}],history:[{id,title,created_at}]}`. Fields are the curated catalogue for the server's Minecraft version; `secret` values are never returned.
+- `PUT /servers/{id}/config/{file}` (`config.write`) with exactly one of `{raw}` (whole text, must parse) or `{set:{"dotted.key":value},unset:["dotted.key"]}` (catalogue keys only, validated for type, range and options) -> `{undo_id|null,changed}`. Errors: 400 `config.invalid` / `config.unknown_key`, 404 unknown file id, 409 `config.missing` (file not created yet).
+- `GET /servers/{id}/config/{file}/diff?snapshot=` -> `{current,previous|null,snapshot:{id,title,created_at}|null}`; defaults to the latest snapshot; only snapshots of that file are accepted.
+
+### Preferences and saved views (per user)
+- `GET /me/preferences` -> `{data:object,updated_at|null}` · `PUT /me/preferences {data:object}` (at most 32 KB). Used to sync the theme between browsers.
+- `GET /views?scope=servers|content` -> `[{id,scope,name,filters:object,sort,created_at}]` · `POST /views {scope,name,filters?,sort?}` -> 201 (same name replaces; 50 per list, else 409 `views.limit`) · `DELETE /views/{id}` -> 204. Always limited to the caller's own views.
+
+### Blueprints (admin)
+A blueprint holds runtime, versions, memory, flags, `server.properties` (without port, world and secret-looking keys), the content list (provider and project id only) and schedules. Never worlds, player data or secrets.
+- `GET /blueprints` -> `[{id,name,runtime,game_version,loader_version,memory_mb,properties:n,content:n,schedules:n,created_by,created_at}]`
+- `POST /blueprints {server_id,name}` -> 201 summary · `POST /blueprints/import` (body: the exported JSON, at most 256 KB) -> 201 summary · `GET /blueprints/{id}/export` -> the JSON document (`{format:"moss-blueprint",version:1,...}`) · `DELETE /blueprints/{id}` -> 204
+- `POST /blueprints/{id}/create {name,port?,accept_eula}` -> 202 `{server,operation,blueprint:{id,skipped_schedules}}`; the install operation then applies the properties and installs the content.
+
+### Import an existing server (admin)
+- `POST /servers/import/inspect` with JSON `{path}` (absolute host path; never inside system folders or Moss's data folder) or multipart field `file` (`.zip` or `.tar.zst`, up to the 512 MiB request limit) -> `{runtime|null,game_version|null,loader_version|null,port|null,jar|null,has_world,java_major|null,java_installed,name,size,notes:string[],token?}`. `token` (uploads only) is valid for 6 hours and can be used once.
+- `POST /servers/import {name,path|token,runtime?,game_version?,loader_version?,memory_mb?,port?,accept_eula}` -> 202 `{server,operation}`. Detected values are used unless overridden. A host path is copied (symbolic links are skipped, the original is untouched); an upload is moved into place. A failed import removes everything it created. Errors: 400 `import.path`, `import.archive`, `import.token`, `eula.required`, 409 `port.taken`.
+
+### Search
+- `GET /search?q=&limit=6` -> `{q,servers:[{id,name,runtime,game_version}],backups:[{id,server_id,server_name,created_at,note,kind}],content:[{id,server_id,server_name,title,filename,kind}],files:[{server_id,server_name,path}]}`. Needs at least 2 characters (shorter returns empty groups). Results only include servers the caller can see; file names only where they have `files.read`.
+
 ## Implementation notes and deviations
 - **Mods:** `/content/check` judges installed files by their own metadata; provider dependency data is enforced when a plan is built. Datapack `pack_format` is not checked. `meta` string fields are `""` when unknown. Update-all skips disabled items. `check-updates` entries also carry `project_id` and `provider`. Modpack `unavailable` entries may carry a `url` to the project page. `GET …/modpacks/export` sets `x-moss-skipped` (items left out). `POST /modpacks/inspect` needs an admin or a `manager` grant. Replace-mode modpack import returns 409 while the server runs. Items from a pack report `source:"modpack"` through the `modpack_items` table.
 - **Platform:** the wrapper shell moves itself into the server's cgroup before the game starts, so there is no unconfined window. Limits take effect at the next start. Under systemd they need version 254 or newer (`DelegateSubgroup`); otherwise they are reported as not enforced. `reinstall` defaults to `keep_data:true` (keeps `server.properties` and `eula.txt`); `false` wipes everything except `.moss`.

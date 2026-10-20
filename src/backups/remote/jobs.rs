@@ -10,11 +10,11 @@ pub struct Opts { pub attempts: u32, pub backoff: Duration }
 pub const DEFAULT: Opts = Opts { attempts: 3, backoff: Duration::from_secs(5) };
 
 #[derive(Clone, Debug)]
-pub struct Row { pub id: String, pub server_id: String, pub size: i64, pub sha: String, pub remote: String, pub dest: Option<String>, pub key: Option<String>, pub local: bool }
+pub struct Row { pub server_id: String, pub size: i64, pub sha: String, pub remote: String, pub dest: Option<String>, pub key: Option<String>, pub local: bool }
 
 pub async fn row(st: &St, id: &str) -> Result<Row> {
     let i = id.to_string();
-    st.db.call(move |c| c.query_row("SELECT id,server_id,size,sha256,remote,remote_dest,remote_key,local_present FROM backups WHERE id=?", [i], |r| Ok(Row { id: r.get(0)?, server_id: r.get(1)?, size: r.get(2)?, sha: r.get(3)?, remote: r.get(4)?, dest: r.get(5)?, key: r.get(6)?, local: r.get(7)? }))).await
+    st.db.call(move |c| c.query_row("SELECT server_id,size,sha256,remote,remote_dest,remote_key,local_present FROM backups WHERE id=?", [i], |r| Ok(Row { server_id: r.get(0)?, size: r.get(1)?, sha: r.get(2)?, remote: r.get(3)?, dest: r.get(4)?, key: r.get(5)?, local: r.get(6)? }))).await
 }
 
 async fn set_remote(st: &St, id: &str, state: &str, dest: Option<&str>, key: Option<&str>, err: Option<&str>) {

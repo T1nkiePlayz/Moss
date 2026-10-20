@@ -16,6 +16,7 @@ impl Md5 {
     fn block(&mut self, b: &[u8]) {
         let m: Vec<u32> = b.chunks(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
         let [mut a, mut bb, mut c, mut d] = self.st;
+        #[allow(clippy::needless_range_loop)]
         for i in 0..64 {
             let (f, g) = match i / 16 { 0 => ((bb & c) | (!bb & d), i), 1 => ((d & bb) | (!d & c), (5 * i + 1) % 16), 2 => (bb ^ c ^ d, (3 * i + 5) % 16), _ => (c ^ (bb | !d), (7 * i) % 16) };
             let t = d; d = c; c = bb;
@@ -45,6 +46,7 @@ impl Md5 {
     }
 }
 
+#[cfg(test)]
 pub fn md5(data: &[u8]) -> [u8; 16] { let mut m = Md5::new(); m.update(data); m.finish() }
 
 #[cfg(test)]

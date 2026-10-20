@@ -48,6 +48,7 @@ async fn big_files_go_up_as_a_multipart_upload_and_verify() {
     let x = Xfer::new();
     s.put(&p, "srv/big.tar.zst", &sha(&body), &x).await.unwrap();
     assert_eq!(x.done(), body.len() as u64, "progress counts every byte once");
+    {
     let g = f.lock().unwrap();
     let log = g.log.join("\n");
     assert!(log.contains("POST /bkt/srv/big.tar.zst?uploads") && log.contains("partNumber=5&uploadId=") && log.contains("POST /bkt/srv/big.tar.zst?uploadId="), "{log}");
@@ -55,7 +56,7 @@ async fn big_files_go_up_as_a_multipart_upload_and_verify() {
     assert_eq!(g.objects["srv/big.tar.zst"].sha.as_deref(), Some(sha(&body).as_str()), "sha256 stored as object metadata");
     assert!(g.objects["srv/big.tar.zst"].etag.ends_with("-5"));
     assert!(g.uploads.is_empty() && g.sig_failures == 0);
-    drop(g);
+    }
     let info = s.head("srv/big.tar.zst").await.unwrap().unwrap();
     check_stored(&info, body.len() as u64, &sha(&body), &p, Some(64 << 10)).unwrap();
     // checked against the wrong part size the multipart ETag no longer matches

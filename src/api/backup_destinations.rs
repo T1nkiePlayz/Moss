@@ -26,7 +26,7 @@ fn config_from(st: &St, b: &DestBody, cur: Option<&DestConfig>) -> ApiResult<Des
         let (ce, cr, cb, cp, cs) = match cur { Some(DestConfig::S3 { endpoint, region, bucket, prefix, path_style }) => (endpoint.clone(), region.clone(), bucket.clone(), prefix.clone(), *path_style), _ => Default::default() };
         DestConfig::S3 { endpoint: b.endpoint.clone().unwrap_or(ce), region: b.region.clone().unwrap_or(cr), bucket: b.bucket.clone().unwrap_or(cb), prefix: b.prefix.clone().unwrap_or(cp), path_style: b.path_style.unwrap_or(cs) }
     };
-    Ok(validate::config_of(&raw, &st.cfg.data_dir, st.cfg.allow_private_backup_hosts)?)
+    validate::config_of(&raw, &st.cfg.data_dir, st.cfg.allow_private_backup_hosts)
 }
 
 async fn view(st: &St, id: &str) -> ApiResult<Value> {

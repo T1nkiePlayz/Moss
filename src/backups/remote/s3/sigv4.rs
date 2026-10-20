@@ -22,7 +22,7 @@ pub fn uri_encode(s: &str, slash: bool) -> String {
     o
 }
 
-pub struct Signed { pub authorization: String, pub signature: String }
+pub struct Signed { pub authorization: String, #[cfg_attr(not(test), allow(dead_code))] pub signature: String }
 
 /// `uri` is the already-encoded absolute path. `query` holds raw pairs (they are encoded and sorted here).
 /// `headers` are (name, value) pairs; names are lowercased and values trimmed. `host` must be among them.

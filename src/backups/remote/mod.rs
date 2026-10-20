@@ -69,7 +69,7 @@ impl Store {
 pub fn check_stored(info: &ObjInfo, size: u64, sha: &str, local: &Path, part: Option<u64>) -> Result<()> {
     if info.size != size { bail!("the destination holds {} bytes but {} were sent", info.size, size); }
     if let Some(s) = &info.sha256 && !s.eq_ignore_ascii_case(sha) { bail!("the destination's SHA-256 does not match the backup"); }
-    if info.sha256.is_none() && matches!(info.etag, None) { bail!("the destination returned neither a checksum nor an ETag to verify against"); }
+    if info.sha256.is_none() && info.etag.is_none() { bail!("the destination returned neither a checksum nor an ETag to verify against"); }
     if let Some(e) = &info.etag && !info.kms && !e.is_empty() {
         let want = etag_for(local, size, part)?;
         let plain = e.trim_matches('"');

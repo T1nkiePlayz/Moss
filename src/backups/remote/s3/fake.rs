@@ -36,12 +36,13 @@ fn pdecode(s: &str) -> String {
     let b = s.as_bytes();
     let (mut o, mut i) = (vec![], 0);
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() { if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) { o.push(v); i += 3; continue; } }
+        if b[i] == b'%' && i + 2 < b.len() && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) { o.push(v); i += 3; continue; }
         o.push(b[i]); i += 1;
     }
     String::from_utf8_lossy(&o).to_string()
 }
 
+#[allow(clippy::result_large_err)]
 fn verify(m: &Method, uri: &Uri, h: &HeaderMap, body: &[u8]) -> Result<(), Response> {
     let auth = h.get("authorization").and_then(|v| v.to_str().ok()).ok_or_else(|| err(403, "AccessDenied", "no authorization"))?;
     let field = |n: &str| auth.split([',', ' ']).find_map(|p| p.strip_prefix(&format!("{n}="))).unwrap_or("").to_string();

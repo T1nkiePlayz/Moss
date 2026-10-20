@@ -65,6 +65,9 @@ export const ICONS: Record<string, string> = {
   save: 'M5 3h11l3 3v15H5zM8 3v5h7V3M8 21v-7h8v7',
   panel: 'M3 4h18v16H3zM9 4v16',
   star: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z',
+  bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
+  key: 'M15.5 7.5l3 3L22 7l-3-3M21 2l-9.6 9.6M7.5 21.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z',
+  unlock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 7.5-2',
   skull: 'M12 3a8 8 0 0 0-8 8c0 2.5 1.2 4 3 5v4h10v-4c1.8-1 3-2.5 3-5a8 8 0 0 0-8-8zM9 12h.01M15 12h.01',
 };
 export type IconName = keyof typeof ICONS;

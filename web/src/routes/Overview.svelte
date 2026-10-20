@@ -5,8 +5,11 @@
   import HealthCards from '../components/HealthCards.svelte';
   import OpCard from '../components/OpCard.svelte';
   import States from '../components/States.svelte';
+  import Lazy from '../components/Lazy.svelte';
+  import { isAdmin } from '../lib/auth.svelte';
   import { host, servers, health, ops, refreshServers, refreshHealth } from '../lib/stores.svelte';
   import { bytes, duration, num } from '../lib/format';
+  const loadHostMetrics = () => import('../components/HostMetrics.svelte');
   const st = $derived(host.status);
   const diskUsed = $derived(st ? (1 - st.host.disk_free / st.host.disk_total) * 100 : 0);
   const recent = $derived(ops.list.slice(0, 4));
@@ -35,6 +38,8 @@
     </div>
   {/if}
 </section>
+
+{#if isAdmin()}<div class="mt"><Lazy load={loadHostMetrics} /></div>{/if}
 
 <div class="grid kpis mt">
   <div class="card kpi"><div class="muted sm">Servers</div><div class="big tnum">{st ? num(st.counts.servers) : '—'}</div></div>

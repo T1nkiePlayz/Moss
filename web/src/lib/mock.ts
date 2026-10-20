@@ -1,6 +1,7 @@
 // In-memory backend for `VITE_MOCK=1`. Never imported in production builds.
 import type * as A from './api';
 import { ApiError } from './api';
+import { nextDailyRun, offsetName } from './tz';
 
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
@@ -281,7 +282,7 @@ const hits: A.Hit[] = [
 
 const cfHits: A.Hit[] = [['cf-worldguard', 'WorldGuard', 'sk89q', 'Protect areas of your world with regions.', 5400000, ['admin-tools']], ['cf-jei', 'Just Enough Items', 'mezz', 'View items and recipes.', 90000000, ['utility']], ['cf-dynmap', 'Dynmap', 'mikeprimm', 'Live web map.', 3000000, ['map-information']]].map(([project_id, title, author, description, downloads, categories]) => ({ project_id: project_id as string, slug: project_id as string, title: title as string, description: description as string, author: author as string, icon_url: null, downloads: downloads as number, follows: 0, categories: categories as string[], updated: ago(3 * DAY), client_side: null, server_side: null }));
 
-export async function handle(method: string, rawPath: string, body: unknown): Promise<unknown> {
+async function handleBase(method: string, rawPath: string, body: unknown): Promise<unknown> {
   await sleep(50 + Math.random() * 120);
   const u = new URL(rawPath, 'http://x');
   const p = u.pathname;
@@ -389,4 +390,228 @@ export async function handle(method: string, rawPath: string, body: unknown): Pr
     if (sub === '/access') { if (method === 'PUT') { grants = (b.grants as any[]).map((g) => ({ ...g, email: users.find((u) => u.id === g.user_id)?.email ?? '' })); return; } return grants; }
   }
   throw new ApiError(404, 'mock.not_found', `Mock has no route for ${method} ${p}`);
+}
+
+// ===== WP-F2 mock additions: sign-in gates, notifications, tokens, limits, time zones, metrics, support bundle =====
+// Demo scenarios via ?scenario=: setup | denied | mfa | mfa-enrol | throttled | empty | errors | macos
+const scenario = new URLSearchParams(location.search).get('scenario') ?? '';
+let gate = ['setup', 'denied', 'mfa', 'mfa-enrol', 'throttled'].includes(scenario) ? scenario : '';
+const macos = scenario === 'macos';
+const failing = scenario === 'errors';
+const NOPE = Symbol('unhandled');
+const SETUP_TOKEN = 'moss-setup-demo-token';
+let claimTries = 0;
+const MFA_CODE = '123456';
+
+servers.push(mk({ name: 'Broken Install', runtime: 'paper', port: 25580, state: 'failed', state_detail: 'Download failed: HTTP 503 from api.papermc.io (3 attempts)', state_since: ago(9 * MIN), created_at: ago(2 * HOUR) }));
+seedFs(servers[servers.length - 1]);
+seedContent(servers[servers.length - 1]);
+const ensureLimits = (s: A.Server) => {
+  s.limits ??= {
+    memory_mb: s.name === 'Survival SMP' ? 6144 : null, cpu_pct: s.name === 'Survival SMP' ? 200 : null, pids: null,
+    enforced: !macos && s.name !== 'Creative Plots', backend: macos || s.name === 'Creative Plots' ? 'none' : 'cgroup2',
+    detail: macos ? 'cgroups are not available on macOS' : s.name === 'Creative Plots' ? 'cgroup v2 is mounted read-only for this process (no delegated subtree)' : null,
+  };
+};
+const worldSets: Record<string, string[]> = {};
+const normalize = () => {
+  servers.forEach(ensureLimits);
+  backups.forEach((b, i) => {
+    b.worlds ??= worldSets[b.server_id] ??= b.server_id !== servers[3].id ? ['world', 'world_nether', 'world_the_end'] : ['world'];
+    b.locked ??= i === 1;
+  });
+  schedules.forEach((x) => { x.tz ??= offsetName(x.tz_offset_min); });
+};
+schedules[0].tz = 'America/New_York';
+schedules[0].next_run = new Date(nextDailyRun('04:00', 'America/New_York') ?? Date.now() + HOUR).toISOString();
+schedules.push({ id: uid(), server_id: servers[0].id, kind: 'restart', command: null, every_minutes: null, daily_at: '06:00', tz_offset_min: 330, tz: 'UTC+05:30', enabled: true, keep: null, last_run: null, next_run: new Date(nextDailyRun('06:00', 'UTC+05:30') ?? Date.now()).toISOString(), last_status: null });
+Object.assign(settings, { notify_webhook_url: 'https://discord.com/api/webhooks/123456/abcdef', notify_events: ['crash', 'crash_loop', 'backup_failed', 'disk_low', 'restart_failed'], audit_console_commands: 'redacted', access_message: 'Ask Sam in #minecraft on Discord to invite you.' });
+javaInstalls.push({ major: 8, path: '/var/lib/moss/java/8', managed: true, version: '8.0.432+6' });
+
+const notifs: A.AppNotification[] = scenario === 'empty' ? [] : [
+  { id: uid(), time: ago(4 * MIN), kind: 'crash_loop', severity: 'critical', title: 'Modded Fabric is crash-looping', body: 'Crashed 3 times in 30 minutes. Automatic restarts are paused.', server_id: servers[2].id, read: false },
+  { id: uid(), time: ago(50 * MIN), kind: 'backup_failed', severity: 'warn', title: 'Backup failed on Survival SMP', body: 'No space left on device while writing the archive.', server_id: servers[0].id, read: false },
+  { id: uid(), time: ago(3 * HOUR), kind: 'disk_low', severity: 'warn', title: 'Disk space is low', body: '8% of the data volume is free (39 GB).', server_id: null, read: false },
+  { id: uid(), time: ago(5 * HOUR), kind: 'update_available', severity: 'info', title: 'Paper 1.21.4 build 232 is available', body: 'Survival SMP runs build 227.', server_id: servers[0].id, read: true },
+  { id: uid(), time: ago(27 * HOUR), kind: 'restart_failed', severity: 'warn', title: 'Scheduled restart failed', body: 'Velocity Proxy did not stop within 60 seconds and was killed.', server_id: servers[3].id, read: true },
+  { id: uid(), time: ago(30 * HOUR), kind: 'security', severity: 'info', title: 'New admin added', body: 'sam@example.com was made an admin by dev@moss.local.', server_id: null, read: true },
+  { id: uid(), time: ago(4 * DAY), kind: 'operation_failed', severity: 'critical', title: 'Install failed: Broken Install', body: 'Download failed: HTTP 503 from api.papermc.io', server_id: servers[servers.length - 1].id, read: true },
+];
+const emitNotif = (n: A.AppNotification) => listeners.forEach((l) => l.notification?.(structuredClone(n)));
+const pushNotif = (severity: A.Severity) => {
+  const n: A.AppNotification = { id: uid(), time: now(), kind: severity === 'critical' ? 'crash' : 'disk_low', severity, title: severity === 'critical' ? 'Survival SMP crashed' : 'Disk space is getting low', body: severity === 'critical' ? 'Exited with code 137 (killed by the memory limit).' : '12% free.', server_id: servers[0].id, read: false };
+  notifs.unshift(n); emitNotif(n);
+};
+if (!gate && scenario !== 'empty') setTimeout(() => pushNotif('critical'), 9000);
+(window as any).__moss = { notify: pushNotif, resync: () => listeners.forEach((l) => l.resync?.()) };
+
+const tokens: (A.ApiToken & { secret?: string })[] = scenario === 'empty' ? [] : [
+  { id: uid(), name: 'Grafana', scope: 'read', prefix: 'moss_pat_7Hk2', created_at: ago(12 * DAY), last_used: ago(3 * MIN), expires_at: new Date(Date.now() + 48 * DAY).toISOString() },
+  { id: uid(), name: 'Deploy script', scope: 'full', prefix: 'moss_pat_Qm9x', created_at: ago(40 * DAY), last_used: null, expires_at: null },
+  { id: uid(), name: 'Old CI runner', scope: 'full', prefix: 'moss_pat_a1B3', created_at: ago(120 * DAY), last_used: ago(70 * DAY), expires_at: ago(DAY) },
+];
+const rand = (n: number) => [...Array(n)].map(() => 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'[(Math.random() * 57) | 0]).join('');
+
+const pathsFor = (kind: string, n: number) => [...Array(Math.min(50, n))].map((_, i) => ({ added: `world/region/r.${i}.${-i}.mca`, removed: `plugins/OldPlugin/data/cache-${i}.bin`, changed: i % 3 ? `world/region/r.${i}.0.mca` : `world/playerdata/${uid().slice(0, 8)}.dat` })[kind as 'added']);
+function preview(k: A.Backup, mode: string, only?: string[]): A.RestorePreview {
+  const inPlace = mode === 'in_place';
+  const share = only?.length ? only.length / (k.worlds?.length ?? 1) : 1;
+  const added = inPlace ? Math.round(12 * share) : k.files, removed = inPlace ? Math.round(340 * share) : 0, changed = inPlace ? Math.round(1204 * share) : 0;
+  const unchanged = inPlace ? Math.max(0, k.files - added - changed) : 0;
+  return {
+    mode: mode as 'in_place', archive: { files: k.files, size: k.size, created_at: k.created_at }, current: inPlace ? { files: k.files - added + removed, size: k.size * 1.07 } : null,
+    added, removed, changed, unchanged, size_delta: inPlace ? -Math.round(k.size * 0.07 * share) : 0,
+    samples: { added: pathsFor('added', added), removed: pathsFor('removed', removed), changed: pathsFor('changed', changed) }, worlds: k.worlds ?? [],
+    warnings: [...(!k.consistent ? ['This backup was taken while the server was running without a save pause, so recent chunks may be inconsistent.'] : []), ...(k.kind === 'pre-change' ? ['This is an automatic pre-change backup; restoring it undoes everything since.'] : [])],
+  };
+}
+
+function metricsFor(range: A.MetricRange, base: { cpu: number; mem: number; players?: boolean; disk?: boolean }, sparse = false): A.MetricSeries {
+  const step = { '1h': 5, '24h': 3600, '7d': 3600, '30d': 3600 }[range];
+  const n = sparse ? 2 : { '1h': 720, '24h': 24, '7d': 168, '30d': 720 }[range];
+  return {
+    range, step_s: step,
+    samples: [...Array(n)].map((_, i) => {
+      const t = Date.now() - (n - 1 - i) * step * 1000, w = Math.sin(i / (range === '1h' ? 14 : 5)) * 0.5 + 0.5, spike = Math.max(0, Math.sin(i / 3.3));
+      return {
+        t, cpu_avg: base.cpu * (0.6 + w * 0.7), cpu_max: Math.min(100, base.cpu * (0.9 + w * 0.8) + spike * 12), mem_avg: base.mem * (0.8 + 0.15 * (i / n)), mem_max: base.mem * (0.88 + 0.15 * (i / n)) + spike * 5e7,
+        ...(base.players ? { players_max: Math.round(2 + w * 4 + spike * 2) } : {}), ...(base.disk ? { disk_free: 330e9 - i * (range === '30d' ? 4e7 : 2e8) } : {}),
+      };
+    }),
+  };
+}
+const err500 = () => new ApiError(500, 'internal', 'The backend returned an unexpected error (mock).', [], 'req_mock123');
+
+async function handleX(method: string, p: string, qs: URLSearchParams, b: Record<string, any>): Promise<unknown> {
+  let m: RegExpMatchArray | null;
+  const M = (re: RegExp) => (m = p.match(re));
+  if (p === '/auth/config') return { mode: 'dev', owner_claimed: !(gate === 'setup'), setup_required: gate === 'setup', access_message: 'Ask Sam in #minecraft on Discord to invite you.' };
+  if (p === '/me') {
+    if (gate === 'setup') throw new ApiError(403, 'auth.setup_required', 'This instance has not been claimed yet.');
+    if (gate === 'denied') throw new ApiError(403, 'auth.not_provisioned', 'Your account is not provisioned on this instance.');
+    if (gate === 'throttled') throw new ApiError(429, 'auth.throttled', 'Too many failed sign-in attempts from this address.');
+    const mfa = gate === 'mfa' || gate === 'mfa-enrol';
+    return { id: users[0].id, email: users[0].email, role: 'owner', mfa: { required: mfa, satisfied: !mfa }, permissions: ['server.view', 'server.power', 'server.console.read', 'server.console.write', 'files.read', 'files.write', 'content.manage', 'backup.manage', 'config.write', 'server.delete', 'admin.users', 'admin.settings'] };
+  }
+  if (p === '/setup/claim') {
+    if (++claimTries > 5) throw new ApiError(429, 'auth.throttled', 'Too many attempts. Try again in a minute.');
+    if (b.token !== SETUP_TOKEN) throw new ApiError(403, 'setup.invalid_token', `That setup token is not correct (try "${SETUP_TOKEN}" in this demo).`);
+    gate = ''; claimTries = 0;
+    return { role: 'owner' };
+  }
+  if (p === '/timezones') return { zones: ['UTC', ...Intl.supportedValuesOf('timeZone')] };
+  if (p === '/notifications' && method === 'GET') {
+    if (failing) throw err500();
+    const items = notifs.filter((n) => !qs.get('unread') || !n.read).slice(0, +(qs.get('limit') ?? 50));
+    return { items, unread: notifs.filter((n) => !n.read).length };
+  }
+  if (p === '/notifications/read') { const ids = b.ids as string[] | undefined; notifs.forEach((n) => { if (b.all || ids?.includes(n.id)) n.read = true; }); return; }
+  if (p === '/notifications/test') {
+    await sleep(600);
+    return /fail/i.test(String(settings.notify_webhook_url)) ? { delivered: false, detail: 'Gave up after 3 attempts: the server answered HTTP 502.' } : { delivered: true, detail: 'HTTP 204 from discord.com in 212 ms.' };
+  }
+  if (p === '/tokens') {
+    if (failing) throw err500();
+    if (method === 'GET') return tokens.map(({ secret: _s, ...t }) => t);
+    if (!String(b.name ?? '').trim()) throw new ApiError(422, 'validation', 'Name is required', [{ path: 'name', message: 'Required' }]);
+    const secret = 'moss_pat_' + rand(40);
+    const t = { id: uid(), name: b.name as string, scope: b.scope as A.TokenScope, prefix: secret.slice(0, 13), created_at: now(), last_used: null, expires_at: b.expires_in_days ? new Date(Date.now() + b.expires_in_days * DAY).toISOString() : null };
+    tokens.unshift(t);
+    return { id: t.id, token: secret, name: t.name, scope: t.scope, expires_at: t.expires_at };
+  }
+  if (M(/^\/tokens\/([^/]+)$/)) { const i = tokens.findIndex((x) => x.id === m![1]); if (i >= 0) tokens.splice(i, 1); return; }
+  if (p === '/support-bundle') {
+    if (failing) throw err500();
+    return { files: [{ name: 'moss.txt', size: 2150 }, { name: 'config.json', size: 4410 }, { name: 'servers.json', size: 12980 }, { name: 'health.json', size: 3320 }, { name: 'activity.json', size: 188400 }, { name: 'operations.json', size: 40210 }, { name: 'console/survival-smp.log', size: 61230 }, { name: 'console/modded-fabric.log', size: 58044 }], redactions: ['Tokens, JWTs and API keys are replaced by [redacted]', 'Webhook URLs are replaced by [redacted]', 'E-mail addresses are hashed (sha256, first 8 characters)', 'Console output keeps only the last 300 lines per server'] };
+  }
+  if (M(/^\/java\/(\d+)$/) && method === 'DELETE') {
+    const major = +m![1], j = javaInstalls.find((x) => x.major === major);
+    if (!j?.managed) throw new ApiError(400, 'java.not_managed', 'Only Java installs managed by Moss can be removed.');
+    if (major === 21) throw new ApiError(409, 'java.in_use', 'Java 21 is needed by Survival SMP and Velocity Proxy.');
+    javaInstalls.splice(javaInstalls.indexOf(j), 1);
+    return;
+  }
+  if (p === '/metrics/host') { if (failing) throw err500(); return metricsFor(qs.get('range') as A.MetricRange, { cpu: 28, mem: 7.5e9, disk: true }); }
+  if (M(/^\/backups\/([^/]+)$/) && (method === 'PATCH' || method === 'DELETE')) {
+    const k = backups.find((x) => x.id === m![1]);
+    if (!k) throw new ApiError(404, 'backup.not_found', 'Backup not found');
+    if (method === 'DELETE') {
+      if (k.locked) throw new ApiError(409, 'backup.locked', 'This backup is locked. Unlock it before deleting.');
+      backups.splice(backups.indexOf(k), 1); return;
+    }
+    if (b.locked !== undefined) k.locked = b.locked;
+    if (b.note !== undefined) k.note = b.note;
+    return k;
+  }
+  if (M(/^\/backups\/([^/]+)\/preview$/)) {
+    const k = backups.find((x) => x.id === m![1]);
+    if (!k) throw new ApiError(404, 'backup.not_found', 'Backup not found');
+    await sleep(450);
+    if (failing) throw new ApiError(500, 'backup.preview_failed', 'The archive could not be read (mock).');
+    return preview(k, b.mode, b.only);
+  }
+  if (M(/^\/servers\/([^/]+)\/metrics$/)) {
+    if (failing) throw err500();
+    const s = sv(m![1]);
+    if (s.state === 'stopped' || s.state === 'failed') return { range: qs.get('range'), step_s: 3600, samples: [] };
+    return metricsFor(qs.get('range') as A.MetricRange, { cpu: s.cpu_pct ?? 6, mem: s.mem_bytes ?? 1e9, players: !!s.players }, s.name === 'Velocity Proxy' && qs.get('range') === '30d');
+  }
+  if (M(/^\/servers\/([^/]+)$/) && method === 'PATCH' && ('memory_limit_mb' in b || 'cpu_limit_pct' in b || 'pids_limit' in b)) {
+    const s = sv(m![1]);
+    const fields: { path: string; message: string }[] = [];
+    if (b.cpu_limit_pct != null && (b.cpu_limit_pct < 10 || b.cpu_limit_pct > 800)) fields.push({ path: 'cpu_limit_pct', message: 'Must be between 10 and 800' });
+    if (b.pids_limit != null && (b.pids_limit < 64 || b.pids_limit > 32768)) fields.push({ path: 'pids_limit', message: 'Must be between 64 and 32768' });
+    if (fields.length) throw new ApiError(422, 'validation', 'Some values are out of range', fields);
+    ensureLimits(s);
+    Object.assign(s.limits!, { memory_mb: b.memory_limit_mb ?? null, cpu_pct: b.cpu_limit_pct ?? null, pids: b.pids_limit ?? null });
+    log('server.update', s.name, 'resource limits');
+    emitServer(s);
+    return s;
+  }
+  if (M(/^\/servers\/([^/]+)\/actions\/reinstall$/)) {
+    const s = sv(m![1]);
+    if (s.state !== 'failed' && s.state !== 'stopped') throw new ApiError(409, 'server.bad_state', 'Reinstall needs the server stopped or the install failed.');
+    setState(s, 'installing');
+    return op2('server.reinstall', b.keep_data ? `Repairing ${s.name}` : `Reinstalling ${s.name}`, s.id, ['Resolving build', 'Downloading server jar', 'Verifying checksum', b.keep_data ? 'Keeping world and config' : 'Writing config'], () => setState(s, 'stopped'));
+  }
+  if (M(/^\/servers\/([^/]+)\/schedules$/) && method === 'POST') {
+    const s = sv(m![1]);
+    const tz = (b.tz as string | undefined) ?? offsetName(b.tz_offset_min ?? 0);
+    const next = b.daily_at ? nextDailyRun(b.daily_at, tz) : Date.now() + (b.every_minutes ?? 60) * MIN;
+    const n = { id: uid(), server_id: s.id, command: null, every_minutes: null, daily_at: null, tz_offset_min: 0, enabled: true, keep: null, last_run: null, next_run: new Date(next ?? Date.now()).toISOString(), last_status: null, ...b, tz } as A.Schedule;
+    schedules.push(n);
+    return n;
+  }
+  return NOPE;
+}
+const op2 = (kind: string, title: string, sid: string, stages: string[], done: () => void) => ({ operation: startOp(kind, title, sid, stages, { done }) });
+
+/** The mock router: WP-F2 routes first, then the base routes; fixtures are normalised to the contract on every call. */
+export async function handle(method: string, rawPath: string, body: unknown): Promise<unknown> {
+  normalize();
+  const u = new URL(rawPath, 'http://x');
+  const x = await handleX(method, u.pathname, u.searchParams, (body ?? {}) as Record<string, any>);
+  if (x !== NOPE) { await sleep(60 + Math.random() * 100); return x; }
+  const r = await handleBase(method, rawPath, body);
+  if (u.pathname === '/status') (r as A.HostStatus).host.os = macos ? 'macOS' : 'Linux';
+  return r;
+}
+
+/** Supabase auth REST calls for the MFA gate (mock mode answers instead of GoTrue). */
+export async function handleAuth(method: string, path: string, body: unknown): Promise<unknown> {
+  await sleep(250);
+  const b = (body ?? {}) as Record<string, any>;
+  if (path === 'user') return { id: users[0].id, email: users[0].email, factors: gate === 'mfa' ? [{ id: 'f-existing', factor_type: 'totp', status: 'verified' }] : [] };
+  if (path === 'factors' && method === 'POST') {
+    const secret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+    return { id: 'f-new', type: 'totp', totp: { qr_code: '', secret, uri: `otpauth://totp/Moss:${encodeURIComponent(users[0].email)}?secret=${secret}&issuer=Moss` } };
+  }
+  if (/^factors\/[^/]+$/.test(path) && method === 'DELETE') return {};
+  if (/^factors\/[^/]+\/challenge$/.test(path)) return { id: 'ch-1', expires_at: Math.floor(Date.now() / 1000) + 300 };
+  if (/^factors\/[^/]+\/verify$/.test(path)) {
+    if (b.code !== MFA_CODE) throw Object.assign(new Error('Invalid TOTP code entered'), { code: 'mfa_verification_failed' });
+    gate = '';
+    return { access_token: 'mock', refresh_token: 'mock', expires_in: 3600, user: { email: users[0].email } };
+  }
+  throw new ApiError(404, 'mock.not_found', `Mock auth has no route for ${method} ${path}`);
 }

@@ -1,11 +1,12 @@
 // Supabase GoTrue via plain fetch; the session lives in localStorage (best effort).
-import { api, ApiError, configureAuth, type AuthConfig, type Me } from './api';
+import { api, ApiError, configureAuth, mockAuthCall, type AuthConfig, type Me } from './api';
+import { toast } from './stores.svelte';
 
 interface Session { access_token: string; refresh_token: string; expires_at: number; email?: string }
 const KEY = 'moss.session';
 
 export const auth = $state<{
-  phase: 'loading' | 'login' | 'ready' | 'denied' | 'error';
+  phase: 'loading' | 'login' | 'ready' | 'denied' | 'setup' | 'mfa' | 'throttled' | 'error';
   config: AuthConfig | null;
   me: Me | null;
   email: string;
@@ -74,8 +75,26 @@ function consumeHash(): Session | null {
   return { access_token: at, refresh_token: rt, expires_at: exp, email };
 }
 
+/** Map a gate error (403 not_provisioned / setup_required / mfa_required, 429 throttled) to a phase. */
+function gateFor(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  auth.email = session?.email || auth.email;
+  if (e.code === 'auth.not_provisioned') auth.phase = 'denied';
+  else if (e.code === 'auth.setup_required') auth.phase = 'setup';
+  else if (e.code === 'auth.mfa_required') auth.phase = 'mfa';
+  else if (e.code === 'auth.throttled' || e.status === 429) { auth.phase = 'throttled'; auth.error = e.message; }
+  else return false;
+  return true;
+}
+
 function onUnauthorized(e: ApiError) {
-  if (e.code === 'auth.not_provisioned') { auth.phase = 'denied'; return; }
+  if (e.code === 'auth.throttled') {
+    // Gate screens show their own inline errors; a running app just says so.
+    if (auth.phase === 'ready') toast('warn', 'Too many requests', { body: 'Moss is rate limiting this address. Wait a moment and try again.' });
+    else if (auth.phase === 'loading') gateFor(e);
+    return;
+  }
+  if (e.code === 'auth.not_provisioned' || e.code === 'auth.setup_required' || e.code === 'auth.mfa_required') { if (auth.phase !== 'login') gateFor(e); return; }
   if (auth.config?.mode === 'supabase' && auth.phase !== 'login') {
     void refresh().then((ok) => { if (!ok) { auth.phase = 'login'; auth.me = null; } });
   }
@@ -85,13 +104,37 @@ async function loadMe() {
   try {
     auth.me = await api.me();
     auth.email = auth.me.email;
-    auth.phase = 'ready';
+    auth.phase = auth.me.mfa?.required && !auth.me.mfa.satisfied ? 'mfa' : 'ready';
   } catch (e) {
-    if (e instanceof ApiError && e.code === 'auth.not_provisioned') { auth.email = session?.email ?? ''; auth.phase = 'denied'; }
-    else if (e instanceof ApiError && e.status === 401) { auth.phase = auth.config?.mode === 'supabase' ? 'login' : 'error'; auth.error = e.message; }
+    if (gateFor(e)) return;
+    if (e instanceof ApiError && e.status === 401) { auth.phase = auth.config?.mode === 'supabase' ? 'login' : 'error'; auth.error = e.message; }
     else { auth.phase = 'error'; auth.error = e instanceof Error ? e.message : String(e); }
   }
 }
+
+/** Re-read the sign-in config and profile, e.g. after claiming the instance or completing MFA. */
+export async function recheck() {
+  auth.error = '';
+  try { auth.config = await api.authConfig(); } catch { /* keep the old config */ }
+  await loadMe();
+}
+
+/** Authenticated Supabase GoTrue call (MFA factors); `path` is relative to /auth/v1/. */
+export async function supabaseCall(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<any> {
+  const m = mockAuthCall(method, path, body);
+  if (m) return m;
+  const tok = await token();
+  const res = await fetch(`${cfg().supabase_url}/auth/v1/${path}`, {
+    method,
+    headers: { apikey: cfg().supabase_anon_key ?? '', Authorization: `Bearer ${tok}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(j.msg || j.message || j.error_description || `Request failed (${res.status})`), { code: j.error_code as string | undefined });
+  return j;
+}
+/** Take the session a successful MFA verification returns (its token carries aal2). */
+export function adoptSession(j: unknown) { if (session) save({ ...toSession(j), email: (j as any).user?.email ?? session.email }); }
 
 export async function boot() {
   configureAuth(token, onUnauthorized);
@@ -99,6 +142,7 @@ export async function boot() {
   try {
     auth.config = await api.authConfig();
   } catch (e) {
+    if (gateFor(e)) return;
     auth.phase = 'error';
     auth.error = e instanceof Error ? e.message : 'Cannot reach the Moss backend';
     return;
@@ -137,8 +181,9 @@ export function signOut() {
   }
   save(null);
   auth.me = null;
-  auth.phase = auth.config?.mode === 'supabase' ? 'login' : 'loading';
   auth.error = '';
+  if (auth.config?.mode === 'supabase') auth.phase = 'login';
+  else void boot();
 }
 
 export const can = (perm: string) => auth.me?.role === 'owner' || auth.me?.permissions.includes(perm) || false;

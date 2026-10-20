@@ -11,7 +11,7 @@
   let err = $state('');
   async function load() { err = ''; try { log = await api.activity(100, sid || undefined); } catch (e) { err = errMsg(e); } }
   $effect(() => { sid; load(); });
-  $effect(() => { feed.latest; if (log) load(); });
+  $effect(() => { feed.latest; feed.rev; if (log) load(); });
   const shown = $derived(ops.list.filter((o) => !sid || o.server_id === sid));
 </script>
 

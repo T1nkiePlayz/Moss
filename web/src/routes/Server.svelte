@@ -4,6 +4,7 @@
   import States from '../components/States.svelte';
   import Lazy from '../components/Lazy.svelte';
   import Overview from './server/Overview.svelte';
+  import InstallFailed from '../components/InstallFailed.svelte';
   import { api, errMsg, type Server } from '../lib/api';
   import { servers, serverById } from '../lib/stores.svelte';
   import { power } from '../lib/actions';
@@ -68,10 +69,12 @@
         <button class="btn" onclick={() => power(s, 'restart')}><Icon name="refresh" size={15} />Restart</button>
         <button class="btn danger" onclick={() => power(s, 'stop')}><Icon name="stop" size={14} />Stop</button>
       {:else}
-        <button class="btn primary" disabled={s.state === 'installing' || s.state === 'stopping'} onclick={() => power(s, 'start')}><Icon name="play" size={14} />Start</button>
+        <button class="btn primary" disabled={s.state === 'installing' || s.state === 'stopping' || s.state === 'failed'} title={s.state === 'failed' ? 'Retry the install first' : undefined} onclick={() => power(s, 'start')}><Icon name="play" size={14} />Start</button>
       {/if}
     </div>
   </div>
+
+  {#if s.state === 'failed'}<InstallFailed server={s} />{/if}
 
   <div class="tabs" role="tablist" aria-label="Server sections">
     {#each tabs as t}

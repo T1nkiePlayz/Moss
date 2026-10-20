@@ -1,8 +1,9 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import States from '../components/States.svelte';
-  import { api, errMsg, type JavaInstall, type Settings as S } from '../lib/api';
-  import { host, prefs, setPref, toast, toastError, trackOp, type Prefs } from '../lib/stores.svelte';
+  import Lazy from '../components/Lazy.svelte';
+  import { api, apiOps, ApiError, errMsg, type JavaInstall, type Settings as S } from '../lib/api';
+  import { confirmDialog, host, prefs, setPref, toast, toastError, trackOp, type Prefs } from '../lib/stores.svelte';
   import { can } from '../lib/auth.svelte';
   import { duration } from '../lib/format';
 
@@ -30,10 +31,24 @@
   let major = $state(21);
   async function loadJava() { jErr = ''; try { java = (await api.java()).installs; } catch (e) { jErr = errMsg(e); } }
   void loadJava();
-  async function installJava() { try { trackOp((await api.installJava(major)).operation); toast('info', `Installing Java ${major}`); } catch (e) { toastError(e, 'Install failed'); } }
+  let jUse = $state('');
+  const jErrMsg = (e: unknown) => (e instanceof ApiError && e.code === 'java.in_use' ? e.message || 'A running server is using this Java version.' : '');
+  async function installJava() {
+    jUse = '';
+    try { trackOp((await api.installJava(major)).operation); toast('info', `Installing Java ${major}`); } catch (e) { jUse = jErrMsg(e); if (!jUse) toastError(e, 'Install failed'); }
+  }
+  async function removeJava(j: JavaInstall) {
+    jUse = '';
+    const r = await confirmDialog({ title: `Remove Java ${j.major}?`, body: 'Deletes the copy Moss downloaded. Servers that need this version will not start until it is installed again.', confirmLabel: 'Remove Java', danger: true });
+    if (!r.ok) return;
+    try { await apiOps.removeJava(j.major); toast('info', `Removed Java ${j.major}`); void loadJava(); } catch (e) { jUse = jErrMsg(e); if (!jUse) toastError(e, 'Could not remove Java'); }
+  }
+  const loadNotif = () => import('../components/settings/Notifications.svelte');
+  const loadTokens = () => import('../components/settings/Tokens.svelte');
+  const loadBundle = () => import('../components/settings/SupportBundle.svelte');
 </script>
 
-<div class="page-head"><div><h1>Settings</h1><p>Appearance, instance defaults and runtimes.</p></div></div>
+<div class="page-head"><div><h1>Settings</h1><p>Appearance, instance defaults, notifications, API tokens and runtimes.</p></div></div>
 
 <div class="col" style="gap:var(--gap)">
   <section class="card" aria-labelledby="ap">
@@ -78,18 +93,24 @@
     {/if}
   </section>
 
+  {#if canAdmin}<Lazy load={loadNotif} />{/if}
+
   <section class="card" aria-labelledby="jv">
     <div class="card-title" id="jv"><Icon name="package" size={14} />Java installs</div>
     {#if jErr}<States kind="error" text={jErr} retry={loadJava} />
     {:else if !java}<States kind="loading" rows={2} />
     {:else}
       {#if !java.length}<p class="muted sm">No Java found. Install one to run servers.</p>
-      {:else}<ul class="jl">{#each java as j}<li><b>Java {j.major}</b><span class="muted tnum">{j.version}</span><span class="badge {j.managed ? 'ok' : ''}">{j.managed ? 'Managed by Moss' : 'System'}</span><code class="xs ellipsis grow">{j.path}</code></li>{/each}</ul>{/if}
+      {:else}<ul class="jl">{#each java as j}<li><b>Java {j.major}</b><span class="muted tnum">{j.version}</span><span class="badge {j.managed ? 'ok' : ''}">{j.managed ? 'Managed by Moss' : 'System'}</span><code class="xs ellipsis grow">{j.path}</code>{#if canAdmin && j.managed}<button class="btn danger sm" onclick={() => removeJava(j)} aria-label="Remove managed Java {j.major}"><Icon name="trash" size={13} />Remove</button>{/if}</li>{/each}</ul>{/if}
+      <div aria-live="assertive">{#if jUse}<div class="banner danger" role="alert" style="margin-top:10px"><Icon name="alert" size={16} /><div><b>Java is in use</b><div class="muted">{jUse}</div><div class="muted">Stop those servers, then try again.</div></div></div>{/if}</div>
       {#if canAdmin}
         <div class="row" style="margin-top:14px"><select class="select" style="width:140px" aria-label="Java major version" bind:value={major}>{#each [8, 11, 17, 21, 25] as m}<option value={m}>Java {m}</option>{/each}</select><button class="btn" onclick={installJava}><Icon name="download" size={15} />Install</button></div>
       {/if}
     {/if}
   </section>
+
+  <Lazy load={loadTokens} />
+  {#if canAdmin}<Lazy load={loadBundle} />{/if}
 
   <section class="card" aria-labelledby="ab">
     <div class="card-title" id="ab"><Icon name="info" size={14} />About</div>
@@ -97,6 +118,7 @@
       <div><dt>Version</dt><dd>{host.status?.version ?? st?.version ?? '—'}</dd></div>
       <div><dt>Uptime</dt><dd class="tnum">{host.status ? duration(host.status.uptime_s) : '—'}</dd></div>
       <div><dt>Host</dt><dd>{host.status?.host.hostname ?? '—'}</dd></div>
+      <div><dt>Operating system</dt><dd>{host.status?.host.os ?? '—'}</dd></div>
       <div><dt>Auth mode</dt><dd>{host.status?.auth_mode ?? '—'}</dd></div>
     </dl>
   </section>

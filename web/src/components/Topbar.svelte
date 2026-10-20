@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
+  import NotificationBell from './NotificationBell.svelte';
   import { router, navigate } from '../lib/router.svelte';
   import { serverById, ui, activeOps, prefs, setPref, cycleTheme } from '../lib/stores.svelte';
   import { auth, signOut } from '../lib/auth.svelte';
@@ -52,6 +53,7 @@
   <button class="btn ghost icon ops" onclick={() => (ui.ops = true)} aria-label="Operations{n ? `, ${n} running` : ''}">
     <Icon name="layers" />{#if n}<span class="badge-n" aria-hidden="true">{n}</span>{/if}
   </button>
+  <NotificationBell />
   <button class="btn ghost icon" onclick={cycleTheme} aria-label="Toggle theme">
     <Icon name={dark ? 'sun' : 'moon'} />
   </button>

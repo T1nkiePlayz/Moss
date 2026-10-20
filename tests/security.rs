@@ -44,3 +44,38 @@ async fn streams_refuse_cross_origin_requests_and_keep_the_ticket() {
     assert_eq!(upgrade(&t, "https://evil.example").send().await.unwrap().status(), 403);
     assert_eq!(upgrade(&t, &format!("http://{host}")).send().await.unwrap().status(), 101);
 }
+
+async fn make_sim(c: &reqwest::Client, base: &str, name: &str) -> String {
+    let created: Value = c.post(format!("{base}/servers")).json(&json!({"name": name, "runtime": "sim", "game_version": "sim-1.0", "memory_mb": 512})).send().await.unwrap().json().await.unwrap();
+    let op = created["operation"]["id"].as_str().unwrap().to_string();
+    let end = Instant::now() + Duration::from_secs(60);
+    loop {
+        let o: Value = c.get(format!("{base}/operations/{op}")).send().await.unwrap().json().await.unwrap();
+        if o["state"] == "completed" { break; }
+        assert!(Instant::now() < end, "install did not finish");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    created["server"]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn file_api_cannot_reach_controller_metadata_or_delete_the_root_by_odd_spellings() {
+    let dir = tmp("files");
+    let m = Moss::start(&dir, &[]);
+    let c = reqwest::Client::new();
+    m.ready(&c).await;
+    let id = make_sim(&c, &m.base, "f").await;
+    let f = format!("{}/servers/{id}/files", m.base);
+    std::fs::create_dir_all(dir.join("servers").join(&id).join(".moss")).unwrap();
+    std::fs::write(dir.join("servers").join(&id).join(".moss/marker"), "x").unwrap();
+    for p in [".moss", "./.moss", "./.moss/", ".MOSS", "/./.moss"] {
+        assert_eq!(c.get(&f).query(&[("path", p)]).send().await.unwrap().status(), 403, "list {p}");
+        assert_eq!(c.get(format!("{f}/content")).query(&[("path", format!("{p}/marker"))]).send().await.unwrap().status(), 403, "read {p}");
+        assert_eq!(c.delete(&f).query(&[("path", p)]).send().await.unwrap().status(), 403, "delete {p}");
+    }
+    for p in ["", ".", "./", "//"] { assert_eq!(c.delete(&f).query(&[("path", p)]).send().await.unwrap().status(), 403, "delete root as {p:?}"); }
+    assert_eq!(c.put(format!("{f}/content")).json(&json!({"path": "./.moss/marker", "content": "pwn"})).send().await.unwrap().status(), 403);
+    assert_eq!(std::fs::read_to_string(dir.join("servers").join(&id).join(".moss/marker")).unwrap(), "x");
+    let listing: Value = c.get(&f).query(&[("path", "./")]).send().await.unwrap().json().await.unwrap();
+    assert!(!listing["entries"].as_array().unwrap().iter().any(|e| e["name"] == ".moss"), "the metadata directory is hidden from every spelling of the root");
+}

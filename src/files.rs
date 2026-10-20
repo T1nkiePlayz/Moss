@@ -26,10 +26,14 @@ pub fn safe_join(root: &FsPath, rel: &str) -> ApiResult<PathBuf> {
     Ok(out)
 }
 
+/// Is `rel` the controller's metadata directory or inside it? Decided on path components (so `./.moss`, `a/../` tricks
+/// and `.MOSS` on case-insensitive filesystems cannot slip past a string comparison).
 fn protected(rel: &str) -> bool {
-    let t = rel.trim_matches('/');
-    t == ".moss" || t.starts_with(".moss/")
+    FsPath::new(rel).components().find_map(|c| match c { Component::Normal(p) => Some(p), _ => None }).is_some_and(|p| p.to_string_lossy().eq_ignore_ascii_case(".moss"))
 }
+
+/// Does `rel` name the server root itself (`""`, `/`, `.`, `./`)?
+fn is_root(rel: &str) -> bool { !FsPath::new(rel).components().any(|c| matches!(c, Component::Normal(_))) }
 
 fn rel_of(root: &FsPath, p: &FsPath) -> String { p.strip_prefix(root).map(|r| r.to_string_lossy().to_string()).unwrap_or_default() }
 
@@ -39,12 +43,13 @@ fn qpath(q: &HashMap<String, String>) -> String { q.get("path").cloned().unwrap_
 pub async fn list(State(st): State<St>, user: User, Path(id): Path<String>, Query(q): Q) -> ApiResult<Json<Value>> {
     let s = server_for(&st, &user, &id, "files.read").await?;
     let (root, rel) = (s.dir(&st), qpath(&q));
+    if protected(&rel) { return Err(ApiError::forbidden("controller metadata is not accessible")); }
     let dir = safe_join(&root, &rel)?;
     let entries = tokio::task::spawn_blocking(move || -> ApiResult<Vec<Value>> {
         let mut v = vec![];
         for e in std::fs::read_dir(&dir)?.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
-            if rel.trim_matches('/').is_empty() && name == ".moss" { continue; }
+            if is_root(&rel) && name.eq_ignore_ascii_case(".moss") { continue; }
             let Ok(m) = e.path().symlink_metadata() else { continue };
             let kind = if m.file_type().is_symlink() { "symlink" } else if m.is_dir() { "dir" } else { "file" };
             let modified = m.modified().ok().map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
@@ -116,7 +121,7 @@ pub async fn rename(State(st): State<St>, user: User, Path(id): Path<String>, Js
 pub async fn delete(State(st): State<St>, user: User, Path(id): Path<String>, Query(q): Q) -> ApiResult<StatusCode> {
     let s = server_for(&st, &user, &id, "files.write").await?;
     let rel = qpath(&q);
-    if rel.trim_matches('/').is_empty() || protected(&rel) { return Err(ApiError::forbidden("refusing to delete this path")); }
+    if is_root(&rel) || protected(&rel) { return Err(ApiError::forbidden("refusing to delete this path")); }
     let p = safe_join(&s.dir(&st), &rel)?;
     let m = tokio::fs::symlink_metadata(&p).await?;
     if m.is_dir() { tokio::fs::remove_dir_all(&p).await?; } else { tokio::fs::remove_file(&p).await?; }
@@ -134,7 +139,7 @@ pub async fn upload(State(st): State<St>, user: User, Path(id): Path<String>, Qu
     while let Some(mut f) = mp.next_field().await.map_err(|e| ApiError::bad("upload.invalid", e.to_string()))? {
         let Some(name) = f.file_name().map(|n| n.to_string()) else { continue };
         let name = FsPath::new(&name).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        if name.is_empty() || name.starts_with('.') && name == ".moss" { continue; }
+        if name.is_empty() || (is_root(&rel) && name.eq_ignore_ascii_case(".moss")) { continue; }
         let target = safe_join(&dir, &name)?;
         let tmp = target.with_extension("moss-upload");
         let mut out = tokio::fs::File::create(&tmp).await?;
@@ -251,6 +256,9 @@ mod tests {
     #[test]
     fn controller_metadata_is_protected() {
         assert!(protected(".moss") && protected("/.moss/undo/x") && !protected("plugins/.mossy"));
+        // spellings that resolve to the same directory through safe_join
+        for p in ["./.moss", "./.moss/undo", ".//.moss/x", ".MOSS", ".Moss/undo", "/./.moss"] { assert!(protected(p), "{p}"); }
+        assert!(is_root("") && is_root("/") && is_root(".") && is_root("./") && is_root("//./") && !is_root("a") && !is_root("./a"));
     }
 
     #[test]

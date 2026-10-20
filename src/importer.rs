@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use std::path::{Component, Path, PathBuf};
 
 const MAX_BYTES: u64 = 200 << 30;
+const MAX_ENTRIES: usize = 1_000_000;
 const STAGE_TTL_SECS: u64 = 6 * 3600;
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -194,7 +195,9 @@ async fn sweep(st: &St) {
 }
 
 /// Unpacks a zip or tar.zst into `dest` with every entry confined to it. Symlinks and special files are refused.
-pub fn extract(archive: &Path, dest: &Path, token: &tokio_util::sync::CancellationToken) -> Result<()> {
+pub fn extract(archive: &Path, dest: &Path, token: &tokio_util::sync::CancellationToken) -> Result<()> { extract_limited(archive, dest, token, MAX_BYTES) }
+
+fn extract_limited(archive: &Path, dest: &Path, token: &tokio_util::sync::CancellationToken, max_bytes: u64) -> Result<()> {
     use std::io::Read;
     let mut magic = [0u8; 4];
     std::fs::File::open(archive)?.read_exact(&mut magic).map_err(|_| anyhow!("The file is empty or too small to be an archive."))?;
@@ -202,6 +205,7 @@ pub fn extract(archive: &Path, dest: &Path, token: &tokio_util::sync::Cancellati
     if &magic == b"PK\x03\x04" {
         let mut z = zip::ZipArchive::new(std::fs::File::open(archive)?).map_err(|e| anyhow!("The zip file could not be read: {e}"))?;
         let mut total = 0u64;
+        if z.len() > MAX_ENTRIES { bail!("The archive has too many files."); }
         for i in 0..z.len() {
             if token.is_cancelled() { bail!("cancelled"); }
             let mut f = z.by_index(i)?;
@@ -210,16 +214,28 @@ pub fn extract(archive: &Path, dest: &Path, token: &tokio_util::sync::Cancellati
             if rel.components().any(|c| !matches!(c, Component::Normal(_))) { bail!("The archive contains an unsafe path ({}).", rel.display()); }
             let out = dest.join(&rel);
             if f.is_dir() { std::fs::create_dir_all(&out)?; continue; }
-            total = total.saturating_add(f.size());
-            if total > MAX_BYTES { bail!("The archive expands beyond the size limit."); }
+            if total.saturating_add(f.size()) > max_bytes { bail!("The archive expands beyond the size limit."); }
             if let Some(p) = out.parent() { std::fs::create_dir_all(p)?; }
-            std::io::copy(&mut f.by_ref().take(MAX_BYTES), &mut std::fs::File::create(&out)?)?;
+            // count what is really written: the size in the header is attacker-controlled
+            let room = max_bytes - total;
+            let n = std::io::copy(&mut f.by_ref().take(room.saturating_add(1)), &mut std::fs::File::create(&out)?)?;
+            total = total.saturating_add(n);
+            if total > max_bytes { bail!("The archive expands beyond the size limit."); }
         }
         Ok(())
     } else if magic == [0x28, 0xB5, 0x2F, 0xFD] {
         crate::backups::extract_archive(archive, dest, token, None)
     } else {
         bail!("Only .zip and .tar.zst files can be imported.")
+    }
+}
+
+/// An archive must not bring its own controller metadata (`.moss`), like the folder import which never copies it.
+fn strip_reserved(root: &Path) {
+    let Ok(rd) = std::fs::read_dir(root) else { return };
+    for e in rd.flatten() {
+        let n = e.file_name().to_string_lossy().to_ascii_lowercase();
+        if n == ".moss" { let _ = if e.path().is_dir() { std::fs::remove_dir_all(e.path()) } else { std::fs::remove_file(e.path()) }; }
     }
 }
 
@@ -252,6 +268,7 @@ pub async fn inspect(State(st): State<St>, user: User, req: axum::extract::Reque
                     .map_err(|e| ApiError::bad("import.archive", e.to_string()))?;
                 let _ = tokio::fs::remove_file(base.join("upload.bin")).await;
                 let root = effective_root(&base.join("extracted"));
+                strip_reserved(&root);
                 tokio::fs::rename(&root, base.join("root")).await?;
                 let r2 = base.join("root");
                 return Ok((orig, tokio::task::spawn_blocking(move || size_of(&r2)).await.unwrap_or(0)));
@@ -420,6 +437,21 @@ mod tests {
         z.finish().unwrap();
     }
 
+    #[test]
+    fn extraction_counts_real_bytes_against_the_limit_and_drops_reserved_metadata() {
+        let d = tmp("lim");
+        let z = d.join("a.zip");
+        jar(&z, &[("a.bin", &"x".repeat(100)), ("b.bin", &"y".repeat(100))]);
+        let tok = tokio_util::sync::CancellationToken::new();
+        assert!(extract_limited(&z, &d.join("ok"), &tok, 1000).is_ok());
+        let e = extract_limited(&z, &d.join("big"), &tok, 150).unwrap_err().to_string();
+        assert!(e.contains("size limit"), "{e}");
+        let z2 = d.join("m.zip");
+        jar(&z2, &[(".moss/console.fifo", "x"), ("server.properties", "a=b")]);
+        extract_limited(&z2, &d.join("m"), &tok, 1000).unwrap();
+        strip_reserved(&d.join("m"));
+        assert!(!d.join("m/.moss").exists() && d.join("m/server.properties").exists());
+    }
     #[test]
     fn names_and_versions() {
         assert_eq!(version_in_name("paper-1.21.4-123.jar").as_deref(), Some("1.21.4"));

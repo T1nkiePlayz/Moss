@@ -7,7 +7,7 @@ export interface AuthConfig { mode: 'supabase' | 'dev'; supabase_url?: string; s
 export interface Me { id: string; email: string; role: Role; permissions: string[] }
 export interface HostStatus {
   version: string; uptime_s: number; auth_mode: string;
-  host: { cpu_pct: number; mem_total: number; mem_used: number; disk_total: number; disk_free: number; load1: number; hostname: string };
+  host: { cpu_pct: number; mem_total: number; mem_used: number; disk_total: number; disk_free: number; load1: number; hostname: string; os?: string };
   counts: { servers: number; running: number; players: number };
 }
 export interface Runtime {
@@ -131,6 +131,7 @@ export async function initApi() {
 export const isMock = () => mock !== null;
 
 const BASE = '/api/v1';
+const AUTH_GATES = new Set(['auth.not_provisioned', 'auth.setup_required', 'auth.mfa_required', 'auth.throttled']);
 const inflight = new Map<string, Promise<unknown>>();
 const cache = new Map<string, { at: number; v: unknown }>();
 
@@ -163,7 +164,7 @@ async function exec<T>(method: string, path: string, body?: unknown, signal?: Ab
   const res = await raw(method, path, body, signal);
   if (!res.ok) {
     const e = await parseError(res);
-    if (res.status === 401 || e.code === 'auth.not_provisioned') onUnauthorized(e);
+    if (res.status === 401 || AUTH_GATES.has(e.code)) onUnauthorized(e);
     throw e;
   }
   if (res.status === 204) return undefined as T;
@@ -317,7 +318,7 @@ async function ticket(): Promise<string> {
 
 export interface Stream { close(): void }
 
-export interface EventHandlers { onOpen(): void; onError(): void; op(o: Operation): void; server(s: Server): void; activity(a: Activity): void }
+export interface EventHandlers { onOpen(): void; onError(): void; op(o: Operation): void; server(s: Server): void; activity(a: Activity): void; notification?(n: AppNotification): void; resync?(): void }
 export function openEvents(h: EventHandlers): Stream {
   if (mock) return mock.openEvents(h);
   let es: EventSource | null = null;
@@ -335,6 +336,8 @@ export function openEvents(h: EventHandlers): Stream {
       on('op', h.op);
       on('server', h.server);
       on('activity', h.activity);
+      on('notification', (n: AppNotification) => h.notification?.(n));
+      es.addEventListener('resync', () => h.resync?.());
     })
     .catch(() => !closed && h.onError());
   return { close: () => { closed = true; es?.close(); } };
@@ -364,3 +367,55 @@ export function openConsole(id: string, h: { onOpen(): void; onClose(): void; on
 }
 
 export const errMsg = (x: unknown) => (x instanceof ApiError ? x.message : x instanceof Error ? x.message : String(x));
+
+// ===== WP-F2 additions (docs/next-api.md WP-B / WP-C / WP-D); declaration merging keeps the originals untouched =====
+export interface AuthConfig { setup_required?: boolean; access_message?: string }
+export interface Me { mfa?: { required: boolean; satisfied: boolean } }
+export interface Limits { memory_mb: number | null; cpu_pct: number | null; pids: number | null; enforced: boolean; backend: 'cgroup2' | 'none'; detail: string | null }
+export interface Server { limits?: Limits }
+export interface Backup { worlds?: string[]; locked?: boolean }
+export interface Schedule { tz?: string }
+export type AuditMode = 'redacted' | 'all' | 'off';
+export interface Settings { notify_webhook_url?: string; notify_events?: string[]; audit_console_commands?: AuditMode; access_message?: string }
+
+export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security';
+export type Severity = 'info' | 'warn' | 'critical';
+export interface AppNotification { id: string; time: string; kind: NotificationKind; severity: Severity; title: string; body: string; server_id: string | null; read: boolean }
+export interface NotificationList { items: AppNotification[]; unread: number }
+
+export type TokenScope = 'read' | 'full';
+export interface ApiToken { id: string; name: string; scope: TokenScope; prefix: string; created_at: string; last_used: string | null; expires_at: string | null }
+export interface CreatedToken { id: string; token: string; name: string; scope: TokenScope; expires_at: string | null }
+
+export interface RestorePreview {
+  mode: 'new_server' | 'in_place'; archive: { files: number; size: number; created_at: string }; current: { files: number; size: number } | null;
+  added: number; removed: number; changed: number; unchanged: number; size_delta: number;
+  samples: { added: string[]; removed: string[]; changed: string[] }; worlds: string[]; warnings: string[];
+}
+export type MetricRange = '1h' | '24h' | '7d' | '30d';
+export interface MetricSample { t: number; cpu_avg: number; cpu_max: number; mem_avg: number; mem_max: number; players_max?: number; disk_free?: number }
+export interface MetricSeries { range: MetricRange; step_s: number; samples: MetricSample[] }
+export interface SupportPreview { files: { name: string; size: number }[]; redactions: string[] }
+
+export const apiOps = {
+  claimSetup: (token: string) => send<{ role: Role }>('POST', '/setup/claim', { token }),
+  notifications: (o: { unread?: boolean; limit?: number } = {}) => get<NotificationList>(`/notifications${q({ unread: o.unread ? 1 : undefined, limit: o.limit ?? 50 })}`),
+  markRead: (b: { ids?: string[]; all?: boolean }) => send('POST', '/notifications/read', b),
+  testWebhook: () => send<{ delivered: boolean; detail: string }>('POST', '/notifications/test'),
+  tokens: (all = false) => get<ApiToken[]>(`/tokens${q({ all: all ? 1 : undefined })}`),
+  createToken: (b: { name: string; scope: TokenScope; expires_in_days?: number }) => send<CreatedToken>('POST', '/tokens', b),
+  revokeToken: (id: string) => send('DELETE', `/tokens/${e(id)}`),
+  timezones: () => get<{ zones: string[] }>('/timezones', { ttl: 600000 }),
+  patchBackup: (id: string, b: { locked?: boolean; note?: string }) => send<Backup>('PATCH', `/backups/${e(id)}`, b),
+  previewRestore: (id: string, mode: 'new_server' | 'in_place', only?: string[]) => send<RestorePreview>('POST', `/backups/${e(id)}/preview`, { mode, only }),
+  restore: (id: string, mode: 'new_server' | 'in_place', only?: string[]) => send<{ operation?: Operation }>('POST', `/backups/${e(id)}/restore`, { mode, only }),
+  metrics: (id: string, range: MetricRange) => get<MetricSeries>(`/servers/${e(id)}/metrics${q({ range })}`),
+  hostMetrics: (range: MetricRange) => get<MetricSeries>(`/metrics/host${q({ range })}`),
+  supportPreview: () => get<SupportPreview>('/support-bundle?preview=1'),
+  downloadSupportBundle: () => download('/support-bundle', 'moss-support-bundle.zip'),
+  removeJava: (major: number) => send('DELETE', `/java/${major}`),
+  reinstall: (id: string, keep_data: boolean) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/actions/reinstall`, { keep_data }),
+  patchLimits: (id: string, b: { memory_limit_mb: number | null; cpu_limit_pct: number | null; pids_limit: number | null }) => send<Server>('PATCH', `/servers/${e(id)}`, b),
+};
+/** Supabase auth REST calls in mock mode are answered by the mock backend (dev only). */
+export const mockAuthCall = (method: string, path: string, body?: unknown): Promise<any> | null => (mock ? mock.handleAuth(method, path, body) : null);

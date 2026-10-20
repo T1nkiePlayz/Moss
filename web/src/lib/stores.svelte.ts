@@ -1,4 +1,4 @@
-import { api, openEvents, errMsg, type Activity, type Finding, type HostStatus, type Operation, type Server, type Stream } from './api';
+import { api, apiOps, openEvents, errMsg, type Activity, type AppNotification, type Finding, type HostStatus, type Operation, type Server, type Stream } from './api';
 
 // ---------- visibility + polling ----------
 export const page = $state({ visible: typeof document === 'undefined' || document.visibilityState === 'visible' });
@@ -133,7 +133,30 @@ export async function refreshOps() {
 }
 
 // ---------- activity feed (live) ----------
-export const feed = $state<{ latest: Activity | null }>({ latest: null });
+export const feed = $state<{ latest: Activity | null; rev: number }>({ latest: null, rev: 0 });
+
+// ---------- notification inbox (live via SSE `notification`) ----------
+export const inbox = $state<{ items: AppNotification[]; unread: number; loaded: boolean; error: string }>({ items: [], unread: 0, loaded: false, error: '' });
+export async function refreshNotifications() {
+  try { const r = await apiOps.notifications({ limit: 50 }); inbox.items = r.items; inbox.unread = r.unread; inbox.error = ''; } catch (e) { inbox.error = errMsg(e); }
+  inbox.loaded = true;
+}
+function onNotification(n: AppNotification) {
+  const had = inbox.items.some((x) => x.id === n.id);
+  inbox.items = [n, ...inbox.items.filter((x) => x.id !== n.id)].slice(0, 100);
+  if (had || n.read) return;
+  inbox.unread++;
+  if (n.severity === 'critical') toast('error', n.title, { body: n.body, timeout: 10000, action: n.server_id ? { label: 'Open', run: () => { location.hash = `#/servers/${encodeURIComponent(n.server_id!)}`; } } : undefined });
+}
+/** Mark some (or, without ids, all) notifications read; optimistic, reconciled on failure. */
+export async function markRead(ids?: string[]) {
+  const hit = inbox.items.filter((n) => !n.read && (!ids || ids.includes(n.id)));
+  hit.forEach((n) => (n.read = true));
+  inbox.unread = ids ? Math.max(0, inbox.unread - hit.length) : 0;
+  try { await apiOps.markRead(ids ? { ids } : { all: true }); } catch (e) { toastError(e, 'Could not mark as read'); void refreshNotifications(); }
+}
+/** SSE `resync`: events were dropped, so refetch every list. */
+function resync() { void refreshServers(); void refreshOps(); void refreshNotifications(); feed.rev++; }
 
 // ---------- live connection ----------
 let stream: Stream | null = null;
@@ -144,7 +167,7 @@ let fallback: (() => void) | null = null;
 function connect() {
   stream?.close();
   stream = openEvents({
-    onOpen: () => { retry = 0; servers.live = true; void refreshServers(); },
+    onOpen: () => { retry = 0; servers.live = true; void refreshServers(); void refreshNotifications(); },
     onError: () => {
       servers.live = false;
       stream?.close();
@@ -154,6 +177,8 @@ function connect() {
     op: upsertOp,
     server: upsertServer,
     activity: (a) => (feed.latest = a),
+    notification: onNotification,
+    resync,
   });
 }
 export function startLive() {
@@ -161,7 +186,7 @@ export function startLive() {
   void refreshOps();
   connect();
   // Fallback poll only while SSE is down.
-  fallback = poll(() => { if (!servers.live) void refreshServers(); }, 10000);
+  fallback = poll(() => { if (!servers.live) { void refreshServers(); void refreshNotifications(); } }, 10000);
 }
 export function stopLive() {
   stream?.close();
@@ -170,6 +195,9 @@ export function stopLive() {
   servers.list = [];
   servers.loaded = false;
   ops.list = [];
+  inbox.items = [];
+  inbox.unread = 0;
+  inbox.loaded = false;
 }
 
 // ---------- host status & global health ----------

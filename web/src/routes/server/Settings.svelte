@@ -1,5 +1,7 @@
 <script lang="ts">
   import Icon from '../../components/Icon.svelte';
+  import LimitsForm from '../../components/LimitsForm.svelte';
+  import { canReinstall, reinstall } from '../../lib/lifecycle';
   import { api, ApiError, type Server } from '../../lib/api';
   import { confirmDialog, toast, toastError } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';
@@ -8,6 +10,7 @@
   let { server: s }: { server: Server } = $props();
   const canEdit = $derived(can('config.write'));
   const canDelete = $derived(can('server.delete'));
+  const showReinstall = $derived(canEdit && canReinstall(s));
 
   let f = $state({ name: '', memory_mb: 0, port: 0, flags_profile: 'balanced' as Server['flags_profile'], autostart: false, rp_enabled: false, rp_max: 3, tags: '', notes: '' });
   let seed = '';
@@ -80,17 +83,30 @@
   {/if}
 </form>
 
-{#if canDelete}
+<div style="margin-top:var(--gap)"><LimitsForm server={s} /></div>
+
+{#if canDelete || showReinstall}
   <section class="card danger-zone" style="margin-top:24px">
     <div class="card-title" style="color:var(--danger)"><Icon name="alert" size={14} />Danger zone</div>
-    <div class="row between wrap">
+    {#if showReinstall}
+      <div class="row between wrap dz">
+        <div><b>Repair server jar</b><div class="sm muted">Downloads the server jar and loader files again. World, config and add-ons are kept.</div></div>
+        <button class="btn" onclick={() => reinstall(s, true)}><Icon name="refresh" size={15} />Repair jar…</button>
+      </div>
+      <div class="row between wrap dz">
+        <div><b>Reinstall server</b><div class="sm muted">Sets the server up again from scratch. Files in the server folder, including worlds, can be replaced.</div></div>
+        <button class="btn danger" onclick={() => reinstall(s, false)}><Icon name="refresh" size={15} />Reinstall…</button>
+      </div>
+    {/if}
+    {#if canDelete}<div class="row between wrap dz">
       <div><b>Delete this server</b><div class="sm muted">Removes it from Moss. You choose whether the world data is deleted too.</div></div>
       <button class="btn danger" onclick={del}><Icon name="trash" size={15} />Delete server…</button>
-    </div>
+    </div>{/if}
   </section>
 {/if}
 
 <style>
+  .dz + .dz { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
   .danger-zone { border-color: color-mix(in srgb, var(--danger), transparent 60%); }
   .rt { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin: 0; } .rt dt { font-size: var(--fs-xs); color: var(--muted); } .rt dd { margin: 2px 0 0; font-weight: 550; }
   @media (max-width: 860px) { form { grid-template-columns: minmax(0, 1fr) !important; } section[style*='grid-column'] { grid-column: auto !important; } }

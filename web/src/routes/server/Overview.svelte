@@ -1,12 +1,13 @@
 <script lang="ts">
   import Icon from '../../components/Icon.svelte';
-  import Sparkline from '../../components/Sparkline.svelte';
+  import MetricsPanel from '../../components/MetricsPanel.svelte';
   import PulseStrip from '../../components/PulseStrip.svelte';
   import HealthCards from '../../components/HealthCards.svelte';
   import AnsiLine from '../../components/AnsiLine.svelte';
   import States from '../../components/States.svelte';
   import StatusBadge from '../../components/StatusBadge.svelte';
-  import { api, errMsg, type Server, type StatSample, type TimelineEvent, type Finding, type UndoEntry } from '../../lib/api';
+  import { api, apiOps, errMsg, type Server, type MetricSample, type TimelineEvent, type Finding, type UndoEntry } from '../../lib/api';
+  import type { ChartDef } from '../../lib/metrics';
   import { poll, toast, toastError, confirmDialog } from '../../lib/stores.svelte';
   import { power, consequence } from '../../lib/actions';
   import { duration, bytes, relTime, pct } from '../../lib/format';
@@ -16,8 +17,6 @@
   let { server: s }: { server: Server } = $props();
   const id = $derived(s.id);
 
-  let samples = $state<StatSample[] | null>(null);
-  let statErr = $state('');
   let events = $state<TimelineEvent[] | null>(null);
   let findings = $state<Finding[]>([]);
   let fLoaded = $state(false);
@@ -27,9 +26,8 @@
 
   $effect(() => {
     const sid = id;
-    samples = null; events = null; fLoaded = false;
+    events = null; fLoaded = false;
     const stop = poll(async () => {
-      try { samples = (await api.stats(sid)).samples; statErr = ''; } catch (e) { statErr = errMsg(e); }
       if (s.capabilities.includes('console')) api.backlog(sid, 8).then((b) => (tail = b.lines.slice(-8))).catch(() => {});
     }, 5000);
     api.timeline(sid).then((e) => (events = e)).catch(() => (events = []));
@@ -50,11 +48,14 @@
   async function copy() {
     try { await navigator.clipboard.writeText(addr); toast('success', 'Address copied', { body: addr, timeout: 2200 }); } catch { toast('warn', 'Could not copy', { body: addr }); }
   }
-  const cpu = $derived((samples ?? []).map((x) => x.cpu));
-  const mem = $derived((samples ?? []).map((x) => x.mem));
-  const times = $derived((samples ?? []).map((x) => x.t));
-  const players = $derived((samples ?? []).map((x) => x.players ?? 0));
   const memMax = $derived(s.memory_mb * 1048576);
+  const defs = $derived<ChartDef[]>([
+    { id: 'cpu', label: 'CPU', icon: 'cpu', avg: 'cpu_avg', peak: 'cpu_max', max: 100, format: (v) => v.toFixed(0) + '%' },
+    { id: 'mem', label: 'Memory', icon: 'ram', avg: 'mem_avg', peak: 'mem_max', max: memMax, color: 'var(--info)', format: (v) => bytes(v) },
+    { id: 'players', label: 'Players', icon: 'users', avg: 'players_max', peak: 'players_max', color: 'var(--warn)', format: (v) => Math.round(v) + ' online', show: (m) => s.capabilities.includes('players') && m.some((x) => (x.players_max ?? 0) > 0) },
+  ]);
+  // Servers without /metrics (older backend): the last hour comes from the raw stats ring buffer.
+  const fallback = async (): Promise<MetricSample[]> => (await api.stats(s.id)).samples.map((x) => ({ t: x.t, cpu_avg: x.cpu, cpu_max: x.cpu, mem_avg: x.mem, mem_max: x.mem, players_max: x.players ?? 0 }));
 </script>
 
 <div class="grid hero-grid">
@@ -97,28 +98,9 @@
   </section>
 </div>
 
-<div class="grid cols-2 mt">
-  <section class="card" aria-label="CPU">
-    <div class="card-title"><Icon name="cpu" size={14} />CPU <span class="grow"></span><b class="tnum" style="color:var(--text)">{pct(s.cpu_pct)}</b></div>
-    {#if statErr && !samples}<States kind="error" text={statErr} />
-    {:else if !samples}<div class="skel" style="height:96px"></div>
-    {:else if !samples.length}<p class="muted sm" style="height:96px">No samples yet. Charts fill in while the server runs.</p>
-    {:else}<Sparkline data={cpu} times={times} height={96} min={0} max={100} grid label="CPU usage" format={(v) => v.toFixed(0) + '%'} />{/if}
-  </section>
-  <section class="card" aria-label="Memory">
-    <div class="card-title"><Icon name="ram" size={14} />Memory <span class="grow"></span><b class="tnum" style="color:var(--text)">{bytes(s.mem_bytes)}</b></div>
-    {#if !samples}<div class="skel" style="height:96px"></div>
-    {:else if !samples.length}<p class="muted sm" style="height:96px">No samples yet.</p>
-    {:else}<Sparkline data={mem} times={times} height={96} min={0} max={memMax} color="var(--info)" grid label="Memory usage" format={(v) => bytes(v)} />{/if}
-  </section>
+<div class="mt">
+  {#key s.id}<MetricsPanel title="Resources" icon="activity" load={(r) => apiOps.metrics(s.id, r)} {defs} {fallback} />{/key}
 </div>
-
-{#if s.capabilities.includes('players') && players.some((x) => x > 0)}
-  <section class="card mt" aria-label="Players over time">
-    <div class="card-title"><Icon name="users" size={14} />Players, last hour</div>
-    <Sparkline data={players} times={times} height={56} min={0} color="var(--warn)" label="Players" format={(v) => v + ' online'} />
-  </section>
-{/if}
 
 <section class="card mt" aria-label="Pulse timeline">
   <div class="card-title"><Icon name="activity" size={14} />Pulse · last 24 hours</div>

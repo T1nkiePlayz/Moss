@@ -18,6 +18,7 @@
   applyPrefs();
   void boot();
 
+  const gate = () => import('./routes/auth/Gate.svelte');
   const routes = {
     servers: () => import('./routes/Servers.svelte'),
     new: () => import('./routes/NewServer.svelte'),
@@ -61,8 +62,10 @@
 
 {#if auth.phase === 'loading'}
   <div class="boot"><Logo size={44} /><div class="bar indet" style="width:120px"><i></i></div></div>
-{:else if auth.phase === 'login' || auth.phase === 'denied'}
+{:else if auth.phase === 'login'}
   <Login />
+{:else if auth.phase === 'denied' || auth.phase === 'setup' || auth.phase === 'mfa' || auth.phase === 'throttled'}
+  <Lazy load={gate} />
 {:else if auth.phase === 'error'}
   <div class="boot"><States kind="error" title="Cannot reach Moss" text={auth.error || 'The backend did not respond.'} retry={() => boot()} /></div>
 {:else}
@@ -100,7 +103,7 @@
 <style>
   .boot { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 20px; padding: 20px; }
   .shell { display: flex; min-height: 100vh; }
-  .col-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .col-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-x: clip; }
   main { flex: 1; outline: none; }
   .page { max-width: 1280px; margin: 0 auto; padding: 24px 24px 48px; width: 100%; }
   .skip { position: fixed; left: 12px; top: -60px; z-index: 200; background: var(--a1); color: var(--a-ink); padding: 8px 14px; border-radius: 8px; font-weight: 600; transition: top .15s; }

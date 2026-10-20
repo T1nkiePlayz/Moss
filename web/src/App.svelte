@@ -8,7 +8,6 @@
   import Toasts from './components/Toasts.svelte';
   import ConfirmHost from './components/ConfirmHost.svelte';
   import OpsDrawer from './components/OpsDrawer.svelte';
-  import Palette from './components/Palette.svelte';
   import States from './components/States.svelte';
   import Overview from './routes/Overview.svelte';
   import { auth, boot, isAdmin } from './lib/auth.svelte';
@@ -96,7 +95,7 @@
     </nav>
   </div>
   <OpsDrawer />
-  {#if ui.palette}<Palette />{/if}
+  {#if ui.palette}{#await import('./components/Palette.svelte') then m}{@const P = m.default}<P />{/await}{/if}
 {/if}
 <ConfirmHost />
 <Toasts />

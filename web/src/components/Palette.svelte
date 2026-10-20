@@ -6,6 +6,8 @@
   import { fuzzy } from '../lib/fuzzy';
   import { power, backupNow, consequence } from '../lib/actions';
   import { can } from '../lib/auth.svelte';
+  import { api } from '../lib/api';
+  import { relTime } from '../lib/format';
 
   interface Item { id: string; title: string; hint: string; icon: string; group: string; run: () => void | Promise<void>; kw?: string }
   let q = $state('');
@@ -42,9 +44,31 @@
     }
     return out;
   });
+  // Backups, content and files come from the server-side search, after a short pause in typing.
+  let remote = $state<Item[]>([]);
+  let remoteFor = '';
+  $effect(() => {
+    const t = q.trim();
+    if (t.length < 2) { remote = []; remoteFor = ''; return; }
+    const h = setTimeout(async () => {
+      try {
+        const r = await api.searchAll(t, 5);
+        if (t !== q.trim()) return;
+        const sn = (id: string, n: string | null) => n ?? servers.list.find((x) => x.id === id)?.name ?? 'a server';
+        remote = [
+          ...r.backups.map((b): Item => ({ id: `r-b-${b.id}`, title: b.note || `Backup of ${b.server_name}`, hint: `Backup · ${b.server_name} · ${relTime(b.created_at)}`, icon: 'archive', group: 'Backups', run: () => navigate(serverHref(b.server_id, 'backups')) })),
+          ...r.content.map((c): Item => ({ id: `r-c-${c.server_id}-${c.id}`, title: c.title, hint: `${c.kind} · ${sn(c.server_id, c.server_name)}`, icon: 'package', group: 'Content', run: () => navigate(serverHref(c.server_id, 'content')) })),
+          ...r.files.map((f): Item => ({ id: `r-f-${f.server_id}-${f.path}`, title: f.path, hint: `File · ${f.server_name}`, icon: 'file', group: 'Files', run: () => navigate(serverHref(f.server_id, 'files')) })),
+        ];
+        remoteFor = t;
+      } catch { remote = []; }
+    }, 250);
+    return () => clearTimeout(h);
+  });
   const results = $derived.by(() => {
     if (!q.trim()) return items.filter((i) => i.group !== 'Actions' || i.id.startsWith('a-theme')).slice(0, 14);
-    return items.map((i) => ({ i, s: fuzzy(q, i.title + ' ' + (i.kw ?? '')) })).filter((x) => x.s >= 0).sort((a, b) => b.s - a.s).slice(0, 12).map((x) => x.i);
+    const local = items.map((i) => ({ i, s: fuzzy(q, i.title + ' ' + (i.kw ?? '')) })).filter((x) => x.s >= 0).sort((a, b) => b.s - a.s).slice(0, 12).map((x) => x.i);
+    return remoteFor === q.trim() ? [...local, ...remote] : local;
   });
   $effect(() => { q; sel = 0; });
   $effect(() => { input.focus(); document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = ''; prev?.focus?.(); }; });
@@ -65,7 +89,7 @@
   <div class="pal" role="dialog" aria-modal="true" aria-label="Command palette">
     <div class="in">
       <Icon name="search" size={18} />
-      <input bind:this={input} bind:value={q} onkeydown={key} placeholder="Search pages, servers and actions…" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-activedescendant={results[sel] ? 'pi-' + results[sel].id : undefined} aria-label="Search" autocomplete="off" spellcheck="false" />
+      <input bind:this={input} bind:value={q} onkeydown={key} placeholder="Search pages, servers, backups, content and files…" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-activedescendant={results[sel] ? 'pi-' + results[sel].id : undefined} aria-label="Search" autocomplete="off" spellcheck="false" />
       <kbd>esc</kbd>
     </div>
     <div class="list" id="pal-list" role="listbox" bind:this={list}>

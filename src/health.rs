@@ -48,7 +48,21 @@ pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
             _ => {}
         }
     }
+    f.extend(content_summary(st, s).await);
     f
+}
+
+/// One summary finding when the content check has warn/critical problems; details live in the Content tab.
+async fn content_summary(st: &St, s: &Srv) -> Option<Value> {
+    if !s.installed { return None; }
+    let c = crate::content::compat(st, s)?;
+    let found = crate::content::server_findings(st, s, &c).await.ok()?;
+    let bad: Vec<_> = found.iter().filter(|x| x.is_problem()).collect();
+    if bad.is_empty() { return None; }
+    let sev = if bad.iter().any(|x| x.severity == "critical") { "critical" } else { "warn" };
+    let title = if bad.len() == 1 { "1 content problem".to_string() } else { format!("{} content problems", bad.len()) };
+    Some(finding(format!("{}:content", s.id), sev, Some(&s.id), &title, "Installed mods or plugins have missing dependencies, conflicts or other compatibility problems.".into(),
+        bad.iter().take(5).map(|x| x.title.clone()).collect(), Some(json!({"label": "Review content", "kind": "open_tab", "tab": "content"}))))
 }
 
 pub async fn collect(st: &St, user: &User) -> ApiResult<Vec<Value>> {

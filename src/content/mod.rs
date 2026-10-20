@@ -13,17 +13,26 @@ use std::collections::HashMap;
 
 
 mod apply;
+mod check;
+mod identify;
 mod inventory;
 mod modrinth;
 mod plan;
 mod search;
+mod toggle;
+mod update_all;
 
 pub use apply::{check_updates, install, update};
+pub use check::{check_get, server_findings};
+pub use identify::identify;
+pub use toggle::toggle;
+pub use update_all::{update_all, update_all_plan};
 pub use inventory::{installed, patch_item, remove, resync};
 pub use plan::plan;
 pub use search::{project, providers, search};
 use inventory::*; use modrinth::*; use plan::*; use search::*;
 
+#[derive(Clone)]
 pub struct Compat { pub kind: &'static str, pub project_type: &'static str, pub loaders: Vec<&'static str>, pub game_version: Option<String>, pub dir: String, pub ext: &'static str, pub cf_class: Option<u32>, pub cf_loader: u32 }
 
 pub fn compat(st: &St, s: &Srv) -> Option<Compat> {

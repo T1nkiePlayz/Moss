@@ -19,7 +19,7 @@ pub(super) async fn users_create(State(st): State<St>, user: User, Json(r): Json
     let i2 = id.clone();
     st.db.call(move |c| c.execute("INSERT INTO users(id,email,role,linked,created_at) VALUES (?,?,?,0,?)", rusqlite::params![i2, e2, role, crate::db::now()])).await
         .map_err(|_| ApiError::conflict("user.exists", "that email already has access"))?;
-    st.audit(&user.email, "user.invite", &email, &r.role, None).await;
+    st.audit(&user.actor(), "user.invite", &email, &r.role, None).await;
     Ok((StatusCode::CREATED, Json(json!({"id": id, "email": email, "role": r.role, "linked": false}))))
 }
 pub(super) async fn users_patch(State(st): State<St>, user: User, Path(id): Path<String>, Json(r): Json<UserReq>) -> ApiResult<StatusCode> {
@@ -29,17 +29,17 @@ pub(super) async fn users_patch(State(st): State<St>, user: User, Path(id): Path
     let n = st.db.call(move |c| c.execute("UPDATE users SET role=? WHERE id=? AND role<>'owner'", [role, i])).await?;
     if n == 0 { return Err(ApiError::not_found("user")); }
     auth::drop_cached(&st, &id);
-    st.audit(&user.email, "user.role", &id, &r.role, None).await;
+    st.audit(&user.actor(), "user.role", &id, &r.role, None).await;
     Ok(StatusCode::NO_CONTENT)
 }
 pub(super) async fn users_delete(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<StatusCode> {
     user.require_admin()?;
     if id == user.id { return Err(ApiError::bad("user.self", "you cannot remove yourself")); }
-    let i = id.clone();
-    let n = st.db.call(move |c| c.execute("DELETE FROM users WHERE id=? AND role<>'owner' AND (role<>'admin' OR ?='owner')", rusqlite::params![i, user.role.clone()])).await?;
+    let (i, role) = (id.clone(), user.role.clone());
+    let n = st.db.call(move |c| c.execute("DELETE FROM users WHERE id=? AND role<>'owner' AND (role<>'admin' OR ?='owner')", rusqlite::params![i, role])).await?;
     if n == 0 { return Err(ApiError::forbidden("cannot remove this user")); }
     auth::drop_cached(&st, &id);
-    st.audit(&user.email, "user.remove", &id, "", None).await;
+    st.audit(&user.actor(), "user.remove", &id, "", None).await;
     Ok(StatusCode::NO_CONTENT)
 }
 pub(super) async fn access_get(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<Json<Value>> {
@@ -62,7 +62,7 @@ pub(super) async fn access_put(State(st): State<St>, user: User, Path(id): Path<
         for g in r.grants { c.execute("INSERT OR REPLACE INTO grants(server_id,user_id,bundle) VALUES (?,?,?)", [&i, &g.user_id, &g.bundle])?; }
         Ok(())
     }).await.map_err(|_| ApiError::bad("validation", "unknown user in grants"))?;
-    st.users.lock().unwrap().clear();
-    st.audit(&user.email, "access.update", &id, "", Some(&id)).await;
+    auth::drop_all(&st);
+    st.audit(&user.actor(), "access.update", &id, "", Some(&id)).await;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -45,3 +45,7 @@ pub fn prune_history(c: &Connection) -> rusqlite::Result<()> {
 pub fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
+
+/// Run all migrations on a scratch connection (unit tests of other modules).
+#[cfg(test)]
+pub fn migrate_for_tests(c: &Connection) { migrations::run(c).unwrap() }

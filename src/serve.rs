@@ -14,7 +14,7 @@ pub async fn build_state(cfg: config::Config) -> anyhow::Result<state::St> {
         http: download::client(&contact), cfg, db, bus, started: Instant::now(),
         live: Mutex::new(HashMap::new()), hubs: Mutex::new(HashMap::new()), stats: Mutex::new(HashMap::new()), tickets: Mutex::new(HashMap::new()),
         ops: Mutex::new(ops::Registry::default()), locks: Mutex::new(HashMap::new()), cache: Mutex::new(HashMap::new()), users: Mutex::new(HashMap::new()),
-        jwks: Mutex::new(None), host: Mutex::new(platform::HostSampler::default()),
+        jwks: Mutex::new(None), guard: Default::default(), host: Mutex::new(platform::HostSampler::default()),
         cf: Mutex::new(Default::default()), cf_sem: tokio::sync::Semaphore::new(curseforge::CONCURRENCY),
     }))
 }
@@ -36,10 +36,10 @@ pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     let addr = format!("{}:{}", cfg.bind, cfg.port);
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}"))?;
     if cfg.dev() { tracing::warn!("AUTH DISABLED (dev mode) — anyone who can reach {addr} has full control"); }
-    else if cfg.owner_email_list().is_empty() { tracing::warn!("MOSS_OWNER_EMAILS is not set: the first verified account to sign in becomes the owner. Set it to pin ownership."); }
+    else { crate::auth::setup::ensure_token(&st).await?; }
     if !cfg.dev() && cfg.bind != "127.0.0.1" && cfg.bind != "::1" { tracing::warn!("listening on {addr}: put Moss behind a TLS reverse proxy before exposing it to a network"); }
     tracing::info!("Moss {} listening on http://{addr}  (data: {})", env!("CARGO_PKG_VERSION"), cfg.data_dir.display());
-    axum::serve(listener, api::router(st)).with_graceful_shutdown(async {
+    axum::serve(listener, api::router(st).into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(async {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("signal");
         tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
         tracing::info!("shutting down the controller — game servers keep running");

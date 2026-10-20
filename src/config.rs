@@ -37,6 +37,12 @@ pub struct Config {
     /// Edge function URL for CurseForge; empty = `<SUPABASE_URL>/functions/v1/curseforge`, `off` disables CurseForge.
     #[arg(long, env = "MOSS_CURSEFORGE_PROXY", default_value = "")]
     pub curseforge_proxy: String,
+    /// MFA policy: `off`, `admins` (owner/admin accounts need an aal2 session) or `all`.
+    #[arg(long, env = "MOSS_REQUIRE_MFA", default_value = "off")]
+    pub require_mfa: String,
+    /// Trust `X-Forwarded-For` for the client address (only behind a reverse proxy that sets it).
+    #[arg(long, env = "MOSS_TRUST_PROXY", default_value_t = false, action = clap::ArgAction::Set)]
+    pub trust_proxy: bool,
     /// Expose the simulated game server runtime (development and demos).
     #[arg(long, env = "MOSS_DEV_RUNTIMES", default_value_t = false, action = clap::ArgAction::Set)]
     pub dev_runtimes: bool,
@@ -64,6 +70,7 @@ impl Config {
         } else if self.supabase_url.is_empty() {
             anyhow::bail!("SUPABASE_URL is required in supabase auth mode (or run with MOSS_AUTH=dev on loopback)");
         }
+        if crate::auth::MfaMode::parse(&self.require_mfa).is_none() { anyhow::bail!("MOSS_REQUIRE_MFA must be off, admins or all"); }
         let u = &self.curseforge_api_url;
         if !(u.starts_with("https://") || u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost")) {
             anyhow::bail!("MOSS_CURSEFORGE_API_URL must be https (or loopback http for tests)");

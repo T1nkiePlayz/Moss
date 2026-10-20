@@ -3,12 +3,17 @@ use super::*;
 
 pub(super) async fn auth_config(State(st): State<St>) -> Json<Value> {
     let claimed = st.db.call(|c| c.query_row("SELECT COUNT(*) FROM users WHERE role='owner'", [], |r| r.get::<_, i64>(0))).await.unwrap_or(0) > 0;
-    Json(json!({"mode": if st.cfg.dev() { "dev" } else { "supabase" }, "supabase_url": st.cfg.supabase_url, "supabase_anon_key": st.cfg.supabase_anon_key, "owner_claimed": claimed}))
+    let (setup_required, access_message) = (auth::setup::pending(&st).await, st.setting("access_message", "").await);
+    Json(json!({"mode": if st.cfg.dev() { "dev" } else { "supabase" }, "supabase_url": st.cfg.supabase_url, "supabase_anon_key": st.cfg.supabase_anon_key,
+        "owner_claimed": claimed, "setup_required": setup_required, "access_message": access_message}))
 }
 
-pub(super) async fn me(user: User) -> Json<Value> {
+/// `GET /me` is exempt from the MFA gate so the UI can tell a blocked user what to do.
+pub(super) async fn me(State(st): State<St>, auth::MfaExempt(user): auth::MfaExempt) -> Json<Value> {
     let perms: Vec<&str> = if user.is_admin() { auth::ALL_PERMS.to_vec() } else { vec![] };
-    Json(json!({"id": user.id, "email": user.email, "role": user.role, "permissions": perms}))
+    let required = !st.cfg.dev() && user.mfa_required(st.cfg.mfa_mode());
+    Json(json!({"id": user.id, "email": user.email, "role": user.role, "permissions": perms,
+        "mfa": {"required": required, "satisfied": !required || user.mfa_satisfied()}}))
 }
 
 pub(super) async fn ticket(State(st): State<St>, user: User) -> ApiResult<Json<Value>> {
@@ -50,6 +55,6 @@ pub(super) async fn java_install(State(st): State<St>, user: User, Json(r): Json
     user.require_admin()?;
     if ![8, 11, 17, 21, 25].contains(&r.major) { return Err(ApiError::bad("java.version", "supported majors: 8, 11, 17, 21, 25")); }
     let op = ops::spawn_op(&st, "java.install", format!("Install Java {}", r.major), None, true, move |ctx| crate::java::install_managed(ctx, r.major));
-    st.audit(&user.email, "java.install", &format!("Java {}", r.major), "", None).await;
+    st.audit(&user.actor(), "java.install", &format!("Java {}", r.major), "", None).await;
     Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
 }

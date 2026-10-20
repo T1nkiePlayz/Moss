@@ -66,6 +66,7 @@ pub struct Inner {
     pub cache: Mutex<HashMap<String, (Instant, Value)>>,
     pub users: Mutex<HashMap<String, (Instant, crate::auth::User)>>,
     pub jwks: Mutex<Option<(Instant, Value)>>,
+    pub guard: crate::auth::Guard,
     pub host: Mutex<crate::platform::HostSampler>,
     pub cf: Mutex<crate::providers::curseforge::Limiter>,
     pub cf_sem: tokio::sync::Semaphore,

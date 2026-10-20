@@ -24,8 +24,10 @@ mod assets;
 mod servers;
 mod session;
 mod settings;
+mod setup;
+mod tokens;
 
-use access::*; use activity::*; use assets::static_files; use servers::*; use session::*; use settings::*;
+use access::*; use activity::*; use assets::static_files; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
 
 type Q = Query<HashMap<String, String>>;
 
@@ -90,6 +92,9 @@ pub fn router(st: St) -> Router {
         .route("/users", get(users_list).post(users_create))
         .route("/users/{id}", patch(users_patch).delete(users_delete))
         .route("/servers/{id}/access", get(access_get).put(access_put))
+        .route("/setup/claim", post(setup_claim))
+        .route("/tokens", get(tokens_list).post(tokens_create))
+        .route("/tokens/{id}", axum::routing::delete(tokens_delete))
         .route("/settings", get(settings_get).put(settings_put))
         .route("/events", get(events))
         .fallback(|| async { ApiError::not_found("endpoint") });

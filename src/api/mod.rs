@@ -46,7 +46,7 @@ pub fn take_ticket(st: &St, t: Option<&String>) -> ApiResult<User> {
 }
 
 pub fn router(st: St) -> Router {
-    use crate::{backups, console, content, files, health, sched, undo};
+    use crate::{backups, cfgfiles, console, content, files, health, sched, undo};
     let api = Router::new()
         .route("/auth/config", get(auth_config))
         .route("/me", get(me))
@@ -66,6 +66,9 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/timeline", get(server_timeline))
         .route("/servers/{id}/health", get(health::server_health))
         .route("/servers/{id}/properties", get(files::props_get).put(files::props_put))
+        .route("/servers/{id}/config", get(cfgfiles::list))
+        .route("/servers/{id}/config/{file}", get(cfgfiles::get).put(cfgfiles::put))
+        .route("/servers/{id}/config/{file}/diff", get(cfgfiles::diff))
         .route("/servers/{id}/console/backlog", get(console::backlog))
         .route("/servers/{id}/console", get(console::ws))
         .route("/servers/{id}/files", get(files::list).delete(files::delete))

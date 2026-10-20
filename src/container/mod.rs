@@ -88,8 +88,10 @@ pub fn view(s: &Srv) -> Value {
 
 // ---- engine handle (detected lazily, cached briefly) --------------------------------------------------------------
 
+type Detected = (Instant, Result<Arc<dyn Engine>, String>);
+
 #[derive(Default)]
-pub struct Handle { cached: Mutex<Option<(Instant, Result<Arc<dyn Engine>, String>)>> }
+pub struct Handle { cached: Mutex<Option<Detected>> }
 
 impl Handle {
     /// Install a ready engine (tests).

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../../components/Icon.svelte';
   import LimitsForm from '../../components/LimitsForm.svelte';
+  import IsolationForm from '../../components/IsolationForm.svelte';
   import { canReinstall, reinstall } from '../../lib/lifecycle';
   import { api, ApiError, type Server } from '../../lib/api';
   import { confirmDialog, toast, toastError } from '../../lib/stores.svelte';
@@ -84,6 +85,8 @@
 </form>
 
 <div style="margin-top:var(--gap)"><LimitsForm server={s} /></div>
+
+<div style="margin-top:var(--gap)"><IsolationForm server={s} /></div>
 
 {#if canDelete || showReinstall}
   <section class="card danger-zone" style="margin-top:24px">

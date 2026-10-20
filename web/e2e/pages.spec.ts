@@ -38,3 +38,20 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   });
 }
+
+test('server settings show the isolation section, and a clear message when no engine exists', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('a[href^="#/servers/"]:not([href$="/new"])').first().waitFor();
+  const first = (await page.locator('a[href^="#/servers/"]:not([href$="/new"])').first().getAttribute('href'))!.replace('#/', '');
+  await page.goto(`/#/${first}/settings`);
+  await expect(page.getByRole('heading', { name: 'Isolation' }).or(page.getByText('Isolation', { exact: true }))).toBeVisible();
+  await expect(page.getByText(/Podman 5\.2\.2 \(rootless\)/)).toBeVisible();
+  await page.getByLabel('Mode').selectOption('container');
+  await page.getByRole('button', { name: 'Save isolation' }).click();
+  await expect(page.getByText('Isolation saved')).toBeVisible();
+  await audit(page, 'settings with container mode');
+  await page.goto(`/?scenario=noengine#/${first}/settings`);
+  await expect(page.getByText('No container engine')).toBeVisible();
+  await expect(page.getByText(/Neither Docker nor Podman was found/).first()).toBeVisible();
+  await audit(page, 'settings without an engine');
+});

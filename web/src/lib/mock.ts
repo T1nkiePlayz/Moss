@@ -197,6 +197,7 @@ function setState(s: A.Server, st: A.ServerState, detail: string | null = null) 
 function doAction(s: A.Server, a: string) {
   if (a === 'start') {
     s.desired = 'running'; setState(s, 'starting');
+    if (s.container) s.container.running_in_container = s.isolation === 'container';
     log('server.start', s.name);
     setTimeout(() => setState(s, 'running'), 2500);
   } else if (a === 'stop' || a === 'kill') {
@@ -379,6 +380,7 @@ const scenario = new URLSearchParams(location.search).get('scenario') ?? '';
 let gate = ['setup', 'denied', 'mfa', 'mfa-enrol', 'throttled'].includes(scenario) ? scenario : '';
 const macos = scenario === 'macos';
 const failing = scenario === 'errors';
+const noEngine = scenario === 'noengine';
 const NOPE = Symbol('unhandled');
 const SETUP_TOKEN = 'moss-setup-demo-token';
 let claimTries = 0;
@@ -394,9 +396,15 @@ const ensureLimits = (s: A.Server) => {
     detail: macos ? 'cgroups are not available on macOS' : s.name === 'Creative Plots' ? 'cgroup v2 is mounted read-only for this process (no delegated subtree)' : null,
   };
 };
+const imageOf = (s: A.Server) => s.container?.image_override ?? `docker.io/library/eclipse-temurin:${s.java_major}-jre`;
+const ensureIsolation = (s: A.Server) => {
+  s.isolation ??= 'process';
+  s.container = { image: imageOf(s), image_override: s.container?.image_override ?? null, running_in_container: s.container?.running_in_container ?? false, restart_needed: false };
+};
 const worldSets: Record<string, string[]> = {};
 const normalize = () => {
   servers.forEach(ensureLimits);
+  servers.forEach(ensureIsolation);
   backups.forEach((b, i) => {
     b.worlds ??= worldSets[b.server_id] ??= b.server_id !== servers[3].id ? ['world', 'world_nether', 'world_the_end'] : ['world'];
     b.locked ??= i === 1;
@@ -546,6 +554,31 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
     ensureLimits(s);
     Object.assign(s.limits!, { memory_mb: b.memory_limit_mb ?? null, cpu_pct: b.cpu_limit_pct ?? null, pids: b.pids_limit ?? null });
     log('server.update', s.name, 'resource limits');
+    emitServer(s);
+    return s;
+  }
+  if (p === '/container/status') {
+    return noEngine
+      ? { available: false, engine: null, version: null, rootless: null, message: 'Neither Docker nor Podman was found. Install one of them (rootless Podman is the safest choice), make sure the user running Moss can use it, then check again.', outbound_restricted: false, default_image: 'docker.io/library/eclipse-temurin:<java version>-jre' }
+      : { available: true, engine: 'podman', version: '5.2.2', rootless: true, message: null, outbound_restricted: false, default_image: 'docker.io/library/eclipse-temurin:<java version>-jre' };
+  }
+  if (M(/^\/servers\/([^/]+)\/container\/pull$/)) {
+    const s = sv(m![1]);
+    return op2('container.pull', `Download ${imageOf(s)}`, s.id, ['Pulling fs layer', 'Downloading', 'Extracting', 'Verifying'], () => {});
+  }
+  if (M(/^\/servers\/([^/]+)$/) && method === 'PATCH' && ('isolation' in b || 'container_image' in b)) {
+    const s = sv(m![1]);
+    const fields: { path: string; message: string }[] = [];
+    if (b.isolation && !['process', 'container'].includes(b.isolation)) fields.push({ path: 'isolation', message: 'process | container' });
+    if (b.container_image && !/^(ghcr\.io\/|(docker\.io\/library\/)?eclipse-temurin:|azul\/zulu-openjdk:|amazoncorretto:)/.test(b.container_image)) fields.push({ path: 'container_image', message: 'Only eclipse-temurin, azul/zulu-openjdk, amazoncorretto and ghcr.io images are allowed.' });
+    if (fields.length) throw new ApiError(400, 'validation', 'Some values are not allowed', fields);
+    if (b.isolation === 'container' && noEngine) throw new ApiError(409, 'container.engine_missing', 'Neither Docker nor Podman was found. Install one of them, then try again.');
+    if (b.isolation) s.isolation = b.isolation;
+    if ('container_image' in b) s.container = { ...s.container!, image_override: b.container_image ?? null };
+    ensureIsolation(s);
+    s.container!.restart_needed = (s.state === 'running' || s.state === 'starting') && s.container!.running_in_container !== (s.isolation === 'container');
+    log('server.isolation', s.name, s.isolation);
+    if (s.isolation === 'container') startOp('container.pull', `Download ${imageOf(s)}`, s.id, ['Pulling fs layer', 'Downloading', 'Extracting'], {});
     emitServer(s);
     return s;
   }

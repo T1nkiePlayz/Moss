@@ -56,7 +56,7 @@ fn spawn_process(st: &St, s: &Srv, argv: &[String], dir: &std::path::Path, mdir:
     let cg_dir = limit_cgroup(st, s);
     let mut cmd = tokio::process::Command::new("/bin/sh");
     cmd.arg("-c").arg(RUN_SCRIPT).arg("moss-run").args(argv).current_dir(dir).env_clear()
-        .env("PATH", platform::GAME_PATH).env("HOME", &dir).env("LANG", platform::GAME_LANG).env("MOSS_DIR", mdir)
+        .env("PATH", platform::GAME_PATH).env("HOME", dir).env("LANG", platform::GAME_LANG).env("MOSS_DIR", mdir)
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     if let Some(d) = &cg_dir { cmd.env("MOSS_CGROUP", d); }
     unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }

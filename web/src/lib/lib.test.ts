@@ -78,3 +78,26 @@ describe('pulse', () => {
     expect(buildPulse([], false, 24, now).uptimePct).toBe(0);
   });
 });
+
+import { describeEngine, imageHint } from './container';
+describe('container isolation text', () => {
+  it('explains a missing engine in plain words', () => {
+    const i = describeEngine({ available: false, engine: null, version: null, rootless: null, message: 'Neither Docker nor Podman was found.', outbound_restricted: false, default_image: '' });
+    expect(i.tone).toBe('warn');
+    expect(i.badge).toBe('No container engine');
+    expect(i.detail).toContain('Neither Docker nor Podman');
+  });
+  it('names the engine and mode, and nudges rootful Docker users', () => {
+    const ok = describeEngine({ available: true, engine: 'podman', version: '5.2.0', rootless: true, message: null, outbound_restricted: false, default_image: '' });
+    expect(ok.badge).toBe('Podman 5.2.0 (rootless)');
+    expect(describeEngine({ available: true, engine: 'docker', version: '27.0', rootless: false, message: null, outbound_restricted: false, default_image: '' }).detail).toContain('Rootless Podman');
+  });
+  it('hints at image problems without being the authority', () => {
+    expect(imageHint('')).toBeNull();
+    expect(imageHint('eclipse-temurin:21-jre')).toBeNull();
+    expect(imageHint('ghcr.io/me/java:21')).toBeNull();
+    expect(imageHint('eclipse-temurin')).toContain('tag');
+    expect(imageHint('ubuntu:24.04')).toContain('allowed');
+    expect(imageHint('ghcr.io/me/java:21 --privileged')).toContain('spaces');
+  });
+});

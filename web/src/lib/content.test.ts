@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { ContentFinding } from './api';
+import type { ContentFinding, PackDiff, StagingRun } from './api';
 import {
   compareRelease, contentCounts, countFindings, criticalConflicts, findBackupId, groupFindings, isDowngrade, modpackFileProblem,
-  normalizeItem, pageUrl, parseModpackRef, sortFindings, sortVersions, sourceBadge, versionDiff, visibleVersions, worstSeverity, planCounts, removalConflicts,
+  normalizeItem, packChangeText, packDiffCounts, pageUrl, parseModpackRef, sortFindings, sortVersions, sourceBadge, stagingActive, stagingSummary, versionDiff, visibleVersions, worstSeverity, planCounts, removalConflicts,
 } from './content';
 
 const f = (id: string, severity: ContentFinding['severity']): ContentFinding => ({ id, severity, item: null, title: id, detail: '', evidence: [], action: null });
@@ -123,5 +123,37 @@ describe('removalConflicts', () => {
     expect(r.map((f) => f.item)).toEqual(['sodium-extra']);
     expect(r[0].severity).toBe('critical');
     expect(removalConflicts([sodium, extra], [sodium, extra])).toEqual([]);
+  });
+});
+
+describe('staged copies and pack diffs', () => {
+  const run = (state: StagingRun['state'], report: StagingRun['report'] = {}): StagingRun => ({ id: 'r', server_id: 's', kind: 'update_all', state, include_world: false, report, port: 30000, operation_id: null, created_at: '', expires_at: '', expired: false, can_promote: false });
+  it('knows which states are still running', () => {
+    expect(['building', 'testing'].every((s) => stagingActive(run(s as StagingRun['state'])))).toBe(true);
+    expect(['healthy', 'unhealthy', 'failed'].some((s) => stagingActive(run(s as StagingRun['state'])))).toBe(false);
+  });
+  it('summarises a healthy copy with its start time and log counts', () => {
+    const s = stagingSummary(run('healthy', { ready_secs: 14.2, errors: 0, warnings: 1 }));
+    expect(s.tone).toBe('ok');
+    expect(s.headline).toContain('14.2 seconds');
+    expect(s.lines[0]).toBe('0 errors and 1 warning in the log.');
+  });
+  it('explains an unhealthy copy and says the real server was left alone', () => {
+    const s = stagingSummary(run('unhealthy', { reasons: ['The server crashed.'], errors: 1, warnings: 0 }));
+    expect(s.tone).toBe('danger');
+    expect(s.headline).toContain('not applied');
+    expect(s.lines).toContain('The server crashed.');
+  });
+  it('shows the error of a failed test and a neutral message while building', () => {
+    expect(stagingSummary(run('failed', { error: 'There are no content updates to try.' })).lines).toEqual(['There are no content updates to try.']);
+    expect(stagingSummary(run('building')).tone).toBe('info');
+  });
+  it('counts a pack diff and formats a change', () => {
+    const ch = (t: string, f: string | null, to: string | null) => ({ title: t, path: `mods/${t}.jar`, from: f, to, reason: null });
+    const d = { files: { added: [ch('a', null, '1')], removed: [], updated: [ch('b', '1', '2'), ch('c', '1', '2')], held: [], unchanged: 3 }, overrides: { added: ['x'], updated: [], user_modified: [{ path: 'y', reason: '' }], removed_upstream: [], unchanged: 0 } } as unknown as PackDiff;
+    expect(packDiffCounts(d)).toEqual({ added: 1, removed: 0, updated: 2, held: 0, configNew: 1, configUpdated: 0, kept: 1 });
+    expect(packChangeText(ch('b', '1', '2'))).toBe('1 → 2');
+    expect(packChangeText(ch('a', null, '1'))).toBe('1');
+    expect(packChangeText(ch('r', '9', null))).toBe('9');
   });
 });

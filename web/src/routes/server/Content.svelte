@@ -11,7 +11,9 @@
   import InstalledList from '../../components/content/InstalledList.svelte';
   import CompatPanel from '../../components/content/CompatPanel.svelte';
   import ItemDrawer from '../../components/content/ItemDrawer.svelte';
-  import { api, download, errMsg, modpackExportPath, type ChangePlan, type ContentFinding, type ContentItem, type Hit, type Operation, type Project, type ProviderId, type ProviderInfo, type SearchResult, type Server } from '../../lib/api';
+  import ModpackPanel from '../../components/content/ModpackPanel.svelte';
+  import StagedTest from '../../components/content/StagedTest.svelte';
+  import { api, download, errMsg, modpackExportPath, type ChangePlan, type ContentFinding, type ContentItem, type Hit, type Operation, type PackInfo, type Project, type ProviderId, type ProviderInfo, type SearchResult, type Server, type StagingRequest } from '../../lib/api';
   import { normalizeItem, removalConflicts } from '../../lib/content';
   import { compact, bytes, relTime, num, initials } from '../../lib/format';
   import { onOp, ops, toast, toastError, trackOp, undoToast } from '../../lib/stores.svelte';
@@ -65,7 +67,9 @@
   let sErr = $state('');
   let searching = $state(false);
   let detail = $state<{ hit: Hit; project: Project | null; err: string } | null>(null);
-  let plan = $state<null | { plan: ChangePlan; title: string; label: string; run: () => Promise<Operation | Operation[]> }>(null);
+  let plan = $state<null | { plan: ChangePlan; title: string; label: string; run: () => Promise<Operation | Operation[]>; alt?: { label: string; run: () => void } }>(null);
+  let staged = $state<null | { request: StagingRequest; title: string; applyLabel: string }>(null);
+  let packKey = $state(0);
   let applying = $state(false);
 
   async function loadItems() { iErr = ''; try { items = (await api.content(s.id)).items.map(normalizeItem); reloadKey++; } catch (e) { iErr = errMsg(e); } }
@@ -89,7 +93,8 @@
 
   // react to finished operations for this server
   $effect(() => onOp(async (o) => {
-    if (o.server_id !== s.id || !/^(content|modpack|upgrade)/.test(o.kind) || o.state !== 'completed') return;
+    if (o.server_id !== s.id || !/^(content|modpack|upgrade|staging)/.test(o.kind) || o.state !== 'completed') return;
+    packKey++;
     await loadItems();
     try {
       const u = (await api.undoList(s.id))[0];
@@ -131,7 +136,8 @@
     try {
       const p = await api.updateAllPlan(s.id);
       if (!p.items.length) { toast('success', 'Everything is up to date'); updates = {}; return; }
-      plan = { plan: p, title: `Update ${p.items.length} ${p.items.length === 1 ? 'item' : 'items'}`, label: 'Update all', run: async () => (await api.updateAll(s.id)).operation };
+      plan = { plan: p, title: `Update ${p.items.length} ${p.items.length === 1 ? 'item' : 'items'}`, label: 'Update all', run: async () => (await api.updateAll(s.id)).operation,
+        alt: canManage ? { label: 'Try on a copy first', run: () => { plan = null; staged = { request: { kind: 'update_all' }, title: 'Try the updates on a copy first', applyLabel: 'Apply the updates' }; } } : undefined };
     } catch (e) { toastError(e, 'Could not build the update plan'); }
   }
   async function apply() {
@@ -146,6 +152,7 @@
       const r = await api.checkUpdates(s.id);
       updates = Object.fromEntries(r.updates.map((u) => [u.item_id, { latest: u.latest, version_id: u.version_id }]));
       toast(r.updates.length ? 'info' : 'success', r.updates.length ? `${r.updates.length} update${r.updates.length > 1 ? 's' : ''} available` : 'Everything is up to date');
+      if (r.warnings?.length) toast('warn', 'Some updates could not be checked', { body: r.warnings.join(' ') });
     } catch (e) { toastError(e, 'Update check failed'); }
     checking = false;
   }
@@ -241,6 +248,7 @@
   {#if iErr}<States kind="error" text={iErr} retry={loadItems} />
   {:else if !items}<States kind="loading" rows={4} />
   {:else}
+    {#if s.content_kind === 'mods'}<ModpackPanel server={s} {canManage} reloadKey={packKey} onoperation={(o) => track(o)} ontest={(p: PackInfo, token: string) => (staged = { request: { kind: 'pack_update', pack: { install_id: p.id, token } }, title: `Try the ${p.name} update on a copy first`, applyLabel: 'Update the pack' })} />{/if}
     <CompatPanel serverId={s.id} {items} {reloadKey} busy={busyFinding} onaction={runFinding} />
     {#each tracked as id (id)}
       {@const o = ops.list.find((x) => x.id === id)}
@@ -337,7 +345,9 @@
   <Importer server={s} onclose={() => (importer = null)} onstarted={(o: Operation) => { importer = null; track(o); view = 'installed'; }} />
 {/if}
 
-{#if plan}<PlanModal plan={plan.plan} title={plan.title} confirmLabel={plan.label} busy={applying} onconfirm={apply} oncancel={() => (plan = null)} />{/if}
+{#if staged}<StagedTest server={s} request={staged.request} title={staged.title} applyLabel={staged.applyLabel} onclose={() => (staged = null)} onpromoted={(o) => track(o)} />{/if}
+
+{#if plan}<PlanModal plan={plan.plan} alt={plan.alt} title={plan.title} confirmLabel={plan.label} busy={applying} onconfirm={apply} oncancel={() => (plan = null)} />{/if}
 
 <style>
   .cnt { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--a-ink); color: var(--a-text); font-size: 11px; margin-left: 2px; }

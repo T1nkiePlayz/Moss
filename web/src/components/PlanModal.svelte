@@ -6,8 +6,8 @@
   import { criticalConflicts, versionDiff } from '../lib/content';
   import type { ChangePlan } from '../lib/api';
   // "Review changes" modal shared by install / update / remove flows.
-  let { plan, title = 'Review changes', confirmLabel = 'Apply changes', busy = false, onconfirm, oncancel }: {
-    plan: ChangePlan; title?: string; confirmLabel?: string; busy?: boolean; onconfirm: () => void; oncancel: () => void;
+  let { plan, title = 'Review changes', confirmLabel = 'Apply changes', busy = false, alt, onconfirm, oncancel }: {
+    plan: ChangePlan; title?: string; confirmLabel?: string; busy?: boolean; alt?: { label: string; run: () => void }; onconfirm: () => void; oncancel: () => void;
   } = $props();
   const tone = { install: 'ok', replace: 'warn', remove: 'danger' } as const;
   const sign = { install: '+', replace: '↻', remove: '−' } as const;
@@ -49,6 +49,7 @@
   {#if plan.requires_restart}<div class="banner info mt-s"><Icon name="refresh" size={16} />A server restart is required for this to take effect.</div>{/if}
   {#snippet footer()}
     <button class="btn" onclick={oncancel}>Cancel</button>
+    {#if alt}<button class="btn" disabled={busy} onclick={alt.run}>{alt.label}</button>{/if}
     <button class="btn {critical.length ? 'danger solid' : 'primary'}" disabled={busy || blocked} onclick={onconfirm} data-autofocus={critical.length ? undefined : ''}>{busy ? 'Working…' : critical.length ? `${confirmLabel} anyway` : confirmLabel}</button>
   {/snippet}
 </Modal>

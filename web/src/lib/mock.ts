@@ -358,7 +358,7 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     if (sub === '/files/mkdir') { fs[s.id][b.path + '/'] = ''; return; }
     if (sub === '/files/rename') { for (const k of Object.keys(fs[s.id])) if (k === b.from || k.startsWith(b.from + '/')) { fs[s.id][b.to + k.slice(b.from.length)] = fs[s.id][k]; delete fs[s.id][k]; } return; }
     if (sub === '/files/upload') { const pth = qs.get('path') ?? ''; for (const f of (body as FormData).getAll('file') as File[]) fs[s.id][(pth ? pth + '/' : '') + f.name] = BIN.test(f.name) ? '\0'.repeat(Math.min(f.size, 5000)) : await f.text(); return; }
-    if (/^\/(content|upgrade|modpacks)(\/|$)/.test(sub)) {
+    if (/^\/(content|upgrade|modpacks|staging)(\/|$)/.test(sub)) {
       const r = await handleContent({ uid, now, ago, op: (...a) => startOp(...a), hits, cfHits, log, pushUndo, backups, content, emitServer }, s, sub, method, b);
       if (r !== NONE) return r;
     }

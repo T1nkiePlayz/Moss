@@ -2,6 +2,8 @@
   import Icon from '../../components/Icon.svelte';
   import States from '../../components/States.svelte';
   import OpCard from '../../components/OpCard.svelte';
+  import StagedTest from '../../components/content/StagedTest.svelte';
+  import { can } from '../../lib/auth.svelte';
   import { api, errMsg, type Server, type UpgradeContent, type UpgradePlan, type Versions } from '../../lib/api';
   import { contentCounts, findBackupId, isDowngrade, visibleVersions } from '../../lib/content';
   import { ops, toastError, trackOp } from '../../lib/stores.svelte';
@@ -75,6 +77,9 @@
   const live = $derived(!!op && (op.state === 'queued' || op.state === 'running'));
   const active = $derived(['running', 'starting', 'stopping', 'installing'].includes(s.state));
   const backupId = $derived(op ? findBackupId(op.log) : null);
+  let testing = $state(false);
+  const canTry = $derived(can('content.manage') && can('config.write'));
+  const tryable = $derived(!!plan && plan.can_proceed && (!downgrade || ack) && !busy);
   const ready = $derived(!!plan && plan.can_proceed && !active && (!downgrade || ack) && !busy && !live);
 
   async function stop() {
@@ -220,7 +225,7 @@
             <label class="row ack"><input type="checkbox" class="check" bind:checked={ack} /><span class="sm"><b>This is a downgrade.</b> Worlds saved by a newer version may be corrupted or fail to load. I have a backup and want to continue.</span></label>
           {/if}
           {#if startErr}<div class="banner danger" role="alert"><Icon name="x-circle" size={16} />{startErr}</div>{/if}
-          <div class="row end"><button class="btn primary lg" disabled={!ready} onclick={confirm}>{busy ? 'Starting…' : `Upgrade to ${plan.to.game_version}`}</button></div>
+          <div class="row end g6">{#if canTry}<button class="btn lg" disabled={!tryable} onclick={() => (testing = true)} title="Starts a temporary copy of this server, upgrades the copy and checks that it starts">Try upgrade on a copy first</button>{/if}<button class="btn primary lg" disabled={!ready} onclick={confirm}>{busy ? 'Starting…' : `Upgrade to ${plan.to.game_version}`}</button></div>
         </div>
       </div>
     {/if}
@@ -237,6 +242,10 @@
     {/if}
   </div>
 </div>
+
+{#if testing && plan}
+  <StagedTest server={s} request={{ kind: 'upgrade', upgrade: { game_version: plan.to.game_version, loader_version: loaderVer || plan.to.loader_version || undefined, content: strategy, ...(downgrade ? { confirm_downgrade: true } : {}) } }} title="Try the upgrade to {plan.to.game_version} on a copy first" applyLabel="Upgrade the real server" onclose={() => (testing = false)} onpromoted={(o) => (opId = o.id)} />
+{/if}
 
 <style>
   .page { display: flex; flex-direction: column; gap: 16px; max-width: 920px; }

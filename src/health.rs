@@ -7,6 +7,16 @@ fn finding(id: String, sev: &str, server: Option<&str>, title: &str, detail: Str
     json!({"id": id, "severity": sev, "server_id": server, "title": title, "detail": detail, "evidence": evidence, "action": action})
 }
 
+/// Info finding when limits were requested but this host cannot enforce them (no cgroup v2 delegation, macOS).
+fn limits_finding(s: &Srv) -> Option<Value> {
+    let req = s.requested_limits();
+    if !req.any() { return None; }
+    let v = crate::platform::cgroup::limits_json(&req);
+    if v["enforced"] == true { return None; }
+    let why = v["detail"].as_str().unwrap_or("resource limits are unavailable").to_string();
+    Some(finding(format!("{}:limits", s.id), "info", Some(&s.id), "Resource limits are not enforced", format!("Limits are saved for this server but cannot be applied on this host: {why}"), vec![format!("backend: {}", v["backend"].as_str().unwrap_or("none"))], None))
+}
+
 pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
     let mut f = vec![];
     let (state, detail) = server::state_of(s, st);
@@ -19,6 +29,7 @@ pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
     if state == "crashed" || state == "failed" {
         f.push(finding(format!("{}:crash", s.id), "critical", Some(&s.id), if state == "crashed" { "Server crashed" } else { "Install failed" }, detail.clone().unwrap_or_default(), vec![format!("state: {state}")], Some(json!({"label": "Open console", "kind": "open_tab", "tab": "console"}))));
     }
+    f.extend(limits_finding(s));
     if all.iter().any(|o| o.id != s.id && o.port == s.port) {
         f.push(finding(format!("{}:port", s.id), "warn", Some(&s.id), "Port shared with another server", format!("Port {} is assigned to more than one Moss server; only one can run at a time.", s.port), vec![format!("port {}", s.port)], Some(json!({"label": "Open settings", "kind": "open_tab", "tab": "settings"}))));
     }

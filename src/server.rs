@@ -28,9 +28,12 @@ pub struct Srv {
     pub notes: String,
     pub custom_cmd: Option<Vec<String>>,
     pub created_at: String,
+    pub memory_limit_mb: Option<i64>,
+    pub cpu_limit_pct: Option<i64>,
+    pub pids_limit: Option<i64>,
 }
 
-pub const COLS: &str = "id,name,runtime,game_version,loader_version,java_major,port,memory_mb,flags_profile,autostart,restart_enabled,restart_max,eula_at,desired,installed,install_error,pid,pid_start,tags,notes,custom_cmd,created_at";
+pub const COLS: &str = "id,name,runtime,game_version,loader_version,java_major,port,memory_mb,flags_profile,autostart,restart_enabled,restart_max,eula_at,desired,installed,install_error,pid,pid_start,tags,notes,custom_cmd,created_at,memory_limit_mb,cpu_limit_pct,pids_limit";
 
 impl Srv {
     pub fn from_row(r: &Row) -> rusqlite::Result<Srv> {
@@ -40,10 +43,14 @@ impl Srv {
             eula_at: r.get(12)?, desired: r.get(13)?, installed: r.get(14)?, install_error: r.get(15)?, pid: r.get(16)?, pid_start: r.get(17)?,
             tags: serde_json::from_str(&r.get::<_, String>(18)?).unwrap_or_default(), notes: r.get(19)?,
             custom_cmd: r.get::<_, Option<String>>(20)?.and_then(|s| serde_json::from_str(&s).ok()), created_at: r.get(21)?,
+            memory_limit_mb: r.get(22)?, cpu_limit_pct: r.get(23)?, pids_limit: r.get(24)?,
         })
     }
     pub fn dir(&self, st: &Inner) -> PathBuf { st.cfg.servers_dir().join(&self.id) }
     pub fn moss_dir(&self, st: &Inner) -> PathBuf { self.dir(st).join(".moss") }
+    pub fn requested_limits(&self) -> crate::platform::cgroup::Requested {
+        crate::platform::cgroup::Requested { memory_mb: self.memory_limit_mb, cpu_pct: self.cpu_limit_pct, pids: self.pids_limit }
+    }
     pub fn is_mc(&self) -> bool { !matches!(self.runtime.as_str(), "custom" | "sim") }
     pub fn is_proxy(&self) -> bool { self.runtime == "velocity" }
     pub fn content_kind(&self) -> &'static str {
@@ -128,6 +135,7 @@ pub fn view(s: &Srv, st: &Inner) -> Value {
         "uptime_s": uptime, "pid": s.pid.filter(|_| l.is_some_and(|l| l.alive)), "players": players,
         "motd": l.and_then(|l| l.motd.clone()), "cpu_pct": l.filter(|l| l.alive).and_then(|l| l.cpu), "mem_bytes": l.filter(|l| l.alive).and_then(|l| l.mem),
         "content_kind": s.content_kind(), "tags": s.tags, "notes": s.notes, "created_at": s.created_at, "capabilities": s.capabilities(),
+        "limits": crate::platform::cgroup::limits_json(&s.requested_limits()),
     })
 }
 

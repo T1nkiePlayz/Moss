@@ -1,0 +1,54 @@
+# Homebrew formula for Moss. Rendered by the release workflow (placeholders in @...@ are replaced with the tag and the
+# real checksums) and attached to the GitHub release as `moss.rb`.
+#   brew install --formula ./moss.rb        (or host it in a tap: homebrew-moss/Formula/moss.rb)
+class Moss < Formula
+  desc "Fast, local-first game server controller (Minecraft Java first)"
+  homepage "https://github.com/@REPO@"
+  version "@VERSION@"
+  license "GPL-3.0-only"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/@REPO@/releases/download/@TAG@/moss-@TAG@-macos-aarch64.tar.gz"
+      sha256 "@SHA256_ARM@"
+    end
+    on_intel do
+      url "https://github.com/@REPO@/releases/download/@TAG@/moss-@TAG@-macos-x86_64.tar.gz"
+      sha256 "@SHA256_INTEL@"
+    end
+  end
+
+  def install
+    bin.install "moss"
+    pkgshare.install ".env", "moss.env.example", "io.moss.controller.plist"
+  end
+
+  def post_install
+    (var/"moss").mkpath
+    cp pkgshare/".env", var/"moss/.env" unless (var/"moss/.env").exist?
+  end
+
+  service do
+    run [opt_bin/"moss", "serve", "--data-dir", var/"moss/data"]
+    keep_alive true
+    working_dir var/"moss"
+    log_path var/"log/moss.log"
+    error_log_path var/"log/moss.log"
+    environment_variables PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+  end
+
+  def caveats
+    <<~EOS
+      Moss reads #{var}/moss/.env and #{var}/moss/.env.local (secrets and overrides go in .env.local).
+      Set MOSS_OWNER_EMAILS there, then start it with:
+        brew services start moss
+      The panel is at http://127.0.0.1:8420. Game servers keep running when Moss restarts.
+      Memory and CPU limits are Linux-only; on macOS they are saved but not enforced.
+      Install a Java runtime from Settings > Java in the panel, or with: brew install openjdk@21
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/moss --version")
+  end
+end

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd job for Moss.
+
+  Per-user (recommended for a Mac that is also your desktop):
+    mkdir -p ~/Library/Application\ Support/Moss ~/Library/Logs/Moss
+    cp io.moss.controller.plist ~/Library/LaunchAgents/
+    # edit the paths below (REPLACE_ME) and put your settings in ~/Library/Application Support/Moss/moss.env
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.moss.controller.plist
+    launchctl kickstart -k gui/$(id -u)/io.moss.controller      # restart
+    launchctl bootout gui/$(id -u)/io.moss.controller            # stop and unload
+
+  System-wide (starts at boot, before anyone logs in): copy to /Library/LaunchDaemons (owner root:wheel, mode 644),
+  add a <key>UserName</key> entry for a dedicated unprivileged account, and use `launchctl bootstrap system ...`.
+
+  launchd does not read env files, so the command below sources moss.env (same format as packaging/moss.env.example)
+  so the secrets never sit in this plist. Game servers are detached from Moss, so restarting this job never stops them.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.moss.controller</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; [ -f "$HOME/Library/Application Support/Moss/moss.env" ] &amp;&amp; . "$HOME/Library/Application Support/Moss/moss.env"; set +a; exec /usr/local/bin/moss serve --data-dir "$HOME/Library/Application Support/Moss/data"</string>
+  </array>
+  <key>WorkingDirectory</key><string>REPLACE_ME_HOME/Library/Application Support/Moss</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <!-- Do not kill the whole process group on stop: game servers must survive a controller restart. -->
+  <key>AbandonProcessGroup</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>REPLACE_ME_HOME/Library/Logs/Moss/moss.log</string>
+  <key>StandardErrorPath</key><string>REPLACE_ME_HOME/Library/Logs/Moss/moss.log</string>
+</dict>
+</plist>

@@ -44,12 +44,3 @@ pub(super) async fn java_list(State(st): State<St>, _u: User) -> Json<Value> {
     let st2 = st.clone();
     Json(tokio::task::spawn_blocking(move || crate::java::json_list(&st2, true)).await.unwrap_or(json!({"installs": []})))
 }
-
-#[derive(Deserialize)] pub(super) struct JavaReq { major: u32 }
-pub(super) async fn java_install(State(st): State<St>, user: User, Json(r): Json<JavaReq>) -> ApiResult<(StatusCode, Json<Value>)> {
-    user.require_admin()?;
-    if ![8, 11, 17, 21, 25].contains(&r.major) { return Err(ApiError::bad("java.version", "supported majors: 8, 11, 17, 21, 25")); }
-    let op = ops::spawn_op(&st, "java.install", format!("Install Java {}", r.major), None, true, move |ctx| crate::java::install_managed(ctx, r.major));
-    st.audit(&user.email, "java.install", &format!("Java {}", r.major), "", None).await;
-    Ok((StatusCode::ACCEPTED, Json(json!({"operation": op}))))
-}

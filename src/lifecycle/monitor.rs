@@ -1,9 +1,10 @@
 //! Background loops: liveness/readiness/restart supervision every second, resource sampling every five.
 use super::{exit::handle_exit, mark_ready, process_alive, set_detail, start::start};
 use crate::{platform, server, state::{Players, Sample, St}};
-use std::time::{Duration, Instant};
+use std::{collections::HashMap, time::{Duration, Instant}};
 
 pub fn spawn_background(st: &St) {
+    super::init_limits();
     supervise(st);
     sample(st);
 }
@@ -47,12 +48,20 @@ fn sample(st: &St) {
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         loop {
             tick.tick().await;
-            st2.host.lock().unwrap().sample();
             let Ok(servers) = server::list(&st2).await else { continue };
-            let usage = platform::group_usage_all(); // one scan of the process table for every server
+            // One scan of the process table for every server, plus host CPU and cgroup memory. On macOS these spawn
+            // `ps`, so none of it runs on an async worker thread.
+            let (st3, ids) = (st2.clone(), servers.iter().filter(|s| s.pid.is_some()).map(|s| s.id.clone()).collect::<Vec<_>>());
+            let Ok((usage, cg_mem)) = tokio::task::spawn_blocking(move || {
+                st3.host.lock().unwrap().sample();
+                let cg = platform::cgroup::backend().ok();
+                let mem: HashMap<String, u64> = ids.into_iter().filter_map(|id| Some((id.clone(), cg?.memory_current(&id)?))).collect();
+                (platform::group_usage_all(), mem)
+            }).await else { continue };
             for s in servers.iter().filter(|s| s.installed && s.pid.is_some()) {
                 let Some(pid) = s.pid else { continue };
                 let Some(&(cpu_secs, rss)) = usage.get(&pid) else { continue };
+                let rss = cg_mem.get(&s.id).copied().unwrap_or(rss); // cgroup memory (incl. page cache of the game) when present
                 let (ready, cpu) = {
                     let mut live = st2.live.lock().unwrap();
                     let l = live.entry(s.id.clone()).or_default();
@@ -77,7 +86,7 @@ fn sample(st: &St) {
                     q.push_back(Sample { t: chrono::Utc::now().timestamp_millis(), cpu: cpu.unwrap_or(0.0), mem: rss, players });
                     while q.len() > 720 { q.pop_front(); }
                 }
-                server::emit(&st2, &s.id).await;
+                st2.emit("server", server::view(s, &st2)); // `s` is this iteration's fresh row: no second query
             }
         }
     });

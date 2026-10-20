@@ -14,6 +14,12 @@ RestartSec=3
 
 # Game servers are launched detached and MUST survive controller restarts and upgrades.
 # Only the controller process is signalled on stop/restart; Moss re-attaches to running servers on start.
+# Resource limits (cgroup v2): Moss gets its own delegated cgroup subtree and creates one child per game server.
+# DelegateSubgroup keeps Moss itself in a leaf so the subtree can enforce controllers (systemd 254+, e.g. Debian 13,
+# Ubuntu 24.04, Fedora). On older systemd the line is ignored with a warning and limits are reported as not enforced.
+Delegate=yes
+DelegateSubgroup=supervisor
+
 KillMode=process
 SendSIGKILL=no
 TimeoutStopSec=20
@@ -28,7 +34,8 @@ PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
-ProtectControlGroups=yes
+# ProtectControlGroups= must NOT be enabled: Moss writes memory/CPU/pids limits into its own cgroup (tested: with it on,
+# limits silently stop working).
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictSUIDSGID=yes
 LockPersonality=yes

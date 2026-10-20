@@ -22,8 +22,103 @@ env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
-  release:
-    name: Build and publish (linux x86_64)
+  web:
+    name: Build the web UI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.TAG }}
+      - name: Sync version from tag
+        run: node scripts/sync-version.mjs "$TAG"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: web
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            service: packaging/moss.service
+            test: true
+          - name: macos-aarch64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            service: packaging/macos/io.moss.controller.plist
+            test: true
+          # Cross-compiled on the arm64 runner: no retired runner labels to chase; the binary is not run here.
+          - name: macos-x86_64
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            service: packaging/macos/io.moss.controller.plist
+            test: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Sync version from tag
+        run: node scripts/sync-version.mjs "$TAG"
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.name }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Test
+        if: matrix.test
+        run: cargo test --locked
+
+      - name: Build the release binary (embeds the web UI)
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        env:
+          COPYFILE_DISABLE: "1" # no AppleDouble ._ files in macOS tarballs
+        run: |
+          name="moss-${TAG}-${{ matrix.name }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/moss" LICENSE README.md "dist/$name/"
+          cp "${{ matrix.service }}" packaging/moss.env.example .env "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          ls -l dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tarball-${{ matrix.name }}
+          path: dist/moss-*.tar.gz
+          retention-days: 1
+
+  publish:
+    name: Publish the draft release
+    needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -35,39 +130,25 @@ jobs:
           ref: ${{ env.TAG }}
           fetch-depth: 0
 
-      - name: Sync version from tag
-        run: node scripts/sync-version.mjs "$TAG"
-
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          node-version: lts/*
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          pattern: tarball-*
+          path: dist
+          merge-multiple: true
 
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
-
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Build the web UI
-        working-directory: web
+      - name: Checksums, Homebrew formula and installer
         run: |
-          npm ci
-          npm run build
-
-      - name: Test
-        run: cargo test --locked
-
-      - name: Build the release binary (embeds the web UI)
-        run: cargo build --release --locked
-
-      - name: Package
-        run: |
-          name="moss-${TAG}-linux-x86_64"
-          mkdir -p "dist/$name"
-          cp target/release/moss LICENSE README.md "dist/$name/"
-          cp packaging/moss.service packaging/moss.env.example .env "dist/$name/"
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
-          (cd dist && sha256sum "$name.tar.gz" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          cd dist
+          for p in linux-x86_64 macos-aarch64 macos-x86_64; do test -f "moss-${TAG}-$p.tar.gz" || { echo "missing tarball for $p"; exit 1; }; done
+          sha256sum moss-*.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          sum_of() { awk -v f="moss-${TAG}-$1.tar.gz" '$2 == f { print $1 }' SHA256SUMS.txt; }
+          sed -e "s|@REPO@|${GITHUB_REPOSITORY}|g" -e "s|@TAG@|${TAG}|g" -e "s|@VERSION@|${TAG#v}|g" \
+              -e "s|@SHA256_ARM@|$(sum_of macos-aarch64)|g" -e "s|@SHA256_INTEL@|$(sum_of macos-x86_64)|g" \
+              ../packaging/homebrew/moss.rb.tmpl > moss.rb
+          if grep -nE '@(REPO|TAG|VERSION|SHA256_ARM|SHA256_INTEL)@' moss.rb; then echo "unreplaced placeholder in moss.rb"; exit 1; fi
+          if grep -q 'sha256 ""' moss.rb; then echo "empty checksum in moss.rb"; exit 1; fi
+          cp ../scripts/install.sh install.sh
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -85,15 +166,18 @@ jobs:
             git log -1 --format=%B "$TAG"
             echo
             echo "### Install"
-            echo "1. Download \`moss-${TAG}-linux-x86_64.tar.gz\` and verify it: \`sha256sum -c SHA256SUMS.txt\` and \`gh attestation verify moss-${TAG}-linux-x86_64.tar.gz --repo \${GITHUB_REPOSITORY}\`."
-            echo "2. Follow the *Quick start* and *Supabase* sections of the README. Moss binds to loopback by default."
+            echo "- **Script (Linux and macOS):** \`sh install.sh\` verifies the checksum and installs the binary. Download \`install.sh\` from this release and read it first."
+            echo "- **Homebrew (macOS):** \`brew install --formula ./moss.rb\`, then \`brew services start moss\`."
+            echo "- **By hand:** download \`moss-${TAG}-<os>-<arch>.tar.gz\` (\`linux-x86_64\`, \`macos-aarch64\`, \`macos-x86_64\`), verify it with \`sha256sum -c SHA256SUMS.txt\` (\`shasum -a 256 -c\` on macOS) and \`gh attestation verify <file> --repo \${GITHUB_REPOSITORY}\`."
+            echo "- Then follow the *Quick start* and *Supabase* sections of the README (macOS: docs/macos.md). Moss binds to loopback by default."
             echo
             echo "> Early development: storage formats may change between versions. Keep your own backups of anything you care about."
           } > notes.md
+          assets=(dist/moss-*.tar.gz dist/SHA256SUMS.txt dist/install.sh dist/moss.rb)
           flags=(--draft --title "Moss $TAG" --notes-file notes.md --verify-tag)
           if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/moss-*.tar.gz dist/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" "${flags[@]}" dist/moss-*.tar.gz dist/SHA256SUMS.txt
+            gh release create "$TAG" "${flags[@]}" "${assets[@]}"
           fi

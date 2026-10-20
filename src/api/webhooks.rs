@@ -29,7 +29,10 @@ fn url(st: &St, s: &str) -> ApiResult<String> {
 
 fn events(l: &[String]) -> ApiResult<Vec<String>> {
     let mut out: Vec<String> = vec![];
-    for e in l { if !webhooks::is_event(e) { return Err(v("events", &format!("Unknown event {e}."))); } if !out.contains(e) { out.push(e.clone()); } }
+    for e in l {
+        if !webhooks::is_event(e) { return Err(v("events", &format!("Unknown event {e}."))); }
+        if !out.contains(e) { out.push(e.clone()); }
+    }
     if out.is_empty() { return Err(v("events", "Choose at least one event.")); }
     Ok(out)
 }
@@ -37,7 +40,10 @@ fn events(l: &[String]) -> ApiResult<Vec<String>> {
 async fn server_ids(st: &St, l: &[String]) -> ApiResult<Vec<String>> {
     let known: Vec<String> = server::list(st).await?.into_iter().map(|s| s.id).collect();
     let mut out: Vec<String> = vec![];
-    for i in l { if !known.contains(i) { return Err(v("server_ids", "One of the chosen servers no longer exists.")); } if !out.contains(i) { out.push(i.clone()); } }
+    for i in l {
+        if !known.contains(i) { return Err(v("server_ids", "One of the chosen servers no longer exists.")); }
+        if !out.contains(i) { out.push(i.clone()); }
+    }
     Ok(out)
 }
 

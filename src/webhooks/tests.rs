@@ -48,7 +48,7 @@ async fn delivers_a_signed_event_with_the_documented_headers_and_payload() {
     publish(&st, ev("server.started", "s1")).await;
     publish(&st, ev("server.stopped", "s1")).await; // not subscribed
     assert_eq!(queue::process_due(&st, TEST_OPTS, true).await, 1);
-    let hits = rx.hits.lock().unwrap();
+    let hits = rx.hits.lock().unwrap().clone();
     assert_eq!(hits.len(), 1);
     let (h, body) = &hits[0];
     let ts: i64 = h["x-moss-timestamp"].to_str().unwrap().parse().unwrap();

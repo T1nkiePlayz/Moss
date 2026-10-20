@@ -129,5 +129,4 @@
 
 <style>
   .wl { list-style: none; margin: 12px 0 0; padding: 0; } .wl li { padding: 12px 0; border-bottom: 1px solid var(--line); } .wl li:last-child { border: 0; }
-  .badge.danger { background: color-mix(in srgb, var(--danger), transparent 85%); color: var(--danger); }
 </style>

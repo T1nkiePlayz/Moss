@@ -84,6 +84,30 @@ test.describe('remote backups', () => {
   });
 });
 
+test('webhooks: add form validates, the secret is shown once, test event and log work', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/#/settings');
+  await expect(page.getByText('Discord bot').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Send test event' }).first().click();
+  await expect(page.getByText('Test event delivered')).toBeVisible();
+  await page.getByRole('button', { name: 'Show delivery log' }).first().click();
+  await expect(page.getByRole('button', { name: 'Send again' }).first()).toBeVisible();
+  await audit(page, 'webhooks with delivery log');
+  await page.getByRole('button', { name: 'Add webhook' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Add webhook' }).click();
+  await expect(page.getByText('Enter the address that should receive events.')).toBeVisible();
+  await audit(page, 'add webhook dialog', '[role="dialog"]');
+  await page.getByRole('dialog').getByLabel('Name', { exact: true }).fill('Dashboard');
+  await page.getByRole('dialog').getByLabel('Address', { exact: true }).fill('https://dash.example.com/moss');
+  await page.getByRole('checkbox', { name: /server.crashed/ }).check();
+  await page.getByRole('dialog').getByRole('button', { name: 'Add webhook' }).click();
+  await expect(page.getByText(/Copy the signing secret for Dashboard now/)).toBeVisible();
+  await expect(page.getByLabel('Signing secret')).toHaveValue(/^whsec_/);
+  await audit(page, 'webhook secret shown');
+  expect(errors).toEqual([]);
+});
+
 async function openFabricContent(page: Page) {
   await page.goto('/');
   await page.locator('a[href^="#/servers/"]').first().waitFor();

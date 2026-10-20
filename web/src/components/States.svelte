@@ -8,7 +8,7 @@
 </script>
 
 {#if kind === 'loading'}
-  <div class="col" aria-busy="true" aria-label="Loading">
+  <div class="col" role="status" aria-busy="true" aria-label="Loading">
     {#each Array(rows) as _}<div class="skel" style="height:52px"></div>{/each}
   </div>
 {:else}

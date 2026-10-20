@@ -50,7 +50,7 @@ pub fn set(raw: &str, path: &[&str], lit: &str) -> Result<String, String> {
     if let Some((i, _, _, eq)) = keys(&ls).into_iter().find(|(_, t, k, _)| *t == table && k == key) {
         let (b, eol) = ls[i];
         let v = b[eq + 1..].trim_start();
-        if v.starts_with('[') && comment_at(v).map_or(v, |c| v[..c].trim_end()).ends_with(']') == false || v.starts_with("\"\"\"") || v.starts_with("'''") {
+        if v.starts_with('[') && !comment_at(v).map_or(v, |c| v[..c].trim_end()).ends_with(']') || v.starts_with("\"\"\"") || v.starts_with("'''") {
             return Err(format!("{name} spans several lines; edit it in the raw editor"));
         }
         let tail = comment_at(v).map(|c| format!("{}{}", &v[v[..c].trim_end().len()..c], &v[c..])).unwrap_or_default();

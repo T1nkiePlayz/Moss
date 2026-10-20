@@ -43,6 +43,7 @@
     if (!r.ok) return;
     try { await apiOps.removeJava(j.major); toast('info', `Removed Java ${j.major}`); void loadJava(); } catch (e) { jUse = jErrMsg(e); if (!jUse) toastError(e, 'Could not remove Java'); }
   }
+  const loadTheme = () => import('../components/settings/ThemeEditor.svelte');
   const loadNotif = () => import('../components/settings/Notifications.svelte');
   const loadTokens = () => import('../components/settings/Tokens.svelte');
   const loadBundle = () => import('../components/settings/SupportBundle.svelte');
@@ -74,6 +75,8 @@
       </div></div>
     </div>
   </section>
+
+  <Lazy load={loadTheme} />
 
   <section class="card" aria-labelledby="in">
     <div class="card-title" id="in"><Icon name="sliders" size={14} />Instance</div>

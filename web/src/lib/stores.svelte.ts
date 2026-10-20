@@ -1,4 +1,5 @@
 import { api, apiOps, openEvents, errMsg, type Activity, type AppNotification, type Finding, type HostStatus, type Operation, type Server, type Stream } from './api';
+import { applyCustomTheme, hasCustom, loadTheme, saveTheme, type CustomTheme } from './theme';
 
 // ---------- visibility + polling ----------
 export const page = $state({ visible: typeof document === 'undefined' || document.visibilityState === 'visible' });
@@ -27,6 +28,8 @@ export interface Prefs {
 const defaults: Prefs = { theme: 'system', accent: 'moss', density: 'comfortable', motion: 'system', sidebar: 'full', serversView: 'cards' };
 const loadPrefs = (): Prefs => { try { return { ...defaults, ...JSON.parse(localStorage.getItem('moss.prefs') || '{}') }; } catch { return { ...defaults }; } };
 export const prefs = $state<Prefs>(loadPrefs());
+/** The person's own colours (Settings > Appearance), kept in this browser; applied on top of light or dark. */
+export const custom = $state<{ theme: CustomTheme | null }>({ theme: loadTheme() });
 const mq = matchMedia('(prefers-color-scheme: light)');
 export function applyPrefs() {
   const d = document.documentElement;
@@ -34,9 +37,11 @@ export function applyPrefs() {
   d.dataset.accent = prefs.accent;
   d.dataset.density = prefs.density;
   d.dataset.motion = prefs.motion;
+  applyCustomTheme(d, d.dataset.theme === 'contrast' ? null : $state.snapshot(custom.theme), d.dataset.theme === 'light' ? 'light' : 'dark');
   try { localStorage.setItem('moss.prefs', JSON.stringify($state.snapshot(prefs))); } catch { /* storage unavailable */ }
 }
 mq.addEventListener('change', () => prefs.theme === 'system' && applyPrefs());
+export function setCustomTheme(t: CustomTheme | null) { custom.theme = t && hasCustom(t) ? t : null; saveTheme(custom.theme); applyPrefs(); }
 export function setPref<K extends keyof Prefs>(k: K, v: Prefs[K]) { prefs[k] = v; applyPrefs(); }
 export const cycleTheme = () => {
   const cur = document.documentElement.dataset.theme;

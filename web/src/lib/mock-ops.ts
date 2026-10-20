@@ -136,3 +136,133 @@ export async function handleOps(c: OpsCtx, s: A.Server, sub: string, method: str
   }
   return NONE;
 }
+
+// ---- routes that are not scoped to one server ----
+export interface GlobalCtx {
+  uid: () => string; now: () => string; servers: A.Server[]; backups: A.Backup[]; content: Record<string, A.ContentItem[]>; fs: Record<string, Record<string, string>>;
+  call: (method: string, path: string, body: unknown) => Promise<unknown>; log: (a: string, t: string, d?: string) => void;
+}
+let prefs: { data: Record<string, unknown>; updated_at: string | null } = { data: {}, updated_at: null };
+const views: A.SavedView[] = [
+  { id: 'view-running', scope: 'servers', name: 'Running now', filters: { status: 'running' }, sort: '', created_at: new Date(Date.now() - 86400000).toISOString() },
+];
+const blueprints: (A.Blueprint & { doc: Record<string, any> })[] = [];
+const staged = new Map<string, A.ImportDetection>();
+const bad = (code: string, msg: string, field?: string) => new ApiError(400, code, msg, field ? [{ path: field, message: msg }] : []);
+
+function detectMock(name: string, hint: string): A.ImportDetection {
+  const unknown = /unknown|mystery/i.test(hint);
+  const rt = unknown ? null : /fabric/i.test(hint) ? 'fabric' : /vanilla/i.test(hint) ? 'vanilla' : /velocity/i.test(hint) ? 'velocity' : 'paper';
+  return {
+    runtime: rt, game_version: unknown ? null : rt === 'velocity' ? '3.4.0' : '1.21.4', loader_version: rt === 'fabric' ? '0.16.9' : null, port: unknown ? null : 25812, jar: unknown ? null : 'server.jar', has_world: !unknown,
+    java_major: unknown ? null : 21, java_installed: true, name, size: 412_000_000,
+    notes: unknown ? ['Moss could not tell what kind of server this is. Choose the runtime below.'] : [],
+  };
+}
+
+export async function handleOpsGlobal(c: GlobalCtx, method: string, p: string, qs: URLSearchParams, b: Record<string, any>, raw: unknown): Promise<unknown> {
+  let m: RegExpMatchArray | null;
+  const M = (re: RegExp) => (m = p.match(re));
+  if (p === '/me/preferences') {
+    if (method === 'GET') return prefs;
+    if (!b.data || typeof b.data !== 'object' || Array.isArray(b.data)) throw bad('validation', 'Preferences must be an object.', 'data');
+    prefs = { data: b.data, updated_at: c.now() };
+    return prefs;
+  }
+  if (p === '/views') {
+    if (method === 'GET') return views.filter((v) => !qs.get('scope') || v.scope === qs.get('scope'));
+    const name = String(b.name ?? '').trim();
+    if (!['servers', 'content'].includes(b.scope)) throw bad('validation', 'Unknown list.', 'scope');
+    if (!name || name.length > 48) throw bad('validation', 'Name must be 1 to 48 characters.', 'name');
+    const i = views.findIndex((v) => v.scope === b.scope && v.name.toLowerCase() === name.toLowerCase());
+    if (i >= 0) views.splice(i, 1);
+    const v: A.SavedView = { id: c.uid(), scope: b.scope, name, filters: b.filters ?? {}, sort: b.sort ?? '', created_at: c.now() };
+    views.push(v);
+    return v;
+  }
+  if (M(/^\/views\/([^/]+)$/)) {
+    const i = views.findIndex((v) => v.id === m![1]);
+    if (i < 0) throw new ApiError(404, 'not_found', 'view not found');
+    views.splice(i, 1);
+    return;
+  }
+  if (p === '/blueprints' && method === 'GET') return blueprints.map(({ doc: _d, ...s }) => s);
+  if (p === '/blueprints' && method === 'POST') {
+    const s = c.servers.find((x) => x.id === b.server_id);
+    if (!s) throw new ApiError(404, 'not_found', 'server not found');
+    const name = String(b.name ?? '').trim();
+    if (!name) throw bad('validation', 'Give the blueprint a name.', 'name');
+    const props = Object.fromEntries((c.fs[s.id]?.['server.properties'] ?? '').split('\n').filter((l) => l.includes('=') && !l.startsWith('#')).map((l) => l.split('=') as [string, string]).filter(([k]) => !/port|password|secret|seed|level-name|server-ip/i.test(k)));
+    const items = (c.content[s.id] ?? []).filter((i) => i.project_id).map((i) => ({ provider: i.provider, project_id: i.project_id, title: i.title, kind: i.kind }));
+    const doc = { format: 'moss-blueprint', version: 1, name, runtime: s.runtime, game_version: s.game_version, loader_version: s.loader_version, memory_mb: s.memory_mb, flags_profile: s.flags_profile, properties: props, content: items, schedules: [] };
+    const bp = { id: c.uid(), name, runtime: s.runtime, game_version: s.game_version, loader_version: s.loader_version, memory_mb: s.memory_mb, properties: Object.keys(props).length, content: items.length, schedules: 0, created_by: 'dev@example.com', created_at: c.now(), doc };
+    blueprints.unshift(bp);
+    c.log('blueprint.save', name);
+    const { doc: _d, ...sum } = bp;
+    return sum;
+  }
+  if (p === '/blueprints/import') {
+    const d = b as Record<string, any>;
+    if (d.format !== 'moss-blueprint' || d.version !== 1) throw bad('blueprint.invalid', 'This is not a valid Moss blueprint: missing the moss-blueprint marker.');
+    if (!d.name || !d.runtime || !d.game_version) throw bad('blueprint.invalid', 'This is not a valid Moss blueprint: name, runtime and game version are required.');
+    const props = d.properties ?? {}, items = d.content ?? [];
+    const bp = { id: c.uid(), name: String(d.name), runtime: d.runtime, game_version: d.game_version, loader_version: d.loader_version ?? null, memory_mb: d.memory_mb ?? 2048, properties: Object.keys(props).length, content: items.length, schedules: (d.schedules ?? []).length, created_by: 'dev@example.com', created_at: c.now(), doc: d };
+    blueprints.unshift(bp);
+    const { doc: _d, ...sum } = bp;
+    return sum;
+  }
+  if (M(/^\/blueprints\/([^/]+)(\/export|\/create)?$/)) {
+    const bp = blueprints.find((x) => x.id === m![1]);
+    if (!bp) throw new ApiError(404, 'not_found', 'blueprint not found');
+    if (m![2] === '/export') return bp.doc;
+    if (m![2] === '/create') {
+      if (!b.accept_eula) throw new ApiError(400, 'eula.required', 'You must accept the Minecraft EULA to create a Minecraft server.', [{ path: 'accept_eula', message: 'required' }]);
+      if (!String(b.name ?? '').trim()) throw bad('validation', 'Give the new server a name.', 'name');
+      const r = (await c.call('POST', '/servers', { name: b.name, runtime: bp.runtime, game_version: bp.game_version, loader_version: bp.loader_version, memory_mb: bp.memory_mb, port: b.port, accept_eula: true })) as { server: A.Server };
+      c.content[r.server.id] = (bp.doc.content ?? []).map((i: any) => ({ id: c.uid(), provider: i.provider, project_id: i.project_id, version_id: null, title: i.title, version_number: '1.0', filename: `${i.title}.jar`, kind: i.kind, sha512: null, installed_at: c.now(), pinned: false, source: 'moss' }) as unknown as A.ContentItem);
+      return { ...r, blueprint: { id: bp.id, skipped_schedules: [] } };
+    }
+    blueprints.splice(blueprints.indexOf(bp), 1);
+    return;
+  }
+  if (p === '/servers/import/inspect') {
+    if (raw instanceof FormData) {
+      const f = raw.get('file') as File | null;
+      if (!f || !/\.(zip|tar\.zst)$/i.test(f.name)) throw bad('import.archive', 'Only .zip and .tar.zst files can be imported.');
+      const d = detectMock(f.name.replace(/\.(zip|tar\.zst)$/i, ''), f.name);
+      const token = c.uid();
+      staged.set(token, d);
+      return { ...d, token };
+    }
+    const path = String(b.path ?? '').trim();
+    if (!path.startsWith('/')) throw bad('import.path', 'The path must be absolute, for example /srv/minecraft/survival.', 'path');
+    if (/^\/(etc|proc|sys|usr|dev)(\/|$)/.test(path) || path === '/') throw bad('import.path', 'That is a system folder, not a Minecraft server.', 'path');
+    if (/missing|nonexistent/i.test(path)) throw bad('import.path', 'That folder does not exist or Moss cannot read it.', 'path');
+    return detectMock(path.split('/').filter(Boolean).pop() ?? 'server', path);
+  }
+  if (p === '/servers/import') {
+    if (!b.accept_eula) throw new ApiError(400, 'eula.required', 'You must accept the Minecraft EULA to run a Minecraft server.', [{ path: 'accept_eula', message: 'required' }]);
+    if (!String(b.name ?? '').trim()) throw bad('validation', 'Give the server a name.', 'name');
+    const d = b.token ? staged.get(b.token) : b.path ? detectMock('x', b.path) : undefined;
+    if (!d) throw bad('import.token', 'That upload has expired. Upload the file again.');
+    const runtime = b.runtime ?? d.runtime, gv = b.game_version ?? d.game_version, port = b.port ?? d.port ?? undefined;
+    if (!runtime) throw new ApiError(400, 'runtime.unsupported', 'Choose the server type.', [{ path: 'runtime', message: 'required' }]);
+    if (!gv) throw new ApiError(400, 'validation', 'Enter the Minecraft version.', [{ path: 'game_version', message: 'required' }]);
+    if (port && c.servers.some((s) => s.port === port)) throw new ApiError(409, 'port.taken', `Port ${port} is already used by another Moss server. Pick a different port.`, [{ path: 'port', message: 'already assigned' }]);
+    if (b.token) staged.delete(b.token);
+    c.log('server.import', b.name, `${runtime} ${gv}`);
+    return c.call('POST', '/servers', { name: b.name, runtime, game_version: gv, loader_version: b.loader_version ?? d.loader_version, memory_mb: b.memory_mb ?? 2048, port, accept_eula: true });
+  }
+  if (p === '/search') {
+    const t = (qs.get('q') ?? '').trim().toLowerCase(), n = +(qs.get('limit') ?? 6);
+    const out: A.SearchResults = { q: t, servers: [], backups: [], content: [], files: [] };
+    if (t.length < 2) return out;
+    const name = (id: string) => c.servers.find((s) => s.id === id)?.name ?? '';
+    out.servers = c.servers.filter((s) => [s.name, s.runtime, s.game_version, ...s.tags].some((x) => x.toLowerCase().includes(t))).slice(0, n).map((s) => ({ id: s.id, name: s.name, runtime: s.runtime, game_version: s.game_version }));
+    out.backups = c.backups.filter((k) => `${k.note} ${k.kind} ${name(k.server_id)}`.toLowerCase().includes(t)).slice(0, n).map((k) => ({ id: k.id, server_id: k.server_id, server_name: name(k.server_id), created_at: k.created_at, note: k.note, kind: k.kind }));
+    for (const [sid, items] of Object.entries(c.content)) for (const i of items) if (out.content.length < n && `${i.title} ${i.filename}`.toLowerCase().includes(t)) out.content.push({ id: i.id, server_id: sid, server_name: name(sid), title: i.title, filename: i.filename, kind: i.kind });
+    for (const [sid, files] of Object.entries(c.fs)) for (const path of Object.keys(files)) if (out.files.length < n && !path.endsWith('/') && !/^(world|logs)\//.test(path) && (path.split('/').pop() ?? '').toLowerCase().includes(t)) out.files.push({ server_id: sid, server_name: name(sid), path });
+    return out;
+  }
+  return NONE;
+}

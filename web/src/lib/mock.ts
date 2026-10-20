@@ -2,7 +2,7 @@
 import type * as A from './api';
 import { ApiError } from './api';
 import { extraRuntimes, handleContent, inspectModpack, itemsFromPack, NONE, seedContent, versionsFor } from './mock-content';
-import { handleOps, revertConfig } from './mock-ops';
+import { handleOps, handleOpsGlobal, revertConfig } from './mock-ops';
 import { nextDailyRun, offsetName } from './tz';
 
 const uid = () => crypto.randomUUID();
@@ -578,6 +578,8 @@ export async function handle(method: string, rawPath: string, body: unknown): Pr
   const u = new URL(rawPath, 'http://x');
   const x = await handleX(method, u.pathname, u.searchParams, (body ?? {}) as Record<string, any>);
   if (x !== NOPE) { await sleep(60 + Math.random() * 100); return x; }
+  const og = await handleOpsGlobal({ uid, now, servers, backups, content, fs, call: (m, pp, bb) => handleBase(m, pp, bb), log }, method, u.pathname, u.searchParams, (body instanceof FormData ? {} : (body ?? {})) as Record<string, any>, body);
+  if (og !== NONE) { await sleep(60 + Math.random() * 100); return og; }
   const r = await handleBase(method, rawPath, body);
   if (u.pathname === '/status') (r as A.HostStatus).host.os = macos ? 'macOS' : 'Linux';
   return r;

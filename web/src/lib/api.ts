@@ -104,6 +104,19 @@ export interface ConfigField {
 export interface ConfigSnapshot { id: string; title: string; created_at: string }
 export interface ConfigFile { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean; raw: string; parse_error: string | null; fields: ConfigField[]; history: ConfigSnapshot[] }
 export interface ConfigDiff { current: string; previous: string | null; snapshot: ConfigSnapshot | null }
+export interface SavedView { id: string; scope: 'servers' | 'content'; name: string; filters: Record<string, unknown>; sort: string; created_at: string }
+export interface Blueprint { id: string; name: string; runtime: string; game_version: string; loader_version: string | null; memory_mb: number; properties: number; content: number; schedules: number; created_by: string; created_at: string }
+export interface ImportDetection {
+  runtime: string | null; game_version: string | null; loader_version: string | null; port: number | null; jar: string | null; has_world: boolean;
+  java_major: number | null; java_installed: boolean; name: string; size: number; notes: string[]; token?: string;
+}
+export interface ImportRequest { name: string; path?: string; token?: string; runtime?: string; game_version?: string; loader_version?: string; memory_mb?: number; port?: number; accept_eula: boolean }
+export interface SearchResults {
+  q: string; servers: { id: string; name: string; runtime: string; game_version: string }[];
+  backups: { id: string; server_id: string; server_name: string; created_at: string; note: string; kind: string }[];
+  content: { id: string; server_id: string; server_name: string | null; title: string; filename: string; kind: string }[];
+  files: { server_id: string; server_name: string; path: string }[];
+}
 export interface UndoEntry { id: string; title: string; created_at: string; files: string[] }
 export interface Activity { id: string; time: string; actor: string; action: string; target: string; detail: string }
 export interface Finding {
@@ -281,6 +294,21 @@ export const api = {
 
   operations: (limit = 50, server_id?: string) => get<Operation[]>(`/operations${q({ limit, server_id })}`),
   cancelOp: (id: string) => send('POST', `/operations/${e(id)}/cancel`),
+  prefsGet: () => get<{ data: Record<string, unknown>; updated_at: string | null }>('/me/preferences'),
+  prefsSave: (data: Record<string, unknown>) => send<{ data: Record<string, unknown>; updated_at: string }>('PUT', '/me/preferences', { data }),
+  views: (scope: SavedView['scope']) => get<SavedView[]>(`/views${q({ scope })}`),
+  saveView: (v: { scope: SavedView['scope']; name: string; filters: Record<string, unknown>; sort?: string }) => send<SavedView>('POST', '/views', v),
+  deleteView: (id: string) => send('DELETE', `/views/${e(id)}`),
+  blueprints: () => get<Blueprint[]>('/blueprints'),
+  saveBlueprint: (server_id: string, name: string) => send<Blueprint>('POST', '/blueprints', { server_id, name }),
+  exportBlueprint: (id: string) => get<Record<string, unknown>>(`/blueprints/${e(id)}/export`),
+  importBlueprint: (doc: Record<string, unknown>) => send<Blueprint>('POST', '/blueprints/import', doc),
+  deleteBlueprint: (id: string) => send('DELETE', `/blueprints/${e(id)}`),
+  createFromBlueprint: (id: string, b: { name: string; port?: number; accept_eula: boolean }) => send<{ server: Server; operation: Operation }>('POST', `/blueprints/${e(id)}/create`, b),
+  importInspectPath: (path: string) => send<ImportDetection>('POST', '/servers/import/inspect', { path }),
+  importInspectFile: (file: File) => { const fd = new FormData(); fd.append('file', file, file.name); return send<ImportDetection>('POST', '/servers/import/inspect', fd); },
+  importServer: (b: ImportRequest) => send<{ server: Server; operation: Operation }>('POST', '/servers/import', b),
+  searchAll: (text: string, limit = 6) => get<SearchResults>(`/search${q({ q: text, limit })}`),
   configFiles: (id: string) => get<{ files: ConfigFileInfo[] }>(`/servers/${e(id)}/config`),
   configFile: (id: string, file: string) => get<ConfigFile>(`/servers/${e(id)}/config/${e(file)}`),
   saveConfig: (id: string, file: string, body: { raw: string } | { set?: Record<string, unknown>; unset?: string[] }) => send<{ undo_id: string | null; changed: boolean }>('PUT', `/servers/${e(id)}/config/${e(file)}`, body),

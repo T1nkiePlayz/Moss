@@ -501,6 +501,13 @@ export interface RestorePreview {
 export type MetricRange = '1h' | '24h' | '7d' | '30d';
 export interface MetricSample { t: number; cpu_avg: number; cpu_max: number; mem_avg: number; mem_max: number; players_max?: number; disk_free?: number }
 export interface MetricSeries { range: MetricRange; step_s: number; samples: MetricSample[] }
+export type AnalyticsDays = 7 | 30 | 90;
+export interface PlayerAnalytics {
+  days: AnalyticsDays; hourly: { hour: string; peak: number; avg: number }[]; unique_players: number; sessions: number; total_play_seconds: number; avg_session_seconds: number;
+  peak: { count: number; at: string | null };
+  top_players: { name: string; play_seconds: number; sessions: number; last_seen: string; online: boolean }[];
+  recent_sessions: { name: string; joined_at: string; left_at: string | null; seconds: number }[];
+}
 export interface SupportPreview { files: { name: string; size: number }[]; redactions: string[] }
 
 export interface Webhook { id: string; name: string; url: string; events: string[]; server_ids: string[]; enabled: boolean; disabled_reason: string | null; consecutive_failures: number; secret: 'set' | 'not set' | string; pending: number; last_delivery: { state: string; at: string; status_code: number | null } | null; created_at: string }
@@ -552,6 +559,7 @@ export const apiOps = {
   serverDestination: (sid: string) => get<ServerDestination>(`/servers/${e(sid)}/backup-destination`, { ttl: 0 }),
   setServerDestination: (sid: string, destination_id: string) => send<ServerDestination>('PUT', `/servers/${e(sid)}/backup-destination`, { destination_id }),
   metrics: (id: string, range: MetricRange) => get<MetricSeries>(`/servers/${e(id)}/metrics${q({ range })}`),
+  analytics: (id: string, days: AnalyticsDays) => get<PlayerAnalytics>(`/servers/${e(id)}/analytics${q({ days })}`),
   hostMetrics: (range: MetricRange) => get<MetricSeries>(`/metrics/host${q({ range })}`),
   supportPreview: () => get<SupportPreview>('/support-bundle?preview=1'),
   downloadSupportBundle: () => download('/support-bundle', 'moss-support-bundle.zip'),

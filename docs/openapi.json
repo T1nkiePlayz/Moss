@@ -2160,6 +2160,60 @@
         ]
       }
     },
+    "/servers/{id}/analytics": {
+      "get": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Player analytics: hourly counts, unique players, playtime, top players (days=7|30|90)",
+        "x-permission": "server.view",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Any"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ]
+            }
+          }
+        ]
+      }
+    },
     "/servers/{id}/timeline": {
       "get": {
         "tags": [

@@ -3,14 +3,33 @@
 use crate::server::Srv;
 
 /// Repositories (fully qualified) a server may use, plus any repository under these registries.
-const REPOS: &[&str] = &["docker.io/library/eclipse-temurin", "docker.io/azul/zulu-openjdk", "docker.io/library/amazoncorretto"];
+const REPOS: &[&str] = &["docker.io/library/eclipse-temurin", "docker.io/azul/zulu-openjdk", "docker.io/library/amazoncorretto",
+    "docker.io/library/debian", "docker.io/library/ubuntu", "docker.io/steamcmd/steamcmd", "docker.io/itzg/minecraft-bedrock-server"];
 const REGISTRIES: &[&str] = &["ghcr.io"];
 
 /// The default image for a Java major version.
 pub fn default_for(java_major: i64) -> String { format!("docker.io/library/eclipse-temurin:{}-jre", java_major.clamp(8, 99)) }
 
-/// The image a server runs: its (validated) override or the default for its Java version.
-pub fn for_server(s: &Srv) -> String { for_java(s.container_image.as_deref(), s.java_major) }
+/// The default image for a game. Games run their own installed binary (the server folder is mounted), so the image only
+/// has to carry the shared libraries it needs; all of these are published for linux/amd64.
+/// - Bedrock needs libcurl and libssl, which the plain Debian/Ubuntu images lack: the Bedrock community image has them.
+/// - Steam (srcds, Valheim, Palworld, ...) needs 32-bit glibc/libstdc++ and CA certificates: the SteamCMD Ubuntu 24.04 image.
+/// - Terraria and Factorio ship their own libraries and only need glibc: slim Debian (small).
+pub fn for_game(id: &str, steam: bool) -> &'static str {
+    match (id, steam) {
+        ("bedrock", _) => "docker.io/itzg/minecraft-bedrock-server:latest",
+        (_, true) => "docker.io/steamcmd/steamcmd:ubuntu-24",
+        _ => "docker.io/library/debian:bookworm-slim",
+    }
+}
+
+/// The image a server runs: its (validated) override, else the default for its game, else for its Java version.
+pub fn for_server(s: &Srv) -> String {
+    match s.game() {
+        Some(g) => s.container_image.as_deref().and_then(|o| validate(o).ok()).unwrap_or_else(|| for_game(g.id, matches!(g.install, crate::games::Install::Steam(_))).to_string()),
+        None => for_java(s.container_image.as_deref(), s.java_major),
+    }
+}
 
 pub fn for_java(over: Option<&str>, java_major: i64) -> String {
     over.and_then(|o| validate(o).ok()).unwrap_or_else(|| default_for(java_major))
@@ -68,6 +87,24 @@ mod tests {
     }
 
     #[test]
+    fn games_get_their_own_default_image_and_overrides_still_work() {
+        use crate::runtimes::launch::test_srv;
+        let mut s = test_srv("bedrock", "x", None, "balanced");
+        assert_eq!(for_server(&s), "docker.io/itzg/minecraft-bedrock-server:latest");
+        for (g, want) in [("terraria", "docker.io/library/debian:bookworm-slim"), ("factorio", "docker.io/library/debian:bookworm-slim"), ("valheim", "docker.io/steamcmd/steamcmd:ubuntu-24"), ("cs2", "docker.io/steamcmd/steamcmd:ubuntu-24")] {
+            s.runtime = g.into();
+            assert_eq!(for_server(&s), want, "{g}");
+            assert_eq!(validate(want).unwrap(), want, "{g} default is on the allow-list");
+        }
+        s.container_image = Some("ubuntu:24.04".into());
+        assert_eq!(for_server(&s), "docker.io/library/ubuntu:24.04");
+        s.container_image = Some("evil/x:1".into());
+        assert_eq!(for_server(&s), "docker.io/steamcmd/steamcmd:ubuntu-24", "a bad stored override falls back");
+        let j = test_srv("paper", "1.21.1", None, "minimal");
+        assert_eq!(for_server(&j), default_for(j.java_major));
+    }
+
+    #[test]
     fn accepts_allow_listed_references_and_qualifies_them() {
         assert_eq!(validate("eclipse-temurin:21-jre").unwrap(), "docker.io/library/eclipse-temurin:21-jre");
         assert_eq!(validate("docker.io/library/eclipse-temurin:17-jre-alpine").unwrap(), "docker.io/library/eclipse-temurin:17-jre-alpine");
@@ -79,7 +116,7 @@ mod tests {
 
     #[test]
     fn rejects_everything_else() {
-        for bad in ["", "eclipse-temurin", "evil.example.com/x/y:1", "docker.io/someone/else:1", "ubuntu:24.04", "-v/:/host:1", "ghcr.io/o/i:1 --privileged",
+        for bad in ["", "eclipse-temurin", "evil.example.com/x/y:1", "docker.io/someone/else:1", "alpine:3.20", "docker.io/library/debian", "-v/:/host:1", "ghcr.io/o/i:1 --privileged",
             "ghcr.io/o/i:1;rm", "ghcr.io/O/I:1", "ghcr.io/o/../i:1", "localhost:5000/x/y:1", "ghcr.io/o/i@sha256:abc", "ghcr.io/o/i@md5:aa", "ghcr.io//i:1", "ghcr.io/o/i:\n1",
             "eclipse-temurin:-1", "ghcr.io:443/o/i:1", "http://ghcr.io/o/i:1", "ghcr.io/o/i:1\0"] {
             assert!(validate(bad).is_err(), "{bad:?} should be rejected");

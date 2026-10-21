@@ -10,8 +10,13 @@ use serde_json::{Value, json};
 use std::{collections::{HashMap, HashSet}, path::Path, sync::{LazyLock, Mutex}};
 
 pub mod a2s;
+pub mod admin;
 pub mod install;
+pub mod mods;
+pub mod rcon;
+pub mod rcon_setup;
 pub mod track;
+pub mod updates;
 pub mod versions;
 
 /// Moss-managed, user-editable `key=value` settings for games whose launch needs values (Valheim, Zomboid).
@@ -29,7 +34,7 @@ pub enum Install { Bedrock, Terraria, Factorio, Steam(u32) }
 pub enum Stop { Command(&'static str), Signal(i32) }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PlayerSource { None, Log, A2s(u16) }
+pub enum PlayerSource { None, Log, A2s(u16), Rcon, Api }
 
 /// Console sequence that makes a running world safe to copy: `pre` is sent in order, then the log is watched for `ready`
 /// (re-sending `query` every couple of seconds) for a bounded time; `after` is always sent afterwards.
@@ -103,14 +108,21 @@ fn terraria(l: &Launch) -> Result<Vec<String>, String> {
 }
 
 fn factorio(l: &Launch) -> Result<Vec<String>, String> {
-    Ok(vec!["./bin/x64/factorio".into(), "--start-server".into(), "saves/moss.zip".into(), "--port".into(), l.port.to_string(), "--server-settings".into(), "config/server-settings.json".into()])
+    let mut v = vec!["./bin/x64/factorio".into(), "--start-server".into(), "saves/moss.zip".into(), "--port".into(), l.port.to_string(), "--server-settings".into(), "config/server-settings.json".into()];
+    if let Some(pw) = l.get("rcon_password") { v.extend(["--rcon-port".into(), l.port.to_string(), "--rcon-password".into(), pw.into()]); }
+    Ok(v)
 }
 
 fn valheim(l: &Launch) -> Result<Vec<String>, String> {
     let pw = l.get("password").filter(|p| p.chars().count() >= 5).ok_or_else(|| format!("{SETTINGS_FILE} needs a password of at least 5 characters (Valheim refuses to start without one)"))?;
     let name = l.get("name").unwrap_or(l.name);
     if name.to_lowercase().contains(&pw.to_lowercase()) { return Err("the Valheim password must not be part of the server name; edit it in moss-game.cfg".into()); }
-    let mut v = strs(["env", "LD_LIBRARY_PATH=./linux64", "SteamAppId=892970", "./valheim_server.x86_64", "-nographics", "-batchmode", "-public", "0"]);
+    // With BepInEx installed (`command` sets `BEPINEX_KEY`) start through Unity Doorstop, as the pack's start_server_bepinex.sh does.
+    let mut v = if l.cfg.contains_key(mods::BEPINEX_KEY) {
+        strs(["env", "DOORSTOP_ENABLED=1", "DOORSTOP_TARGET_ASSEMBLY=./BepInEx/core/BepInEx.Preloader.dll", "LD_LIBRARY_PATH=./doorstop_libs:./linux64", "LD_PRELOAD=libdoorstop_x64.so", "SteamAppId=892970", "./valheim_server.x86_64", "-nographics", "-batchmode", "-public", "0"])
+    } else {
+        strs(["env", "LD_LIBRARY_PATH=./linux64", "SteamAppId=892970", "./valheim_server.x86_64", "-nographics", "-batchmode", "-public", "0"])
+    };
     v.extend(["-name".into(), name.into(), "-port".into(), l.port.to_string(), "-world".into(), l.get("world").unwrap_or("Dedicated").into(), "-password".into(), pw.into()]);
     Ok(v)
 }
@@ -118,25 +130,38 @@ fn valheim(l: &Launch) -> Result<Vec<String>, String> {
 fn srcds(game: &str, map: &str, l: &Launch) -> Vec<String> {
     let mut v = strs(["./srcds_run", "-game", game, "-console", "-norestart", "-port"]);
     v.extend([l.port.to_string(), "+maxplayers".into(), l.max_players.to_string(), "+map".into(), map.into()]);
+    if let Some(pw) = l.get("rcon_password") { v.extend(["+rcon_password".into(), pw.into()]); }
     v
 }
-fn gmod(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("garrysmod", "gm_construct", l)) }
+fn gmod(l: &Launch) -> Result<Vec<String>, String> {
+    let mut v = srcds("garrysmod", "gm_construct", l);
+    v.extend(mods::workshop::gmod_args(l.cfg));
+    Ok(v)
+}
 fn tf2(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("tf", "ctf_2fort", l)) }
 fn l4d2(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("left4dead2", "c1m1_hotel", l)) }
 
 fn cs2(l: &Launch) -> Result<Vec<String>, String> {
     let mut v = strs(["./game/bin/linuxsteamrt64/cs2", "-dedicated", "-console", "-usercon", "-port"]);
-    v.extend([l.port.to_string(), "-maxplayers".into(), l.max_players.to_string(), "+map".into(), "de_dust2".into()]);
+    v.extend([l.port.to_string(), "-maxplayers".into(), l.max_players.to_string()]);
+    v.extend(mods::workshop::cs2_map_args(l.cfg));
+    if let Some(pw) = l.get("rcon_password") { v.extend(["+rcon_password".into(), pw.into()]); }
     Ok(v)
 }
 
 fn rust(l: &Launch) -> Result<Vec<String>, String> {
     let mut v = strs(["env", "LD_LIBRARY_PATH=./RustDedicated_Data/Plugins/x86_64", "./RustDedicated", "-batchmode", "-nographics", "+server.port"]);
     v.extend([l.port.to_string(), "+server.queryport".into(), (u32::from(l.port) + 1).to_string(), "+server.maxplayers".into(), l.max_players.to_string(), "+server.hostname".into(), l.name.into(), "+server.identity".into(), "moss".into()]);
+    if let Some(pw) = l.get("rcon_password") { v.extend(["+rcon.port".into(), l.port.to_string(), "+rcon.password".into(), pw.into(), "+rcon.web".into(), "0".into()]); }
     Ok(v)
 }
 
-fn palworld(l: &Launch) -> Result<Vec<String>, String> { Ok(vec!["./PalServer.sh".into(), format!("-port={}", l.port), format!("-players={}", l.max_players)]) }
+/// `-players` only when moss-game.cfg sets `max_players`; otherwise ServerPlayerMaxNum in PalWorldSettings.ini (Config tab) applies.
+fn palworld(l: &Launch) -> Result<Vec<String>, String> {
+    let mut v = vec!["./PalServer.sh".into(), format!("-port={}", l.port)];
+    if l.get("max_players").is_some() { v.push(format!("-players={}", l.max_players)); }
+    Ok(v)
+}
 
 fn zomboid(l: &Launch) -> Result<Vec<String>, String> {
     let pw = l.get("password").ok_or_else(|| format!("{SETTINGS_FILE} needs an admin password (Project Zomboid asks for one on first start)"))?;
@@ -180,15 +205,15 @@ pub static GAMES: &[Game] = &[
     Game { id: "rust", name: "Rust", description: "Rust dedicated server via SteamCMD (anonymous, needs 8 GB or more RAM). Linux x86_64 only.",
         port: 28015, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(258550), launch: rust, stop: Stop::Command("quit"),
         ready: Some("Server startup complete"), join: None, leave: None, players: PlayerSource::A2s(1), max_players: 50, needs_eula: false, fallback_ready_s: 600 },
-    Game { id: "palworld", name: "Palworld", description: "Palworld dedicated server via SteamCMD (anonymous, 16 GB RAM recommended). Player counts are not available. Linux x86_64 only.",
+    Game { id: "palworld", name: "Palworld", description: "Palworld dedicated server via SteamCMD (anonymous, 16 GB RAM recommended). Linux x86_64 only.",
         port: 8211, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(2394010), launch: palworld, stop: Stop::Signal(SIGINT),
-        ready: None, join: None, leave: None, players: PlayerSource::None, max_players: 32, needs_eula: false, fallback_ready_s: 90 },
+        ready: None, join: None, leave: None, players: PlayerSource::Rcon, max_players: 32, needs_eula: false, fallback_ready_s: 90 },
     Game { id: "zomboid", name: "Project Zomboid", description: "Project Zomboid dedicated server via SteamCMD (anonymous). Admin password is generated into moss-game.cfg. Linux x86_64 only.",
         port: 16261, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(380870), launch: zomboid, stop: Stop::Command("quit"),
-        ready: Some(r"SERVER STARTED"), join: None, leave: None, players: PlayerSource::None, max_players: 16, needs_eula: false, fallback_ready_s: 600 },
+        ready: Some(r"SERVER STARTED"), join: None, leave: None, players: PlayerSource::Rcon, max_players: 16, needs_eula: false, fallback_ready_s: 600 },
     Game { id: "satisfactory", name: "Satisfactory", description: "Satisfactory dedicated server via SteamCMD (anonymous, 12 GB RAM recommended). Claim the server from the in-game server manager. Linux x86_64 only.",
         port: 7777, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(1690800), launch: satisfactory, stop: Stop::Signal(SIGINT),
-        ready: None, join: None, leave: None, players: PlayerSource::None, max_players: 4, needs_eula: false, fallback_ready_s: 120 },
+        ready: None, join: None, leave: None, players: PlayerSource::Api, max_players: 4, needs_eula: false, fallback_ready_s: 120 },
 ];
 
 pub fn get(runtime: &str) -> Option<&'static Game> { GAMES.iter().find(|g| g.id == runtime) }
@@ -224,7 +249,7 @@ impl Game {
     /// Whether the console log carries anything the monitor wants (readiness or joins and leaves).
     pub fn reads_log(&self) -> bool { self.ready.is_some() || self.players == PlayerSource::Log }
     pub fn view(&self) -> Value {
-        let tracking = match self.players { PlayerSource::None => "none", PlayerSource::Log => "log", PlayerSource::A2s(_) => "a2s" };
+        let tracking = match self.players { PlayerSource::None => "none", PlayerSource::Log => "log", PlayerSource::A2s(_) => "a2s", PlayerSource::Rcon => "rcon", PlayerSource::Api => "api" };
         let installable = self.supported_here();
         json!({
             "id": self.id, "name": self.name, "category": "game", "tier": if matches!(self.install, Install::Steam(_)) { "experimental" } else { "stable" },
@@ -250,11 +275,13 @@ pub fn read_settings(dir: &Path) -> HashMap<String, String> {
 /// The argument vector for a game server (never a shell string). Called from `lifecycle::command::build_command`.
 pub fn command(dir: &Path, s: &Srv) -> ApiResult<Vec<String>> {
     let g = get(&s.runtime).ok_or_else(|| ApiError::bad("runtime.unsupported", "unknown game"))?;
-    if s.isolation == "container" { return Err(ApiError::bad("container.unsupported", format!("{} servers cannot run in a container", g.name))); }
     if !g.supported_here() { return Err(ApiError::conflict("platform.unsupported", format!("{} is not supported on this host ({})", g.name, g.platforms.join(" / ")))); }
-    let cfg = read_settings(dir);
+    let mut cfg = read_settings(dir);
+    let port16 = u16::try_from(s.port).map_err(|_| ApiError::bad("validation", "invalid port"))?;
+    rcon_setup::prepare(dir, g, port16, &mut cfg); // remote admin: generated password, Palworld and Zomboid settings files
+    if dir.join("BepInEx/core/BepInEx.Preloader.dll").exists() { cfg.insert(mods::BEPINEX_KEY.into(), "1".into()); }
     let max = cfg.get("max_players").and_then(|v| v.parse().ok()).unwrap_or(g.max_players);
-    let port = u16::try_from(s.port).map_err(|_| ApiError::bad("validation", "invalid port"))?;
+    let port = port16;
     let argv = (g.launch)(&Launch { port, max_players: max, name: &s.name, cfg: &cfg }).map_err(|m| ApiError::conflict("game.config", m))?;
     if let Some(exe) = argv.iter().find(|a| a.starts_with("./")) && !dir.join(exe).exists() {
         return Err(ApiError::conflict("server.not_installed", format!("{exe} is missing; reinstall the server")));
@@ -400,9 +427,18 @@ mod tests {
         assert_eq!(argv("cs2", 27015, &[])[0], "./game/bin/linuxsteamrt64/cs2");
         let r = argv("rust", 28015, &[]);
         assert!(r.windows(2).any(|w| w == ["+server.port", "28015"]) && r.windows(2).any(|w| w == ["+server.queryport", "28016"]));
-        assert_eq!(argv("palworld", 8211, &[]), ["./PalServer.sh", "-port=8211", "-players=32"]);
+        assert_eq!(argv("palworld", 8211, &[]), ["./PalServer.sh", "-port=8211"]);
         assert_eq!(argv("zomboid", 16261, &[("password", "pw12345")]), ["./start-server.sh", "-servername", "moss", "-adminpassword", "pw12345", "-port", "16261"]);
         assert_eq!(argv("satisfactory", 7777, &[]), ["./FactoryServer.sh", "-Port=7777"]);
+    }
+
+    #[test]
+    fn rcon_arguments_follow_the_password() {
+        let a = |id: &str, port| argv(id, port, &[("rcon_password", "s3cret")]);
+        assert!(a("gmod", 27015).ends_with(&["+rcon_password".to_string(), "s3cret".to_string()]));
+        assert!(a("cs2", 27015).windows(2).any(|w| w == ["+rcon_password", "s3cret"]));
+        assert!(a("rust", 28015).windows(2).any(|w| w == ["+rcon.port", "28015"]) && a("rust", 28015).ends_with(&["+rcon.web".to_string(), "0".to_string()]));
+        assert!(a("factorio", 34197).ends_with(&["--rcon-port".to_string(), "34197".to_string(), "--rcon-password".to_string(), "s3cret".to_string()]));
     }
 
     #[test]
@@ -467,14 +503,14 @@ mod tests {
         assert!(["players", "properties", "eula", "console", "backups"].iter().all(|c| bedrock.contains(c)) && !bedrock.contains(&"java") && !bedrock.contains(&"content"));
         let terraria = caps("terraria");
         assert!(terraria.contains(&"players") && !terraria.contains(&"properties") && !terraria.contains(&"eula") && !terraria.contains(&"java"));
-        assert!(!caps("palworld").contains(&"players") && caps("palworld").contains(&"files"));
+        assert!(caps("palworld").contains(&"players") && caps("palworld").contains(&"files") && caps("satisfactory").contains(&"players") && !caps("valheim").is_empty());
         let v = test_srv("valheim", "latest", None, "balanced");
         assert!(v.is_game() && !v.is_mc() && !v.needs_eula() && test_srv("bedrock", "x", None, "balanced").needs_eula());
         assert!(!test_srv("custom", "custom", None, "balanced").is_game());
     }
 
     #[test]
-    fn command_needs_installed_files_and_no_container() {
+    fn command_needs_installed_files_and_runs_in_a_container_too() {
         use crate::runtimes::launch::test_srv;
         let dir = std::env::temp_dir().join(format!("moss-games-cmd-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -488,7 +524,7 @@ mod tests {
         std::fs::write(dir.join("bedrock_server"), "").unwrap();
         assert_eq!(command(&dir, &s).unwrap().last().map(String::as_str), Some("./bedrock_server"));
         s.isolation = "container".into();
-        assert_eq!(command(&dir, &s).unwrap_err().code, "container.unsupported");
+        assert_eq!(command(&dir, &s).unwrap().last().map(String::as_str), Some("./bedrock_server"), "same argv inside the container");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

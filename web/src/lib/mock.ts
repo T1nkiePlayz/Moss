@@ -1,11 +1,13 @@
 // In-memory backend for `VITE_MOCK=1`. Never imported in production builds.
 import type * as A from './api';
 import { ApiError } from './api';
+import { handlePlayerLists, NONE as NOT_PLAYERLISTS } from './mock-playerlists';
 import { handleWebhooks, NONE as NOT_WEBHOOK } from './mock-webhooks';
 import { handleWorkflows, NONE as NOT_WORKFLOW } from './mock-workflows';
 import { handleRemote, NONE as NOT_REMOTE, seedRemote } from './mock-remote';
 import { extraRuntimes, handleContent, hangarHits, inspectModpack, itemsFromPack, NONE, seedContent, versionsFor } from './mock-content';
 import { handleOps, handleOpsGlobal, revertConfig } from './mock-ops';
+import { handleGameMods, NONE as NOT_GAMEMODS } from './mock-gamemods';
 import { nextDailyRun, offsetName } from './tz';
 
 const uid = () => crypto.randomUUID();
@@ -26,14 +28,14 @@ function mk(p: Partial<A.Server> & { name: string; runtime: string }): A.Server 
   };
 }
 const servers: A.Server[] = [
-  mk({ name: 'Survival SMP', runtime: 'paper', desired: 'running', state: 'running', state_since: ago(26 * HOUR), uptime_s: 26 * 3600 + 421, pid: 4211, players: { online: 3, max: 20, sample: ['Alex_Builds', 'creeper_hug', 'Notch2'] }, motd: 'Welcome to the Survival SMP', cpu_pct: 18, mem_bytes: 2.4e9, tags: ['friends', 'main'], notes: 'Weekly restart Sunday 04:00.' }),
+  mk({ name: 'Survival SMP', runtime: 'paper', desired: 'running', state: 'running', state_since: ago(26 * HOUR), uptime_s: 26 * 3600 + 421, pid: 4211, players: { online: 3, max: 20, sample: ['Alex_Builds', 'creeper_hug', 'Notch2'] }, motd: 'Welcome to the Survival SMP', cpu_pct: 18, mem_bytes: 2.4e9, tags: ['friends', 'main'], notes: 'Weekly restart Sunday 04:00.', capabilities: [...caps, 'map'] }),
   mk({ name: 'Creative Plots', runtime: 'purpur', port: 25566, memory_mb: 2048, tags: ['creative'], created_at: ago(12 * DAY) }),
   mk({ name: 'Modded Fabric', runtime: 'fabric', loader_version: '0.16.9', port: 25567, memory_mb: 6144, content_kind: 'mods', desired: 'running', state: 'crashed', state_detail: 'Exited with code 1 (OutOfMemoryError)', state_since: ago(14 * MIN), tags: ['mods'], created_at: ago(5 * DAY), capabilities: caps.filter((c) => c !== 'players') }),
-  mk({ name: 'Terraria', runtime: 'terraria', game_version: '1.4.4.9', java_major: 0, port: 7777, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(9 * HOUR), uptime_s: 9 * 3600 + 80, pid: 5120, players: { online: 2, max: 8, sample: ['Guide', 'Dryad_fan'] }, cpu_pct: 4, mem_bytes: 6.2e8, tags: ['game'], created_at: ago(9 * DAY), capabilities: gameCaps('players') }),
-  mk({ name: 'Valheim', runtime: 'valheim', game_version: 'latest', java_major: 0, port: 2456, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(2 * DAY), uptime_s: 2 * 86400 + 900, pid: 5230, players: { online: 4, max: 10, sample: ['Ragnar', 'Freya', 'Bjorn', 'Astrid'] }, cpu_pct: 31, mem_bytes: 3.4e9, tags: ['game', 'friends'], created_at: ago(20 * DAY), capabilities: gameCaps('players') }),
-  mk({ name: 'Factorio', runtime: 'factorio', game_version: '2.0.55', java_major: 0, port: 34197, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(5 * HOUR), uptime_s: 5 * 3600 + 12, pid: 5340, players: { online: 1, max: 0, sample: ['engineer42'] }, cpu_pct: 22, mem_bytes: 1.1e9, tags: ['game'], created_at: ago(14 * DAY), capabilities: gameCaps('players') }),
+  mk({ name: 'Terraria', runtime: 'terraria', game_version: '1.4.4.9', java_major: 0, port: 7777, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(9 * HOUR), uptime_s: 9 * 3600 + 80, pid: 5120, players: { online: 2, max: 8, sample: ['Guide', 'Dryad_fan'] }, cpu_pct: 4, mem_bytes: 6.2e8, tags: ['game'], created_at: ago(9 * DAY), capabilities: gameCaps('players', 'config') }),
+  mk({ name: 'Valheim', runtime: 'valheim', game_version: 'latest', java_major: 0, port: 2456, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(2 * DAY), uptime_s: 2 * 86400 + 900, pid: 5230, players: { online: 4, max: 10, sample: ['Ragnar', 'Freya', 'Bjorn', 'Astrid'] }, cpu_pct: 31, mem_bytes: 3.4e9, tags: ['game', 'friends'], created_at: ago(20 * DAY), capabilities: gameCaps('players', 'game_mods', 'config') }),
+  mk({ name: 'Factorio', runtime: 'factorio', game_version: '2.0.55', java_major: 0, port: 34197, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(5 * HOUR), uptime_s: 5 * 3600 + 12, pid: 5340, players: { online: 1, max: 0, sample: ['engineer42'] }, cpu_pct: 22, mem_bytes: 1.1e9, tags: ['game'], created_at: ago(14 * DAY), capabilities: gameCaps('players', 'game_mods', 'config') }),
   mk({ name: 'Bedrock Realm', runtime: 'bedrock', game_version: '1.21.124.2', java_major: 0, port: 19132, memory_mb: 2048, content_kind: 'none', desired: 'stopped', state: 'stopped', tags: ['game', 'bedrock'], created_at: ago(6 * DAY), capabilities: gameCaps('players', 'properties', 'eula') }),
-  mk({ name: 'CS2 Wingman', runtime: 'cs2', game_version: 'latest', java_major: 0, port: 27015, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(3 * HOUR), uptime_s: 3 * 3600 + 300, pid: 5450, players: { online: 6, max: 10, sample: ['s1mple_fan', 'AWPer', 'rush_b', 'eco_king', 'smoke_me', 'flashbang'] }, motd: 'de_dust2', cpu_pct: 46, mem_bytes: 5.8e9, tags: ['game', 'lan'], created_at: ago(3 * DAY), capabilities: gameCaps('players') }),
+  mk({ name: 'CS2 Wingman', runtime: 'cs2', game_version: 'latest', java_major: 0, port: 27015, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(3 * HOUR), uptime_s: 3 * 3600 + 300, pid: 5450, players: { online: 6, max: 10, sample: ['s1mple_fan', 'AWPer', 'rush_b', 'eco_king', 'smoke_me', 'flashbang'] }, motd: 'de_dust2', cpu_pct: 46, mem_bytes: 5.8e9, tags: ['game', 'lan'], created_at: ago(3 * DAY), capabilities: gameCaps('players', 'game_mods', 'config') }),
   mk({ name: 'Velocity Proxy', runtime: 'velocity', game_version: '3.4.0', port: 25577, memory_mb: 512, java_major: 21, content_kind: 'proxy_plugins', desired: 'running', state: 'running', state_since: ago(3 * DAY), uptime_s: 3 * 86400 + 12, pid: 2210, players: { online: 3, max: 100, sample: [] }, cpu_pct: 2, mem_bytes: 3.1e8, tags: ['edge'], capabilities: caps.filter((c) => !['backups', 'properties'].includes(c)) }),
 ];
 const sv = (id: string) => {
@@ -55,7 +57,7 @@ const runtimes: A.Runtime[] = [
   ...gameRuntimes(),
 ];
 function gameRuntimes(): A.Runtime[] {
-  const g = (id: string, name: string, description: string, port: number, protocol: 'udp' | 'tcp', platforms: string[], tracking: 'none' | 'log' | 'a2s', max: number, extra: Partial<A.Runtime> = {}): A.Runtime =>
+  const g = (id: string, name: string, description: string, port: number, protocol: 'udp' | 'tcp', platforms: string[], tracking: 'none' | 'log' | 'a2s' | 'rcon' | 'api', max: number, extra: Partial<A.Runtime> = {}): A.Runtime =>
     ({ id, name, category: 'game', tier: 'experimental', content_kind: 'none', description, installable: true, default_port: port, protocol, platforms, player_tracking: tracking, max_players: max, ...extra });
   const steam = 'via SteamCMD (anonymous). Linux x86_64 only.';
   return [
@@ -68,9 +70,9 @@ function gameRuntimes(): A.Runtime[] {
     g('tf2', 'Team Fortress 2', `Team Fortress 2 dedicated server ${steam} Starts on ctf_2fort.`, 27015, 'udp', ['linux'], 'a2s', 24),
     g('l4d2', 'Left 4 Dead 2', `Left 4 Dead 2 dedicated server ${steam}`, 27015, 'udp', ['linux'], 'a2s', 8),
     g('rust', 'Rust', `Rust dedicated server ${steam} Needs 8 GB or more RAM.`, 28015, 'udp', ['linux'], 'a2s', 50),
-    g('palworld', 'Palworld', `Palworld dedicated server ${steam} 16 GB RAM recommended. Player counts are not available.`, 8211, 'udp', ['linux'], 'none', 32),
-    g('zomboid', 'Project Zomboid', `Project Zomboid dedicated server ${steam} Admin password is generated into moss-game.cfg.`, 16261, 'udp', ['linux'], 'none', 16),
-    g('satisfactory', 'Satisfactory', `Satisfactory dedicated server ${steam} 12 GB RAM recommended.`, 7777, 'udp', ['linux'], 'none', 4),
+    g('palworld', 'Palworld', `Palworld dedicated server ${steam} 16 GB RAM recommended.`, 8211, 'udp', ['linux'], 'rcon', 32),
+    g('zomboid', 'Project Zomboid', `Project Zomboid dedicated server ${steam} Admin password is generated into moss-game.cfg.`, 16261, 'udp', ['linux'], 'rcon', 16),
+    g('satisfactory', 'Satisfactory', `Satisfactory dedicated server ${steam} 12 GB RAM recommended.`, 7777, 'udp', ['linux'], 'api', 4),
   ];
 }
 const gameVersions: Record<string, A.Versions> = {
@@ -85,6 +87,7 @@ const ops: A.Operation[] = [];
 type Handlers = A.EventHandlers;
 const listeners = new Set<Handlers>();
 const emitOp = (o: A.Operation) => listeners.forEach((l) => l.op(structuredClone(o)));
+const mockOnline = (s: A.Server): A.OnlinePlayers => { const mc = ['paper', 'fabric', 'vanilla', 'forge', 'neoforge', 'purpur', 'folia'].includes(s.runtime); const sample = s.players?.sample ?? []; return { players: sample.map((name, i) => ({ name, id: mc ? null : String(i + 2) })), online: s.players?.online ?? 0, source: mc || s.runtime === 'terraria' || s.runtime === 'bedrock' || s.runtime === 'valheim' ? 'tracked' : 'rcon', can_kick: s.runtime !== 'valheim' && s.runtime !== 'velocity', can_ban: s.runtime !== 'valheim' && s.runtime !== 'bedrock' && s.runtime !== 'velocity' }; };
 const emitServer = (s: A.Server) => listeners.forEach((l) => l.server(structuredClone(s)));
 const emitAct = (a: A.Activity) => listeners.forEach((l) => l.activity(a));
 
@@ -393,7 +396,7 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     const rt = runtimes.find((r) => r.id === b.runtime);
     const game = rt?.category === 'game' ? rt : null;
     const s = mk({ name: b.name, runtime: b.runtime, game_version: b.game_version, loader_version: b.loader_version ?? null, memory_mb: b.memory_mb, port: b.port ?? (game?.default_port ?? 25565) + (game ? 0 : 5 + servers.length), desired: 'stopped', state: 'installing', content_kind: rt?.content_kind ?? 'none', eula_accepted: !!b.accept_eula,
-      ...(game ? { java_major: 0, capabilities: gameCaps(...(game.player_tracking !== 'none' ? ['players'] : []), ...(game.id === 'bedrock' ? ['properties', 'eula'] : [])) } : {}) });
+      ...(game ? { java_major: 0, capabilities: gameCaps(...(game.player_tracking !== 'none' ? ['players'] : []), ...(game.id === 'bedrock' ? ['properties', 'eula'] : []), ...(['valheim', 'factorio', 'gmod', 'cs2'].includes(game.id) ? ['game_mods'] : [])) } : {}) });
     servers.push(s); seedFs(s); content[s.id] = b.modpack_token ? itemsFromPack(s, b.modpack_token) : []; emitServer(s);
     log('server.create', s.name);
     const o = startOp('server.install', `Installing ${s.name}`, s.id, ['Resolving build', 'Downloading server jar', 'Verifying checksum', 'Writing config', 'First-run setup'], { done: () => setState(s, 'stopped') });
@@ -411,6 +414,8 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     }
     if (S(/^\/actions\/(\w+)$/)) { doAction(s, mm![1]); return { server: s }; }
     if (sub === '/command') { log('server.command', s.name, b.command); return; }
+    if (sub === '/players/online') return mockOnline(s);
+    if (S(/^\/players\/([^/]+)\/(kick|ban)$/)) { const n = decodeURIComponent(mm![1]); if (s.players) { s.players.sample = s.players.sample.filter((x) => x !== n); s.players.online = s.players.sample.length; } log('player.' + mm![2], s.name, n); return; }
     if (sub === '/stats') return { samples: stats(s) };
     if (sub === '/timeline') return timeline(s);
     if (sub === '/health') return health().filter((f) => f.server_id === s.id);
@@ -435,6 +440,10 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     if (/^\/config(\/|$)/.test(sub)) {
       const r = await handleOps({ uid, now, fs, pushUndo, log }, s, sub, method, b, qs);
       if (r !== NONE) return r;
+    }
+    if (/^\/game-mods(\/|$)/.test(sub)) {
+      const r = await handleGameMods({ uid, now, op: (kind, title, sid, stages, opts) => startOp(kind, title, sid, stages, opts) }, s, sub, method, b, qs);
+      if (r !== NOT_GAMEMODS) return r;
     }
     if (/^\/(content|upgrade|modpacks|staging)(\/|$)/.test(sub)) {
       const r = await handleContent({ uid, now, ago, op: (...a) => startOp(...a), hits, cfHits, log, pushUndo, backups, content, emitServer }, s, sub, method, b);
@@ -582,7 +591,7 @@ function metricsFor(range: A.MetricRange, base: { cpu: number; mem: number; play
 }
 const err500 = () => new ApiError(500, 'internal', 'The backend returned an unexpected error (mock).', [], 'req_mock123');
 
-const statusPages: A.StatusPage[] = [{ id: 'sp-main', slug: 'k3x9f2m7qa4tz8', path: '/status/k3x9f2m7qa4tz8', title: 'Our servers', description: 'Live status of the community servers.', enabled: true, show_players: true, show_address: 'play.example.com', server_ids: servers.slice(0, 2).map((s) => s.id), created_at: '2026-01-10T12:00:00Z' }];
+const statusPages: A.StatusPage[] = [{ id: 'sp-main', slug: 'k3x9f2m7qa4tz8', path: '/status/k3x9f2m7qa4tz8', title: 'Our servers', description: 'Live status of the community servers.', enabled: true, show_players: true, show_map: false, show_address: 'play.example.com', server_ids: servers.slice(0, 2).map((s) => s.id), created_at: '2026-01-10T12:00:00Z' }];
 function handleStatusPages(method: string, p: string, b: Record<string, any>): unknown {
   const bad = (field: string, message: string) => new ApiError(422, 'validation', message, [{ path: field, message }]);
   const check = (x: Record<string, any>, partial: boolean) => {
@@ -596,7 +605,7 @@ function handleStatusPages(method: string, p: string, b: Record<string, any>): u
   if (p === '/status-pages' && method === 'POST') {
     check(b, false);
     const slug = b.slug || Array.from({ length: 14 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
-    const page: A.StatusPage = { id: uid(), slug, path: `/status/${slug}`, title: String(b.title).trim(), description: String(b.description ?? '').trim(), enabled: b.enabled ?? true, show_players: !!b.show_players, show_address: String(b.show_address ?? '').trim() || null, server_ids: b.server_ids ?? [], created_at: now() };
+    const page: A.StatusPage = { id: uid(), slug, path: `/status/${slug}`, title: String(b.title).trim(), description: String(b.description ?? '').trim(), enabled: b.enabled ?? true, show_players: !!b.show_players, show_map: !!b.show_map, show_address: String(b.show_address ?? '').trim() || null, server_ids: b.server_ids ?? [], created_at: now() };
     statusPages.push(page);
     return page;
   }
@@ -614,6 +623,8 @@ function handleStatusPages(method: string, p: string, b: Record<string, any>): u
 
 async function handleX(method: string, p: string, qs: URLSearchParams, b: Record<string, any>): Promise<unknown> {
   if (p.startsWith('/status-pages')) return handleStatusPages(method, p, b);
+  const pl = await handlePlayerLists({ uid, now }, method, p, b);
+  if (pl !== NOT_PLAYERLISTS) return pl;
   const wh = await handleWebhooks({ uid, now, servers }, method, p, b);
   if (wh !== NOT_WEBHOOK) return wh;
   const wf = await handleWorkflows({ uid, now, servers }, method, p, b);
@@ -643,6 +654,8 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
     return { items, unread: notifs.filter((n) => !n.read).length };
   }
   if (p === '/notifications/read') { const ids = b.ids as string[] | undefined; notifs.forEach((n) => { if (b.all || ids?.includes(n.id)) n.read = true; }); return; }
+  if (p === '/push/key') return { key: 'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8' };
+  if (p === '/push/subscriptions') return;
   if (p === '/notifications/test') {
     await sleep(600);
     return /fail/i.test(String(settings.notify_webhook_url)) ? { delivered: false, detail: 'Gave up after 3 attempts: the server answered HTTP 502.' } : { delivered: true, detail: 'HTTP 204 from discord.com in 212 ms.' };
@@ -694,6 +707,13 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
     const d = Number(qs.get('days') ?? 7);
     return analyticsFor(s, (d === 30 || d === 90 ? d : 7) as A.AnalyticsDays);
   }
+  if (M(/^\/servers\/([^/]+)\/map$/)) {
+    if (failing) throw err500();
+    const s = sv(m![1]);
+    if (!s.capabilities.includes('map')) return { available: false };
+    const up = s.state === 'running';
+    return { available: true, kind: 'bluemap', running: up, reachable: up, url: 'about:blank', expires_at: Math.floor(Date.now() / 1000) + 43200 };
+  }
   if (M(/^\/servers\/([^/]+)\/metrics$/)) {
     if (failing) throw err500();
     const s = sv(m![1]);
@@ -741,6 +761,14 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
     if (s.isolation === 'container') startOp('container.pull', `Download ${imageOf(s)}`, s.id, ['Pulling fs layer', 'Downloading', 'Extracting'], {});
     emitServer(s);
     return s;
+  }
+  if (M(/^\/servers\/([^/]+)\/game-update$/)) {
+    const s = sv(m![1]);
+    const behind = s.runtime === 'terraria' || s.runtime === 'valheim';
+    const st: A.GameUpdate = { installed: s.runtime === 'valheim' ? '25800001' : s.game_version, latest: s.runtime === 'valheim' ? '25909431' : s.runtime === 'terraria' ? '1.4.5.0' : s.game_version, available: behind, checked_at: new Date().toISOString(), source: s.runtime === 'terraria' ? 'terraria.org' : s.runtime === 'valheim' ? 'steamcmd.net' : 'factorio.com' };
+    if (method !== 'POST') return st;
+    if (!st.available) throw new ApiError(409, 'game_update.current', 'the server is already up to date');
+    return op2('server.game_update', `Update ${s.name}`, s.id, ['Taking a pre-change backup', 'Stopping the server', 'Updating', 'Starting the server'], () => { if (s.runtime === 'terraria') s.game_version = '1.4.5.0'; });
   }
   if (M(/^\/servers\/([^/]+)\/actions\/reinstall$/)) {
     const s = sv(m![1]);

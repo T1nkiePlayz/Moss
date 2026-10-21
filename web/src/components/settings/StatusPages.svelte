@@ -11,7 +11,7 @@
   let form = $state<{ page: StatusPage | null } | null>(null);
 
   // form fields
-  let f = $state({ title: '', slug: '', description: '', show_address: '', show_players: false, enabled: true, server_ids: [] as string[] });
+  let f = $state({ title: '', slug: '', description: '', show_address: '', show_players: false, show_map: false, enabled: true, server_ids: [] as string[] });
   let busy = $state(false);
   let fieldErr = $state<Record<string, string>>({});
   let top = $state('');
@@ -23,8 +23,8 @@
   const names = (ids: string[]) => ids.map((id) => servers.list.find((s) => s.id === id)?.name ?? 'a removed server');
   function open(page: StatusPage | null) {
     f = page
-      ? { title: page.title, slug: page.slug, description: page.description, show_address: page.show_address ?? '', show_players: page.show_players, enabled: page.enabled, server_ids: [...page.server_ids] }
-      : { title: '', slug: '', description: '', show_address: '', show_players: false, enabled: true, server_ids: [] };
+      ? { title: page.title, slug: page.slug, description: page.description, show_address: page.show_address ?? '', show_players: page.show_players, show_map: page.show_map, enabled: page.enabled, server_ids: [...page.server_ids] }
+      : { title: '', slug: '', description: '', show_address: '', show_players: false, show_map: false, enabled: true, server_ids: [] };
     fieldErr = {}; top = ''; form = { page };
   }
   function move(i: number, d: number) {
@@ -40,7 +40,7 @@
     e.preventDefault(); fieldErr = {}; top = '';
     if (!f.title.trim()) { fieldErr.title = 'Give the page a title.'; return; }
     busy = true;
-    const body = { title: f.title.trim(), description: f.description.trim(), show_address: f.show_address.trim() || null, show_players: f.show_players, enabled: f.enabled, server_ids: f.server_ids };
+    const body = { title: f.title.trim(), description: f.description.trim(), show_address: f.show_address.trim() || null, show_players: f.show_players, show_map: f.show_map, enabled: f.enabled, server_ids: f.server_ids };
     try {
       if (form?.page) { await apiOps.patchStatusPage(form.page.id, { ...body, slug: f.slug.trim() || form.page.slug }); toast('success', 'Status page updated'); }
       else { await apiOps.addStatusPage({ ...body, slug: f.slug.trim() || undefined }); toast('success', 'Status page created'); }
@@ -81,7 +81,7 @@
             <button class="btn ghost icon sm" aria-label={`Delete ${p.title}`} onclick={() => remove(p)}><Icon name="trash" size={14} /></button>
           </div>
           <div class="xs muted mono ellipsis" title={url(p)}>{url(p)}</div>
-          <div class="xs muted">{p.server_ids.length ? names(p.server_ids).join(', ') : 'No servers chosen'}{p.show_players ? ' · shows player counts' : ''}</div>
+          <div class="xs muted">{p.server_ids.length ? names(p.server_ids).join(', ') : 'No servers chosen'}{p.show_players ? ' · shows player counts' : ''}{p.show_map ? ' · shows live map' : ''}</div>
         </li>
       {/each}
     </ul>
@@ -97,6 +97,7 @@
       <div class="field"><label for="spa">Public address <span class="muted">(optional)</span></label><input id="spa" class="input mono" bind:value={f.show_address} maxlength="100" placeholder="play.example.com" autocomplete="off" spellcheck="false" aria-describedby="spa-h" /><span class="hint" id="spa-h">Shown to visitors exactly as typed. Moss never shows the address it listens on.</span>{#if fieldErr.show_address}<span class="err" role="alert">{fieldErr.show_address}</span>{/if}</div>
       <div class="field"><label for="sps">Link name <span class="muted">(optional)</span></label><input id="sps" class="input mono" bind:value={f.slug} maxlength="40" placeholder={form.page ? '' : 'a random one is made for you'} autocomplete="off" spellcheck="false" aria-describedby="sps-h" aria-invalid={!!fieldErr.slug} /><span class="hint" id="sps-h">3 to 40 lowercase letters, digits or dashes. A short, guessable name lets anyone find the page.</span>{#if fieldErr.slug}<span class="err" role="alert">{fieldErr.slug}</span>{/if}</div>
       <label class="row g8"><input type="checkbox" class="check" bind:checked={f.show_players} /><span>Show how many players are online</span></label>
+      <label class="row g8"><input type="checkbox" class="check" bind:checked={f.show_map} /><span>Show the live map of running servers that have a map plugin</span></label>
       <label class="row g8"><input type="checkbox" class="check" bind:checked={f.enabled} /><span>Public (anyone with the link can see it)</span></label>
       <fieldset class="evs">
         <legend class="label">Servers shown, in order</legend>

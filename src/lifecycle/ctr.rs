@@ -19,7 +19,7 @@ pub fn limits(s: &Srv) -> (u64, Option<f64>, u32) {
 pub fn run_spec(st: &St, s: &Srv, argv: Vec<String>) -> RunSpec {
     let (memory_mb, cpus, pids) = limits(s);
     RunSpec {
-        name: container::container_name(&s.id), server_id: s.id.clone(), image: image::for_server(s), dir: s.dir(st), port: s.port as u16, network: container::ports::Network::parse(&s.network).unwrap_or(container::ports::Network::GameOnly), extra_ports: container::ports::parse_stored(&s.extra_ports), memory_mb, cpus, pids,
+        name: container::container_name(&s.id), server_id: s.id.clone(), image: image::for_server(s), dir: s.dir(st), port: s.port as u16, proto: s.game().map_or(container::ports::Proto::Tcp, |g| match g.proto { crate::games::Proto::Udp => container::ports::Proto::Udp, crate::games::Proto::Tcp => container::ports::Proto::Tcp }), span: s.game().map_or(0, |g| g.span()), network: container::ports::Network::parse(&s.network).unwrap_or(container::ports::Network::GameOnly), extra_ports: container::ports::parse_stored(&s.extra_ports), memory_mb, cpus, pids,
         uid: unsafe { libc::getuid() }, gid: unsafe { libc::getgid() }, selinux: selinux_enforcing(), argv,
     }
 }
@@ -103,6 +103,14 @@ pub async fn stop_container(st: &St, s: &Srv, timeout_s: u32) {
     if let Ok(eng) = container::engine(st).await {
         let n = container::container_name(&s.id);
         let _ = tokio::task::spawn_blocking(move || eng.stop(&n, timeout_s)).await;
+    }
+}
+
+/// Send a signal to the container's main process (the game; it is PID 1 after `exec`).
+pub async fn signal_container(st: &St, s: &Srv, sig: i32) {
+    if let Ok(eng) = container::engine(st).await {
+        let n = container::container_name(&s.id);
+        let _ = tokio::task::spawn_blocking(move || eng.signal(&n, sig)).await;
     }
 }
 

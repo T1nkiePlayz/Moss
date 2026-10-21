@@ -14,7 +14,7 @@ export interface Runtime {
   id: string; name: string; category: 'official' | 'plugins' | 'modded' | 'proxy' | 'custom' | 'game';
   tier: 'stable' | 'experimental' | 'planned'; content_kind: ContentKind; description: string; installable: boolean;
   /** Games only (category `game`). */
-  default_port?: number; protocol?: 'udp' | 'tcp'; platforms?: string[]; player_tracking?: 'none' | 'log' | 'a2s'; needs_eula?: boolean; max_players?: number;
+  default_port?: number; protocol?: 'udp' | 'tcp'; platforms?: string[]; player_tracking?: 'none' | 'log' | 'a2s' | 'rcon' | 'api'; needs_eula?: boolean; max_players?: number;
 }
 export interface Versions { versions: { id: string; stable: boolean }[]; recommended: string; loader_versions?: Record<string, { id: string; recommended: boolean }[]> }
 export interface JavaInstall { major: number; path: string; managed: boolean; version: string }
@@ -32,6 +32,7 @@ export interface CreateServer {
   accept_eula: boolean; flags_profile?: string; autostart?: boolean; custom?: { command: string[] }; modpack_token?: string;
 }
 export interface StatSample { t: number; cpu: number; mem: number; players: number | null }
+export interface OnlinePlayers { players: { name: string; id: string | null }[]; online: number; source: 'rcon' | 'api' | 'tracked'; can_kick: boolean; can_ban: boolean }
 export interface TimelineEvent { time: string; kind: 'start' | 'ready' | 'stop' | 'crash' | 'restart' | 'backup' | 'install' | 'update' | 'undo'; detail: string }
 export interface FileEntry { name: string; kind: 'dir' | 'file' | 'symlink'; size: number; modified: string }
 export interface FileList { path: string; entries: FileEntry[] }
@@ -118,7 +119,7 @@ export interface Backup {
   verified_at: string | null; note: string; kind: 'manual' | 'scheduled' | 'pre-change'; consistent: boolean; files: number;
 }
 export interface Schedule {
-  id: string; server_id: string; kind: 'backup' | 'restart' | 'start' | 'stop' | 'command'; command: string | null;
+  id: string; server_id: string; kind: 'backup' | 'restart' | 'start' | 'stop' | 'command' | 'game_update'; command: string | null;
   every_minutes: number | null; daily_at: string | null; tz_offset_min: number; enabled: boolean; keep: number | null;
   last_run: string | null; next_run: string | null; last_status: string | null;
 }
@@ -127,13 +128,14 @@ export interface Operation {
   state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; stage: string; progress: number | null;
   log: string[]; error: string | null; created_at: string; started_at: string | null; ended_at: string | null; cancellable: boolean;
 }
-export interface ConfigFileInfo { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean }
+export type ConfigFormat = 'yaml' | 'toml' | 'json' | 'keyvalue' | 'cvar' | 'ini';
+export interface ConfigFileInfo { id: string; title: string; path: string; format: ConfigFormat; exists: boolean; creatable?: boolean }
 export interface ConfigField {
   key: string; type: 'bool' | 'int' | 'float' | 'string' | 'enum' | string; default: unknown; group: string; description: string; min: number | null; max: number | null; options: string[];
   restart: boolean; secret: boolean; danger: boolean; mixed: boolean; present: boolean; value: unknown;
 }
 export interface ConfigSnapshot { id: string; title: string; created_at: string }
-export interface ConfigFile { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean; raw: string; parse_error: string | null; fields: ConfigField[]; history: ConfigSnapshot[] }
+export interface ConfigFile { id: string; title: string; path: string; format: ConfigFormat; exists: boolean; creatable?: boolean; raw: string; parse_error: string | null; fields: ConfigField[]; history: ConfigSnapshot[] }
 export interface ConfigDiff { current: string; previous: string | null; snapshot: ConfigSnapshot | null }
 export interface SavedView { id: string; scope: 'servers' | 'content'; name: string; filters: Record<string, unknown>; sort: string; created_at: string }
 export interface Blueprint { id: string; name: string; runtime: string; game_version: string; loader_version: string | null; memory_mb: number; properties: number; content: number; schedules: number; created_by: string; created_at: string }
@@ -243,7 +245,7 @@ export function send<T = void>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path
 }
 export const clearCache = () => cache.clear();
 
-const q = (o: Record<string, string | number | undefined | null>) => {
+export const q = (o: Record<string, string | number | undefined | null>) => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(o)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v));
   const s = p.toString();
@@ -486,7 +488,7 @@ export interface Schedule { tz?: string }
 export type AuditMode = 'redacted' | 'all' | 'off';
 export interface Settings { notify_webhook_url?: string; notify_events?: string[]; audit_console_commands?: AuditMode; access_message?: string }
 
-export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security' | 'webhook_disabled';
+export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security' | 'webhook_disabled' | 'player_join';
 export type Severity = 'info' | 'warn' | 'critical';
 export interface AppNotification { id: string; time: string; kind: NotificationKind; severity: Severity; title: string; body: string; server_id: string | null; read: boolean }
 export interface NotificationList { items: AppNotification[]; unread: number }
@@ -518,8 +520,10 @@ export interface WebhookList { items: Webhook[]; event_types: WebhookEventType[]
 export interface WebhookDelivery { id: string; event_id: string; type: string; test: boolean; state: 'pending' | 'delivered' | 'dead'; attempts: number; max_attempts: number; created_at: string; finished_at: string | null; next_attempt_at: string | null; status_code: number | null; latency_ms: number | null; response: string | null; error: string | null }
 export interface WebhookInput { name?: string; url?: string; events?: string[]; server_ids?: string[]; enabled?: boolean }
 
-export interface StatusPage { id: string; slug: string; path: string; title: string; description: string; enabled: boolean; show_players: boolean; show_address: string | null; server_ids: string[]; created_at: string }
-export interface StatusPageInput { title?: string; slug?: string; description?: string; enabled?: boolean; show_players?: boolean; show_address?: string | null; server_ids?: string[] }
+/** `url` is a signed, expiring path to the proxied map (`/map/{id}/{token}/`); `expires_at` is unix seconds. */
+export interface ServerMap { available: boolean; kind?: 'bluemap' | 'squaremap' | 'pl3xmap' | 'dynmap'; running?: boolean; reachable?: boolean; url?: string; expires_at?: number }
+export interface StatusPage { id: string; slug: string; path: string; title: string; description: string; enabled: boolean; show_players: boolean; show_map: boolean; show_address: string | null; server_ids: string[]; created_at: string }
+export interface StatusPageInput { title?: string; slug?: string; description?: string; enabled?: boolean; show_players?: boolean; show_map?: boolean; show_address?: string | null; server_ids?: string[] }
 export type WorkflowAction =
   | { type: 'start' | 'stop' | 'restart' | 'backup'; server: string }
   | { type: 'command'; server: string; command: string }
@@ -593,3 +597,15 @@ export const apiOps = {
 };
 /** Supabase auth REST calls in mock mode are answered by the mock backend (dev only). */
 export const mockAuthCall = (method: string, path: string, body?: unknown): Promise<any> | null => (mock ? mock.handleAuth(method, path, body) : null);
+
+// ---- Game mods (Valheim, Factorio, Garry's Mod, CS2)
+export interface GameMod { id: string; title: string; version: string; enabled: boolean; auto: boolean; requires: string[]; url: string; installed_at: string }
+export interface GameModHit { id: string; title: string; author: string | null; summary: string | null; downloads: number | null; icon_url: string | null; version?: string | null; url: string }
+export interface GameModsInfo {
+  kind: 'thunderstore' | 'factorio' | 'workshop'; runtime: string; installed: GameMod[]; running: boolean; bepinex?: boolean;
+  credentials?: { username: string | null; has_token: boolean };
+  workshop?: { field: 'collection' | 'map'; id: string | null; url: string | null; has_api_key: boolean };
+}
+/** GET /servers/{id}/game-update: installed vs latest version of a game server's software. */
+export interface GameUpdate { installed: string | null; latest: string | null; available: boolean; checked_at: string; source: string }
+/** Game servers (everything that is not a Minecraft Java server, a custom command or the simulator). */

@@ -35,7 +35,7 @@
   async function loadFile() {
     if (!fileId) { data = null; return; }
     err = '';
-    try { data = await api.configFile(s.id, fileId); raw = data.raw; edits = {}; reset = new Set(); diff = null; if (!data.exists) mode = 'form'; } catch (e) { err = errMsg(e); data = null; }
+    try { data = await api.configFile(s.id, fileId); raw = data.raw; edits = {}; reset = new Set(); diff = null; if (!data.exists && !data.creatable) mode = 'form'; } catch (e) { err = errMsg(e); data = null; }
   }
   $effect(() => { s.id; loadFiles(); });
   $effect(() => { s.id; fileId; loadFile(); });
@@ -115,8 +115,8 @@
 
   {#if !data}
     {#if err}<States kind="error" text={err} retry={loadFile} />{:else}<States kind="loading" rows={3} />{/if}
-  {:else if !data.exists}
-    <States kind="empty" icon="file" title="{data.title} has not been created yet" text="Minecraft writes {data.path} the first time the server starts. Start the server once, then come back." />
+  {:else if !data.exists && !data.creatable}
+    <States kind="empty" icon="file" title="{data.title} has not been created yet" text="The server writes {data.path} the first time it starts. Start the server once, then come back." />
   {:else}
     {#if data.parse_error}<div class="banner danger" style="margin-bottom:16px" role="alert"><Icon name="alert" size={16} /><span>This file has a syntax problem, so the form is disabled: {data.parse_error}. Fix it in the raw editor.</span></div>{/if}
 

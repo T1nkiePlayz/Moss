@@ -33,11 +33,13 @@
     const t: { id: string; label: string; icon: string }[] = [{ id: 'overview', label: 'Overview', icon: 'home' }];
     if (c.includes('console')) t.push({ id: 'console', label: 'Console', icon: 'terminal' });
     if (c.includes('files')) t.push({ id: 'files', label: 'Files', icon: 'folder' });
-    if (c.includes('properties')) t.push({ id: 'config', label: 'Config', icon: 'sliders' });
+    if (c.includes('properties') || c.includes('config')) t.push({ id: 'config', label: 'Config', icon: 'sliders' });
     if (c.includes('content') && s.content_kind !== 'none') t.push({ id: 'content', label: kindName[s.content_kind] ?? 'Content', icon: 'puzzle' });
+    if (c.includes('game_mods')) t.push({ id: 'game-mods', label: 'Mods', icon: 'puzzle' });
     if (c.includes('java')) t.push({ id: 'upgrade', label: 'Upgrade', icon: 'arrow-up' });
     if (c.includes('backups')) t.push({ id: 'backups', label: 'Backups', icon: 'archive' });
     if (c.includes('players')) t.push({ id: 'players', label: 'Players', icon: 'users' });
+    if (c.includes('map')) t.push({ id: 'map', label: 'Map', icon: 'layers' });
     if (isAdmin()) t.push({ id: 'access', label: 'Access', icon: 'shield' });
     t.push({ id: 'settings', label: 'Settings', icon: 'settings' });
     return t;
@@ -47,9 +49,11 @@
     files: () => import('./server/Files.svelte'),
     config: () => import('./server/Config.svelte'),
     content: () => import('./server/Content.svelte'),
+    'game-mods': () => import('./server/GameMods.svelte'),
     upgrade: () => import('./server/Upgrade.svelte'),
     backups: () => import('./server/Backups.svelte'),
     players: () => import('./server/Players.svelte'),
+    map: () => import('./server/Map.svelte'),
     access: () => import('./server/Access.svelte'),
     settings: () => import('./server/Settings.svelte'),
   } as const;

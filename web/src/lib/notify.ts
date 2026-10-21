@@ -3,7 +3,7 @@ import type { AppNotification, NotificationKind, Severity } from './api';
 
 export const kindLabel: Record<NotificationKind, string> = {
   crash: 'Crash', crash_loop: 'Crash loop', backup_failed: 'Backup failed', disk_low: 'Low disk', operation_failed: 'Operation failed',
-  restart_failed: 'Restart failed', update_available: 'Update available', security: 'Security', webhook_disabled: 'Webhook switched off',
+  restart_failed: 'Restart failed', update_available: 'Update available', security: 'Security', webhook_disabled: 'Webhook switched off', player_join: 'Player joined',
 };
 /** Event kinds an admin can subscribe the webhook to, in display order, with the contract's defaults. */
 export const webhookKinds: { kind: NotificationKind; label: string; hint: string }[] = [
@@ -16,6 +16,7 @@ export const webhookKinds: { kind: NotificationKind; label: string; hint: string
   { kind: 'update_available', label: 'Update available', hint: 'A new Moss or server version is ready.' },
   { kind: 'webhook_disabled', label: 'Webhook switched off', hint: 'An event webhook failed too many times and was turned off.' },
   { kind: 'security', label: 'Security', hint: 'Sign-in and access events worth reviewing.' },
+  { kind: 'player_join', label: 'Player joined', hint: 'Someone joins a server. Off by default; can be frequent.' },
 ];
 export const defaultEvents: NotificationKind[] = ['crash', 'crash_loop', 'backup_failed', 'disk_low', 'restart_failed'];
 

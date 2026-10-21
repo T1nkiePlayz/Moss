@@ -8,7 +8,7 @@ pub(super) async fn container_status(State(st): State<St>, _user: User) -> ApiRe
     Ok(Json(status_json(&st).await))
 }
 
-const DEFAULT_IMAGE: &str = "docker.io/library/eclipse-temurin:<java version>-jre";
+const DEFAULT_IMAGE: &str = "docker.io/library/eclipse-temurin:<java version>-jre (games: their own image, shown per server)";
 
 async fn status_json(st: &St) -> Value {
     match crate::container::engine(st).await {

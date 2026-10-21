@@ -24,11 +24,17 @@ mod activity;
 mod assets;
 mod backup_destinations;
 mod container;
+pub(crate) mod game_mods;
+mod game_update;
 mod java;
 mod limits;
+mod map_proxy;
 mod metrics;
 mod notifications;
+mod push;
 pub mod origin;
+mod player_lists;
+mod players_online;
 mod reinstall;
 mod servers;
 mod session;
@@ -40,8 +46,8 @@ mod tokens;
 mod webhooks;
 mod workflows;
 
-use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
-use {analytics::*, metrics::*, notifications::*, status_pages::*, support::*, webhooks::*, workflows::*};
+use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use game_update::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
+use {analytics::*, metrics::*, notifications::*, push::*, status_pages::*, support::*, webhooks::*, workflows::*};
 pub use servers::{create_server_from_value, free_port_for};
 
 type Q = Query<HashMap<String, String>>;
@@ -84,8 +90,17 @@ pub fn router(st: St) -> Router {
         .route("/container/status", get(container_status))
         .route("/servers/{id}/container/pull", post(container_pull))
         .route("/servers/{id}/actions/reinstall", post(server_reinstall))
+        .route("/servers/{id}/game-update", get(game_update_status).post(game_update_start))
         .route("/servers/{id}/actions/{action}", post(server_action))
         .route("/servers/{id}/command", post(server_command))
+        .route("/servers/{id}/players/online", get(players_online::list))
+        .route("/servers/{id}/players/{name}/kick", post(players_online::kick))
+        .route("/servers/{id}/players/{name}/ban", post(players_online::ban))
+        .route("/servers/{id}/player-lists", get(player_lists::server_get).put(player_lists::server_put))
+        .route("/player-lists", get(player_lists::lists).post(player_lists::list_create))
+        .route("/player-lists/{id}", patch(player_lists::list_patch).delete(player_lists::list_delete))
+        .route("/player-lists/{id}/entries", get(player_lists::entries).post(player_lists::entry_add))
+        .route("/player-lists/{id}/entries/{name}", axum::routing::delete(player_lists::entry_remove))
         .route("/servers/{id}/stats", get(server_stats))
         .route("/servers/{id}/timeline", get(server_timeline))
         .route("/servers/{id}/health", get(health::server_health))
@@ -127,6 +142,12 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/upgrade", post(content::upgrade_start))
         .route("/servers/{id}/content/{item}", patch(content::patch_item).delete(content::remove))
         .route("/servers/{id}/content/{item}/update", post(content::update))
+        .route("/servers/{id}/game-mods", get(game_mods::list).post(game_mods::install))
+        .route("/servers/{id}/game-mods/search", get(game_mods::search))
+        .route("/servers/{id}/game-mods/updates", get(game_mods::updates))
+        .route("/servers/{id}/game-mods/workshop", axum::routing::put(game_mods::workshop_put))
+        .route("/servers/{id}/game-mods/credentials", axum::routing::put(game_mods::credentials_put))
+        .route("/servers/{id}/game-mods/{item}", patch(game_mods::patch).delete(game_mods::delete))
         .route("/backups", get(backups::list_all))
         .route("/servers/{id}/backups", get(backups::list).post(backups::create))
         .route("/backups/{id}", patch(backups::patch).delete(backups::delete))
@@ -161,6 +182,8 @@ pub fn router(st: St) -> Router {
         .route("/notifications", get(notifications_list))
         .route("/notifications/read", post(notifications_read))
         .route("/notifications/test", post(notifications_test))
+        .route("/push/key", get(push_key))
+        .route("/push/subscriptions", post(push_subscribe).delete(push_unsubscribe))
         .route("/webhooks", get(webhooks_list).post(webhooks_create))
         .route("/webhooks/{id}", patch(webhooks_patch).delete(webhooks_delete))
         .route("/webhooks/{id}/rotate-secret", post(webhooks_rotate))
@@ -171,6 +194,7 @@ pub fn router(st: St) -> Router {
         .route("/workflows/{id}", get(workflows_get).patch(workflows_patch).delete(workflows_delete))
         .route("/workflows/{id}/test", post(workflows_test))
         .route("/workflows/{id}/runs", get(workflows_runs))
+        .route("/servers/{id}/map", get(map_proxy::map_info))
         .route("/servers/{id}/metrics", get(server_metrics))
         .route("/servers/{id}/analytics", get(server_analytics))
         .route("/metrics/host", get(host_metrics))
@@ -195,6 +219,8 @@ pub fn router(st: St) -> Router {
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
         .layer(axum::extract::DefaultBodyLimit::max(32 << 20)) // fits the editor's 8 MiB text files even if JSON escaping doubles them
         .layer(tower_http::trace::TraceLayer::new_for_http())
+        // added after the layers above: the map proxy sets its own headers (it must stay frameable by the UI)
+        .merge(map_proxy::public_routes())
         .with_state(st)
 }
 

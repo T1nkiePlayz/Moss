@@ -343,6 +343,9 @@ async fn write_config(ctx: &OpCtx, g: &Game, s: &Srv, dir: &Path) -> Result<()> 
             }
         }
     }
+    let (d, g) = (dir.to_path_buf(), g.id);
+    // Remote admin: every game with RCON gets a generated rcon_password in moss-game.cfg.
+    tokio::task::spawn_blocking(move || super::get(g).map(|g| super::rcon_setup::ensure_password(&d, g))).await?;
     Ok(())
 }
 

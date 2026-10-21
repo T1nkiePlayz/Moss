@@ -19,7 +19,7 @@ static BEDROCK_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"bedrock-ser
 /// "1449" -> "1.4.4.9": Terraria's file names are the version with the dots removed (every component is one digit).
 pub fn terraria_dotted(digits: &str) -> String { digits.chars().map(String::from).collect::<Vec<_>>().join(".") }
 
-fn version_key(v: &str) -> Vec<u64> { v.split('.').filter_map(|p| p.parse().ok()).collect() }
+pub fn version_key(v: &str) -> Vec<u64> { v.split('.').filter_map(|p| p.parse().ok()).collect() }
 
 /// Versions found in terraria.org's listing (any string shaped like `terraria-server-1449.zip`), newest first.
 pub fn terraria_versions(listing: &Value) -> Vec<String> {
@@ -109,6 +109,61 @@ pub async fn resolve(st: &St, g: &Game, version: &str) -> Result<Resolved> {
     Ok(Resolved { url, hash: None::<Hash>, java_major: 0, loader_version: None })
 }
 
+// ---------- latest-version lookups (update checks) ----------
+
+const STEAMCMD_INFO: &str = "https://api.steamcmd.net/v1/info";
+const LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The public-branch build id in a steamcmd.net `info/<appid>` document.
+pub fn steam_buildid(doc: &Value, app: u32) -> Option<String> {
+    match &doc["data"][app.to_string()]["depots"]["branches"]["public"]["buildid"] {
+        Value::String(s) if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// Newest version in terraria.org's listing document.
+pub fn terraria_latest(listing: &Value) -> Option<String> { terraria_versions(listing).into_iter().next() }
+
+/// Which Factorio release to compare with: the experimental one when the server already runs a version newer than
+/// the stable release, otherwise the stable one.
+pub fn factorio_target(installed: &str, versions: &[(String, bool)]) -> Option<String> {
+    let stable = versions.iter().find(|(_, s)| *s).map(|(v, _)| v.clone());
+    let exp = versions.iter().find(|(_, s)| !*s).map(|(v, _)| v.clone());
+    match (stable, exp) {
+        (Some(s), Some(e)) if version_key(installed) > version_key(&s) => Some(e),
+        (Some(s), _) => Some(s),
+        (None, e) => e,
+    }
+}
+
+async fn get_json_timed(st: &St, url: &str) -> Result<Value> {
+    Ok(st.http.get(url).timeout(LOOKUP_TIMEOUT).send().await.map_err(|e| anyhow!("GET {url}: {e}"))?.error_for_status()?.json().await?)
+}
+
+/// The latest public build id for a Steam app, from steamcmd.net (10 s timeout).
+pub async fn steam_latest_buildid(st: &St, app: u32) -> Result<String> {
+    let doc = get_json_timed(st, &format!("{STEAMCMD_INFO}/{app}")).await?;
+    steam_buildid(&doc, app).ok_or_else(|| anyhow!("steamcmd.net has no public build id for app {app}"))
+}
+
+/// The raw release document of a direct-download game (Bedrock links, Terraria listing, Factorio releases).
+pub async fn release_doc(st: &St, g: &Game) -> Result<Value> {
+    let url = match g.install { Install::Bedrock => BEDROCK_LINKS, Install::Terraria => TERRARIA_LIST, Install::Factorio => FACTORIO_LATEST, Install::Steam(_) => bail!("Steam games have no release document") };
+    get_json_timed(st, url).await
+}
+
+/// The latest version in a release document, as `release_doc` returned it. `installed` picks the Factorio channel.
+pub fn latest_in_doc(g: &Game, doc: &Value, installed: &str) -> Option<String> {
+    match g.install {
+        Install::Bedrock => bedrock_link(doc).map(|(v, _)| v),
+        Install::Terraria => terraria_latest(doc),
+        Install::Factorio => factorio_target(installed, &factorio_versions(doc)),
+        Install::Steam(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +185,26 @@ mod tests {
         let same = json!({"stable": {"headless": "2.0.55"}, "experimental": {"headless": "2.0.55"}});
         assert_eq!(factorio_versions(&same).len(), 1);
         assert_eq!(factorio_url("2.0.55"), "https://factorio.com/get-download/2.0.55/headless/linux64");
+    }
+
+    #[test]
+    fn steamcmd_info_buildid() {
+        let j = json!({"data": {"896660": {"depots": {"branches": {"public": {"buildid": "25909431", "timeupdated": "1"}, "beta": {"buildid": "1"}}}}}, "status": "success"});
+        assert_eq!(steam_buildid(&j, 896660).as_deref(), Some("25909431"));
+        assert_eq!(steam_buildid(&j, 4020), None);
+        assert_eq!(steam_buildid(&json!({"data": {"7": {"depots": {"branches": {"public": {"buildid": 42}}}}}}), 7).as_deref(), Some("42"));
+        assert_eq!(steam_buildid(&json!({"data": {"7": {"depots": {"branches": {"public": {"buildid": "x"}}}}}}), 7), None);
+        assert_eq!(steam_buildid(&json!({"data": []}), 7), None);
+    }
+
+    #[test]
+    fn factorio_channel_follows_the_installed_version() {
+        let v = vec![("2.0.55".to_string(), true), ("2.1.1".to_string(), false)];
+        assert_eq!(factorio_target("2.0.50", &v).as_deref(), Some("2.0.55"));
+        assert_eq!(factorio_target("2.0.55", &v).as_deref(), Some("2.0.55"));
+        assert_eq!(factorio_target("2.1.0", &v).as_deref(), Some("2.1.1"));
+        assert_eq!(factorio_target("2.0.55", &[("2.1.1".to_string(), false)]).as_deref(), Some("2.1.1"));
+        assert_eq!(factorio_target("1", &[]), None);
     }
 
     #[test]

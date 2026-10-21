@@ -32,6 +32,10 @@ pub struct RunSpec {
     /// Host server directory, the only bind mount (at `/data`).
     pub dir: PathBuf,
     pub port: u16,
+    /// Protocol of the game port (Minecraft: tcp). A UDP game also gets TCP on `port` (remote console).
+    pub proto: ports::Proto,
+    /// Extra consecutive ports above `port` the game occupies (query, IPv6 twin, ...), published with `proto`.
+    pub span: u16,
     pub network: ports::Network,
     /// Extra TCP/UDP ports published on the same number inside and out.
     pub extra_ports: Vec<ports::ExtraPort>,
@@ -71,6 +75,8 @@ pub trait Engine: Send + Sync {
     fn running(&self) -> Result<HashSet<String>>;
     fn stop(&self, name: &str, timeout_s: u32) -> Result<()>;
     fn kill(&self, name: &str) -> Result<()>;
+    /// Send a signal (number, e.g. 2 for SIGINT) to the container's main process; a gone container is fine.
+    fn signal(&self, name: &str, sig: i32) -> Result<()>;
     fn rm(&self, name: &str) -> Result<()>;
     fn logs(&self, name: &str, tail: u32) -> Result<String>;
     /// One batched `stats --no-stream` for all `names`.
@@ -84,8 +90,9 @@ pub fn container_name(server_id: &str) -> String { format!("moss-{server_id}") }
 /// Server ids are UUIDs; anything else never reaches a command line.
 pub fn valid_id(id: &str) -> bool { !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') }
 
-/// Can this server run in a container? Minecraft runtimes only (the image carries Java); `sim` only for development.
-pub fn supported(s: &Srv, dev_runtimes: bool) -> bool { s.is_mc() || (s.runtime == "sim" && dev_runtimes) }
+/// Can this server run in a container? Minecraft runtimes (the image carries Java) and games (their own image runs
+/// the installed binary); `custom` never, `sim` only for development.
+pub fn supported(s: &Srv, dev_runtimes: bool) -> bool { s.is_mc() || s.is_game() || (s.runtime == "sim" && dev_runtimes) }
 
 /// The `container` object of the server view.
 pub fn view(s: &Srv) -> Value {
@@ -143,6 +150,13 @@ mod tests {
     fn names_and_ids() {
         assert_eq!(container_name("0190-abc"), "moss-0190-abc");
         assert!(valid_id("0190a1b2-c3d4") && !valid_id("a b") && !valid_id("../x") && !valid_id(""));
+    }
+    #[test]
+    fn games_can_run_in_containers_but_custom_cannot() {
+        use crate::runtimes::launch::test_srv;
+        for g in ["bedrock", "terraria", "factorio", "valheim", "cs2", "paper"] { assert!(supported(&test_srv(g, "x", None, "balanced"), false), "{g}"); }
+        assert!(!supported(&test_srv("custom", "custom", None, "balanced"), false));
+        assert!(!supported(&test_srv("sim", "x", None, "balanced"), false) && supported(&test_srv("sim", "x", None, "balanced"), true));
     }
     #[test]
     fn unknown_containers_count_as_alive() {

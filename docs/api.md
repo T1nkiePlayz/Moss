@@ -30,13 +30,15 @@ Server object:
  state:"installing"|"stopped"|"starting"|"running"|"stopping"|"crashed"|"failed"|"needs_attention",
  state_detail|null,state_since,uptime_s|null,pid|null,players:{online,max,sample:string[]}|null,motd|null,
  cpu_pct|null,mem_bytes|null,content_kind,tags:string[],notes,created_at,
- capabilities:string[] /* console,files,content,backups,players,properties,schedules */}
+ capabilities:string[] /* console,files,content,backups,players,properties,config,schedules */}
 ```
 - `GET /servers` → `Server[]`
 - `POST /servers {name,runtime,game_version,loader_version?,memory_mb,port?,accept_eula:boolean,flags_profile?,autostart?,custom?:{command:string[]}}` → 202 `{server,operation}`. `accept_eula` must be true for Minecraft runtimes (recorded + audited).
 - `GET /servers/{id}` · `PATCH /servers/{id} {name?,memory_mb?,port?,flags_profile?,autostart?,restart_policy?,tags?,notes?,game_version?}` · `DELETE /servers/{id}?delete_data=false`
 - `POST /servers/{id}/actions/{start|stop|restart|kill}` → `{server}` (start/stop are asynchronous; watch `state`)
 - `POST /servers/{id}/command {command}` → 204
+- `GET /servers/{id}/players/online` → `{players:[{name,id?}], online, source: "rcon"|"api"|"tracked", can_kick, can_ban}`; live list from RCON (Source games, Rust, Factorio, Palworld, Zomboid), the Satisfactory API (count only) or the tracked list
+- `POST /servers/{id}/players/{name}/kick` and `.../ban` `{reason?}` → 204 (needs `server.console.write`; audited as `player.kick` / `player.ban`)
 - `GET /servers/{id}/stats` → `{samples:[{t:number(unix ms),cpu:number,mem:number,players:number|null}]}` (≈1 h at 5 s)
 - `GET /servers/{id}/timeline?limit=` → `[{time,kind:"start"|"ready"|"stop"|"crash"|"restart"|"backup"|"install"|"update"|"undo",detail}]`
 - `GET /servers/{id}/health` → `Finding[]` (see Health)
@@ -143,6 +145,8 @@ Server object gains `limits:{memory_mb:number|null, cpu_pct:number|null, pids:nu
 
 ### Actions
 - `POST /servers/{id}/actions/reinstall {keep_data:boolean}` → 202 `{operation}`. Allowed when the install failed or the server is stopped; `keep_data:true` only re-downloads the server jar/loader files.
+- `GET /servers/{id}/game-update[?refresh=true]` → `{installed, latest, available, checked_at, source}` for game servers (Steam: installed `buildid` from `steamapps/appmanifest_<appid>.acf` vs the public branch on steamcmd.net; Factorio: `data/base/info.json` vs factorio.com; Terraria/Bedrock: stored version vs upstream). Lookups are cached for an hour; a fresh lookup that finds an update raises the admin-only `update_available` notification. `server.view`.
+- `POST /servers/{id}/game-update` → 202 `{operation}` (kind `server.game_update`): pre-change backup, stop if running, reinstall over the files (worlds, saves and config files are kept), record the version, start again if it was running. 409 `game_update.current` when already up to date, `server.installing` while installing. `config.write`. Schedules may use `kind:"game_update"` (updates only when one is available).
 - `DELETE /java/{major}` → 204. Managed Java only; 409 `java.in_use` naming servers that need it. `POST /java/install` returns 409 `java.in_use` if any running server uses that major (install into a temp dir, atomic swap only when none run).
 - `GET /status` host gains `os: "Linux"|"macOS"`.
 
@@ -167,6 +171,7 @@ Notification: `{id, time, kind:"crash"|"crash_loop"|"backup_failed"|"disk_low"|"
 - `POST /notifications/read {ids?:string[], all?:boolean}` → 204.
 - SSE event `notification` (data = Notification) on `/events`.
 - Settings gain `notify_webhook_url:string`, `notify_events:string[]` (kinds to deliver; default crash, crash_loop, backup_failed, disk_low, restart_failed), `audit_console_commands:"redacted"|"all"|"off"` (default `redacted`), `access_message:string` (≤500 chars, shown on the not-invited screen).
+- `GET /push/key` → `{key}` the VAPID public key (base64url) for `pushManager.subscribe`. `POST /push/subscriptions {endpoint, keys:{p256dh, auth}}` → 204 saves this browser's subscription (https, public host, at most 20 per user); `DELETE /push/subscriptions {endpoint}` → 204. See `docs/push.md`.
 - `POST /notifications/test` (admin) → `{delivered:boolean, detail:string}` sends a test message to the webhook. Delivery: HTTPS only, no redirects, DNS-resolved address must be public unless `MOSS_ALLOW_PRIVATE_WEBHOOKS=true`, 3 attempts with backoff, Discord webhooks (`discord.com/api/webhooks/…`) get an embed payload, anything else gets `{"event","severity","title","body","server","time","moss":"<version>"}`.
 
 ### Long-term metrics
@@ -230,7 +235,7 @@ A test copy is a hidden server on a free port (`MOSS_STAGING_PORT_RANGE`, defaul
 
 ### Configuration files
 Structured editors for `paper-global.yml`, `paper-world-defaults.yml`, per-world `paper-world.yml`, `spigot.yml`, `bukkit.yml`, `purpur.yml` (Purpur only) and `velocity.toml`. Edits change single lines of the text, so comments and unknown keys survive. Every change takes an undo snapshot (revert with `POST /undo/{id}/revert`).
-- `GET /servers/{id}/config` -> `{files:[{id,title,path,format:"yaml"|"toml",exists}]}` (`files.read`). Ids: `paper-global`, `paper-world-defaults`, `world--<name>`, `spigot`, `bukkit`, `purpur`, `velocity`.
+- `GET /servers/{id}/config` -> `{files:[{id,title,path,format:"yaml"|"toml"|"json"|"keyvalue"|"cvar"|"ini",exists,creatable}]}` (`files.read`). Ids: `paper-global`, `paper-world-defaults`, `world--<name>`, `spigot`, `bukkit`, `purpur`, `velocity`; games: `moss-game` (Valheim, Zomboid), `zomboid-server`, `server-settings` (Factorio), `serverconfig` (Terraria), `palworld-settings`, `server-cfg` (gmod, tf2, l4d2, cs2). Servers of those games have the `config` capability (the Config tab). `creatable` files (server.cfg) may be written before the game has made them.
 - `GET /servers/{id}/config/{file}` -> `{id,title,path,format,exists,raw,parse_error|null,fields:[{key,type:"bool"|"int"|"float"|"string"|"enum",default,group,description,min,max,options,restart,secret,danger,mixed,present,value}],history:[{id,title,created_at}]}`. Fields are the curated catalogue for the server's Minecraft version; `secret` values are never returned.
 - `PUT /servers/{id}/config/{file}` (`config.write`) with exactly one of `{raw}` (whole text, must parse) or `{set:{"dotted.key":value},unset:["dotted.key"]}` (catalogue keys only, validated for type, range and options) -> `{undo_id|null,changed}`. Errors: 400 `config.invalid` / `config.unknown_key`, 404 unknown file id, 409 `config.missing` (file not created yet).
 - `GET /servers/{id}/config/{file}/diff?snapshot=` -> `{current,previous|null,snapshot:{id,title,created_at}|null}`; defaults to the latest snapshot; only snapshots of that file are accepted.
@@ -256,7 +261,7 @@ A blueprint holds runtime, versions, memory, flags, `server.properties` (without
 ## Implementation notes and deviations
 - **Mods:** `/content/check` judges installed files by their own metadata; provider dependency data is enforced when a plan is built. Datapack `pack_format` is not checked. `meta` string fields are `""` when unknown. Update-all skips disabled items. `check-updates` entries also carry `project_id` and `provider`. Modpack `unavailable` entries may carry a `url` to the project page. `GET …/modpacks/export` sets `x-moss-skipped` (items left out). `POST /modpacks/inspect` needs an admin or a `manager` grant. Replace-mode modpack import returns 409 while the server runs. Items from a pack report `source:"modpack"` through the `modpack_items` table.
 - **Platform:** the wrapper shell moves itself into the server's cgroup before the game starts, so there is no unconfined window. Limits take effect at the next start. Under systemd they need version 254 or newer (`DelegateSubgroup`); otherwise they are reported as not enforced. `reinstall` defaults to `keep_data:true` (keeps `server.properties` and `eula.txt`); `false` wipes everything except `.moss`.
-- **Data and ops:** `notify_events` selects webhook deliveries only; in-app notifications are always created. `POST /notifications/test` makes one attempt. Metrics `t` is epoch milliseconds. Webhooks are strictly HTTPS, even with `MOSS_ALLOW_PRIVATE_WEBHOOKS=true`. Selective restore keeps replaced entries under `data/removed/<server>-pre-restore-<time>/`.
+- **Data and ops:** `notify_events` selects webhook and Web Push deliveries (the kind `player_join` is opt-in); in-app notifications are always created. `POST /notifications/test` makes one attempt. Metrics `t` is epoch milliseconds. Webhooks are strictly HTTPS, even with `MOSS_ALLOW_PRIVATE_WEBHOOKS=true`. Selective restore keeps replaced entries under `data/removed/<server>-pre-restore-<time>/`.
 - **Auth:** `auth.mfa_required` carries `aal` and `required` next to `code` in `error`. Extra codes: `setup.not_pending` (409), `setup.bad_token` (403), `setup.no_token` (409), `setup.rate_limited` (429), `token.limit` (409), `auth.token_scope`, `auth.token_forbidden`. Tokens are also blocked on `/setup/*` and `PUT /servers/{id}/access`, and a read-scope token cannot request a stream ticket. `GET /tokens?all=1` adds an `owner` email. Claiming ownership also needs an `aal2` session when MFA would apply to an owner.
 
 ## Remote backups (0.3)
@@ -279,3 +284,28 @@ Outbound, signed event subscriptions; consumer guide in `docs/webhooks.md`.
 - `POST /webhooks/{id}/test` → `{delivery}`: one attempt now, even if disabled, logged but never retried or counted towards auto-disable
 - `GET /webhooks/{id}/deliveries` → `{items:[{id,event_id,type,test,state:"pending"|"delivered"|"dead",attempts,max_attempts,created_at,finished_at,next_attempt_at,status_code,latency_ms,response,error}]}` (the last 100 finished plus anything pending; `response` is truncated)
 - `POST /webhooks/{id}/deliveries/{did}/retry` → `{delivery}`; 409 `webhook.not_retryable` unless the delivery is `dead`
+
+## Live maps
+
+- `GET /servers/{id}/map` (`server.view`) → `{available:false}` or `{available:true,kind:"bluemap"|"squaremap"|"pl3xmap"|"dynmap",running,reachable,url:"/map/{id}/{token}/",expires_at}`. Server views gain the capability `"map"` when a map plugin is detected. `url` is a signed 12 h capability link served outside `/api/v1`: `GET|HEAD /map/{id}/{token}/{path}` proxies to `127.0.0.1:<the plugin's configured web port>` with a sandboxing CSP (see `docs/maps.md`). Status pages gain `show_map` (default false); the public page then frames the live map of its running servers that have one.
+
+## Game mods
+
+Valheim (Thunderstore), Factorio (mod portal) and Garry's Mod / CS2 (Steam Workshop); see [game-mods.md](game-mods.md). Servers with these runtimes list `game_mods` in `capabilities`. Other runtimes answer 400 `capability.unsupported`.
+
+- `GET /servers/{id}/game-mods` (`server.view`) → `{kind:"thunderstore"|"factorio"|"workshop", runtime, running, installed:[{id,title,version,enabled,auto,requires,url,installed_at}], bepinex?, credentials?:{username,has_token}, workshop?:{field:"collection"|"map",id,url,has_api_key}}`
+- `GET /servers/{id}/game-mods/search?q=` (`server.view`) → `{results:[{id,title,author,summary,downloads,icon_url,version?,url}]}`; 400 for Workshop servers, 502 `provider.unavailable` when the provider is down
+- `GET /servers/{id}/game-mods/updates` (`server.view`) → `{updates:[{id,installed,latest}]}`
+- `POST /servers/{id}/game-mods {id, version?}` (`content.manage`) → 202 `{operation}` (kind `gamemods.install`); installs the mod and its required dependencies. Installing an installed mod again updates it. 409 `server.running`, `server.not_installed`, `game_mods.credentials` (Factorio without login); 400 `validation` for a malformed id
+- `PATCH /servers/{id}/game-mods/{mod} {enabled}` (`content.manage`) → `{ok:true}`; 404 unknown mod; 400 `game_mods.core` for BepInEx; 409 `server.running`
+- `DELETE /servers/{id}/game-mods/{mod}` (`content.manage`) → 204; 409 `game_mods.required` while another installed mod needs it, 409 `server.running`
+- `PUT /servers/{id}/game-mods/workshop {collection}` (gmod) or `{map}` (cs2) (`content.manage`) → `{ok:true,id}`; an empty value clears it; 400 `validation` unless digits
+- `PUT /servers/{id}/game-mods/credentials {username, token?}` (`config.write`, Factorio only) → `{ok:true}`; an empty username clears both; the token is never returned
+
+## Shared player lists
+Named whitelists and ban lists managed once and applied to every subscribed server; guide in `docs/player-lists.md`. List management is admin-only (non-admins get 403); `GET /servers/{id}/player-lists` needs `server.view`.
+- `GET /player-lists` → `{items:[{id,name,kind:"allow"|"ban",entries,servers,created_at}]}` · `POST /player-lists {name, kind}` → 201 · `PATCH /player-lists/{id} {name}` · `DELETE /player-lists/{id}` → 204
+- `GET /player-lists/{id}/entries` → `{items:[{name,uuid|null,reason,added_by,added_at}]}` · `POST /player-lists/{id}/entries {name, reason?}` → 201 (409 `player.exists`, names are unique ignoring case) · `DELETE /player-lists/{id}/entries/{name}` → 204
+- `GET /servers/{id}/player-lists` → `{lists:[{id,name,kind,entries,subscribed}], support:{allow,ban,note|null}, pending:{allow,ban}, allowlist_enabled:boolean|null}`
+- `PUT /servers/{id}/player-lists {list_ids}` (admin) replaces the subscriptions; 422 if a list kind is unsupported by the game.
+Changes are applied in the background and recorded in the activity log (`playerlist.*`).

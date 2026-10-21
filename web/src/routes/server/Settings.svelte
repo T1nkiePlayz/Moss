@@ -4,7 +4,8 @@
   import LimitsForm from '../../components/LimitsForm.svelte';
   import IsolationForm from '../../components/IsolationForm.svelte';
   import { canReinstall, reinstall } from '../../lib/lifecycle';
-  import { api, apiOps, ApiError, errMsg, isGameServer, type GameUpdate, type Server } from '../../lib/api';
+  import { apiExtra, isGameServer } from '../../lib/api-extra';
+  import { api, ApiError, errMsg, type GameUpdate, type Server } from '../../lib/api';
   import { confirmDialog, toast, toastError, trackOp } from '../../lib/stores.svelte';
   import { can, isAdmin } from '../../lib/auth.svelte';
   import { navigate } from '../../lib/router.svelte';
@@ -20,13 +21,13 @@
   let checking = $state(false);
   async function checkUpdate(refresh = false) {
     checking = true; updErr = '';
-    try { upd = await apiOps.gameUpdate(s.id, refresh); } catch (e) { upd = null; updErr = errMsg(e); } finally { checking = false; }
+    try { upd = await apiExtra.gameUpdate(s.id, refresh); } catch (e) { upd = null; updErr = errMsg(e); } finally { checking = false; }
   }
   $effect(() => { if (showUpdates) { s.id; checkUpdate(); } });
   async function runUpdate() {
     const r = await confirmDialog({ title: `Update ${s.name}?`, body: 'Takes a backup first, then stops the server, installs the new version and starts it again if it was running. Worlds and settings are kept.', confirmLabel: 'Update server' });
     if (!r.ok) return;
-    try { trackOp((await apiOps.startGameUpdate(s.id)).operation); toast('info', 'Update started', { body: s.name }); } catch (e) { toastError(e, 'Could not start the update'); }
+    try { trackOp((await apiExtra.startGameUpdate(s.id)).operation); toast('info', 'Update started', { body: s.name }); } catch (e) { toastError(e, 'Could not start the update'); }
   }
 
   let f = $state({ name: '', memory_mb: 0, port: 0, flags_profile: 'balanced' as Server['flags_profile'], autostart: false, rp_enabled: false, rp_max: 3, tags: '', notes: '' });

@@ -245,7 +245,7 @@ export function send<T = void>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path
 }
 export const clearCache = () => cache.clear();
 
-const q = (o: Record<string, string | number | undefined | null>) => {
+export const q = (o: Record<string, string | number | undefined | null>) => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(o)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v));
   const s = p.toString();
@@ -561,9 +561,6 @@ export const apiOps = {
   notifications: (o: { unread?: boolean; limit?: number } = {}) => get<NotificationList>(`/notifications${q({ unread: o.unread ? 1 : undefined, limit: o.limit ?? 50 })}`),
   markRead: (b: { ids?: string[]; all?: boolean }) => send('POST', '/notifications/read', b),
   testWebhook: () => send<{ delivered: boolean; detail: string }>('POST', '/notifications/test'),
-  pushKey: () => get<{ key: string }>('/push/key', { ttl: 0 }),
-  pushSubscribe: (b: PushSubscriptionJSON) => send('POST', '/push/subscriptions', b),
-  pushUnsubscribe: (endpoint: string) => send('DELETE', '/push/subscriptions', { endpoint }),
   tokens: (all = false) => get<ApiToken[]>(`/tokens${q({ all: all ? 1 : undefined })}`),
   createToken: (b: { name: string; scope: TokenScope; expires_in_days?: number }) => send<CreatedToken>('POST', '/tokens', b),
   revokeToken: (id: string) => send('DELETE', `/tokens/${e(id)}`),
@@ -587,18 +584,12 @@ export const apiOps = {
   serverDestination: (sid: string) => get<ServerDestination>(`/servers/${e(sid)}/backup-destination`, { ttl: 0 }),
   setServerDestination: (sid: string, destination_id: string) => send<ServerDestination>('PUT', `/servers/${e(sid)}/backup-destination`, { destination_id }),
   metrics: (id: string, range: MetricRange) => get<MetricSeries>(`/servers/${e(id)}/metrics${q({ range })}`),
-  map: (id: string) => get<ServerMap>(`/servers/${e(id)}/map`, { ttl: 0 }),
   analytics: (id: string, days: AnalyticsDays) => get<PlayerAnalytics>(`/servers/${e(id)}/analytics${q({ days })}`),
-  onlinePlayers: (id: string) => get<OnlinePlayers>(`/servers/${e(id)}/players/online`),
-  kickPlayer: (id: string, name: string, reason?: string) => send('POST', `/servers/${e(id)}/players/${e(name)}/kick`, { reason }),
-  banPlayer: (id: string, name: string, reason?: string) => send('POST', `/servers/${e(id)}/players/${e(name)}/ban`, { reason }),
   hostMetrics: (range: MetricRange) => get<MetricSeries>(`/metrics/host${q({ range })}`),
   supportPreview: () => get<SupportPreview>('/support-bundle?preview=1'),
   downloadSupportBundle: () => download('/support-bundle', 'moss-support-bundle.zip'),
   removeJava: (major: number) => send('DELETE', `/java/${major}`),
   reinstall: (id: string, keep_data: boolean) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/actions/reinstall`, { keep_data }),
-  gameUpdate: (id: string, refresh = false) => get<GameUpdate>(`/servers/${e(id)}/game-update${(refresh ? '?refresh=true' : '')}`, { ttl: 0 }),
-  startGameUpdate: (id: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/game-update`),
   containerStatus: () => get<ContainerStatus>('/container/status'),
   patchIsolation: (id: string, b: { isolation?: Isolation; container_image?: string | null; network?: ContainerNetwork; extra_ports?: ExtraPort[] }) => send<Server>('PATCH', `/servers/${e(id)}`, b),
   pullImage: (id: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/container/pull`),
@@ -615,17 +606,6 @@ export interface GameModsInfo {
   credentials?: { username: string | null; has_token: boolean };
   workshop?: { field: 'collection' | 'map'; id: string | null; url: string | null; has_api_key: boolean };
 }
-export const gameMods = {
-  info: (id: string) => get<GameModsInfo>(`/servers/${e(id)}/game-mods`, { ttl: 0 }),
-  search: (id: string, text: string) => get<{ results: GameModHit[] }>(`/servers/${e(id)}/game-mods/search${q({ q: text })}`, { ttl: 30000 }),
-  updates: (id: string) => get<{ updates: { id: string; installed: string; latest: string }[] }>(`/servers/${e(id)}/game-mods/updates`, { ttl: 0 }),
-  install: (id: string, mod: string, version?: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/game-mods`, { id: mod, version }),
-  setEnabled: (id: string, mod: string, enabled: boolean) => send('PATCH', `/servers/${e(id)}/game-mods/${e(mod)}`, { enabled }),
-  remove: (id: string, mod: string) => send('DELETE', `/servers/${e(id)}/game-mods/${e(mod)}`),
-  setWorkshop: (id: string, b: { collection?: string; map?: string }) => send('PUT', `/servers/${e(id)}/game-mods/workshop`, b),
-  setCredentials: (id: string, username: string, token?: string) => send('PUT', `/servers/${e(id)}/game-mods/credentials`, { username, token }),
-};
 /** GET /servers/{id}/game-update: installed vs latest version of a game server's software. */
 export interface GameUpdate { installed: string | null; latest: string | null; available: boolean; checked_at: string; source: string }
 /** Game servers (everything that is not a Minecraft Java server, a custom command or the simulator). */
-export const isGameServer = (s: Pick<Server, 'runtime' | 'capabilities'>) => !s.capabilities.includes('java') && s.runtime !== 'custom' && s.runtime !== 'sim';

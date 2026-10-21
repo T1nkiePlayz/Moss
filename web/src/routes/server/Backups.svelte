@@ -4,7 +4,8 @@
   import BackupList from '../../components/BackupList.svelte';
   import StagedModal from '../../components/StagedModal.svelte';
   import TimezoneSelect from '../../components/TimezoneSelect.svelte';
-  import { api, apiOps, errMsg, isGameServer, type Backup, type Schedule, type Server, type ServerDestination, type StagedRestore } from '../../lib/api';
+  import { isGameServer } from '../../lib/api-extra';
+  import { api, apiOps, errMsg, type Backup, type Schedule, type Server, type ServerDestination, type StagedRestore } from '../../lib/api';
   import { backupNow } from '../../lib/actions';
   import { confirmDialog, onOp, toast, toastError } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';

@@ -1,5 +1,5 @@
 // Web Push subscribe/unsubscribe. Imported lazily (from the notification settings) so it stays out of the initial bundle.
-import { apiOps } from './api';
+import { apiExtra } from './api-extra';
 
 export type PushState = 'unsupported' | 'denied' | 'off' | 'on';
 
@@ -30,9 +30,9 @@ export async function enablePush(): Promise<PushState> {
   if ((await Notification.requestPermission()) !== 'granted') return 'denied';
   const reg = await registration();
   await navigator.serviceWorker.ready;
-  const { key } = await apiOps.pushKey();
+  const { key } = await apiExtra.pushKey();
   const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) }));
-  await apiOps.pushSubscribe(sub.toJSON());
+  await apiExtra.pushSubscribe(sub.toJSON());
   return 'on';
 }
 
@@ -40,7 +40,7 @@ export async function disablePush(): Promise<PushState> {
   const reg = await navigator.serviceWorker.getRegistration('/');
   const sub = await reg?.pushManager.getSubscription();
   if (sub) {
-    await apiOps.pushUnsubscribe(sub.endpoint).catch(() => {});
+    await apiExtra.pushUnsubscribe(sub.endpoint).catch(() => {});
     await sub.unsubscribe();
   }
   return 'off';

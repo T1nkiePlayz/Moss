@@ -1,5 +1,6 @@
 <script lang="ts">
   import States from '../../components/States.svelte';
+  import { apiExtra } from '../../lib/api-extra';
   import { apiOps, errMsg, type AnalyticsDays, type OnlinePlayers, type PlayerAnalytics, type Server } from '../../lib/api';
   import { confirmDialog, poll, toast, toastError } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';
@@ -28,13 +29,13 @@
   const canAct = $derived(can('server.console.write'));
   async function loadLive() {
     const id = s.id;
-    try { const r = await apiOps.onlinePlayers(id); if (id === s.id) { live = r; liveErr = ''; } } catch (e) { if (id === s.id) liveErr = errMsg(e); }
+    try { const r = await apiExtra.onlinePlayers(id); if (id === s.id) { live = r; liveErr = ''; } } catch (e) { if (id === s.id) liveErr = errMsg(e); }
   }
   $effect(() => { s.id; running; live = null; liveErr = ''; if (!running) return; return poll(loadLive, 15000); });
   async function act(name: string, ban: boolean) {
     const verb = ban ? 'Ban' : 'Kick';
     if (!(await confirmDialog({ title: `${verb} ${name}?`, body: ban ? 'They will not be able to rejoin until unbanned.' : 'They are disconnected and may rejoin.', confirmLabel: verb, danger: true })).ok) return;
-    try { await (ban ? apiOps.banPlayer : apiOps.kickPlayer)(s.id, name); toast('success', `${verb === 'Ban' ? 'Banned' : 'Kicked'} ${name}`); loadLive(); } catch (e) { toastError(e, `Could not ${verb.toLowerCase()} ${name}`); }
+    try { await (ban ? apiExtra.banPlayer : apiExtra.kickPlayer)(s.id, name); toast('success', `${verb === 'Ban' ? 'Banned' : 'Kicked'} ${name}`); loadLive(); } catch (e) { toastError(e, `Could not ${verb.toLowerCase()} ${name}`); }
   }
 
   const pts = $derived(data ? bars(data.hourly, data.days) : []);

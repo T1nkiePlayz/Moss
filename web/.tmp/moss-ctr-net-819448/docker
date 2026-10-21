@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-export STUB_STATE='/storage/Projects/Languages/Rust/Moss/web/.tmp/moss-ctr-net-819448/stub-state' STUB_LOG='/storage/Projects/Languages/Rust/Moss/web/.tmp/moss-ctr-net-819448/calls.log' STUB_GAME_CMD='/storage/Projects/Languages/Rust/Moss/target/debug/moss sim-server --port {PORT}'
-exec '/storage/Projects/Languages/Rust/Moss/tests/stubs/docker' "$@"

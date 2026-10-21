@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-export STUB_STATE='/storage/Projects/Languages/Rust/Moss/web/.tmp/moss-stub-4f704366-b2ee-4bec-9efb-a80edcef48ac/state' STUB_LOG='/storage/Projects/Languages/Rust/Moss/web/.tmp/moss-stub-4f704366-b2ee-4bec-9efb-a80edcef48ac/calls.log' STUB_GAME_CMD='sleep 30' STUB_INSTALLER_CMD='' 
-exec '/storage/Projects/Languages/Rust/Moss/tests/stubs/docker' "$@"

@@ -1,5 +1,0 @@
-info--format{{.ServerVersion}}|{{.SecurityOptions}}
-imageinspect--format{{.Id}}docker.io/library/eclipse-temurin:21-jre
-pulldocker.io/library/eclipse-temurin:21-jre
-imageinspect--format{{.Id}}docker.io/library/eclipse-temurin:21-jre
-pulldocker.io/library/eclipse-temurin:17-jre

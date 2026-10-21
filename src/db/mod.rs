@@ -19,7 +19,9 @@ pub struct Db(Arc<Mutex<Connection>>);
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
         let c = Connection::open(path).with_context(|| format!("opening database {}", path.display()))?;
-        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
+        // WAL + synchronous=NORMAL: no corruption on power loss and nothing lost on a crash, only the last commits on a
+        // power cut, without an fsync on every commit. Temp tables and sorts stay in memory.
+        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA temp_store=MEMORY;")?;
         migrations::run(&c)?;
         Ok(Self(Arc::new(Mutex::new(c))))
     }

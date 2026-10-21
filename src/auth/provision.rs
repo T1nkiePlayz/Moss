@@ -61,6 +61,9 @@ pub fn drop_cached(st: &St, id: &str) {
     st.users.lock().unwrap_or_else(|p| p.into_inner()).remove(id);
 }
 
+/// Bumped whenever a user or grant changes; long-lived streams compare it to drop authorization they captured earlier.
+pub fn epoch() -> u64 { EPOCH.load(Ordering::SeqCst) }
+
 /// Forget every cached identity (grant changes).
 pub fn drop_all(st: &St) {
     EPOCH.fetch_add(1, Ordering::SeqCst);

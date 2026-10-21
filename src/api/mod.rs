@@ -46,8 +46,9 @@ type Q = Query<HashMap<String, String>>;
 pub fn take_ticket(st: &St, t: Option<&String>) -> ApiResult<User> {
     let t = t.ok_or_else(|| ApiError::unauthorized("missing ticket"))?;
     let mut m = st.tickets.lock().unwrap();
-    m.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(30));
-    m.remove(t).map(|(_, u)| u).ok_or_else(|| ApiError::unauthorized("invalid or expired ticket"))
+    m.retain(|_, (at, _, _)| at.elapsed() < Duration::from_secs(30));
+    // The ticket carries a snapshot of the user; one minted before a user or grant change could carry revoked access.
+    m.remove(t).filter(|(_, _, e)| *e == auth::epoch()).map(|(_, u, _)| u).ok_or_else(|| ApiError::unauthorized("invalid or expired ticket"))
 }
 
 pub fn router(st: St) -> Router {

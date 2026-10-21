@@ -106,7 +106,7 @@ let fallback: (() => void) | null = null;
 function connect() {
   stream?.close();
   stream = openEvents({
-    onOpen: () => { retry = 0; servers.live = true; void refreshServers(); void refreshNotifications(); },
+    onOpen: () => { retry = 0; servers.live = true; void refreshServers(); void refreshOps(); void refreshNotifications(); },
     onError: () => {
       servers.live = false;
       stream?.close();

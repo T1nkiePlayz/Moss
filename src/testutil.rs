@@ -44,8 +44,17 @@ pub async fn stub<F>(f: F) -> Stub where F: Fn(&str, &str) -> Reply + Send + Syn
     Stub { base, hits }
 }
 
-/// A fresh data directory under the system temp dir.
+/// A fresh data directory under the system temp dir. Tests don't clean these up, so the first call per process
+/// removes ones left by runs over an hour old (recent ones may belong to a test binary running alongside).
 pub fn tmp_data() -> PathBuf {
+    static SWEEP: std::sync::Once = std::sync::Once::new();
+    SWEEP.call_once(|| {
+        let Ok(rd) = std::fs::read_dir(std::env::temp_dir()) else { return };
+        for e in rd.flatten() {
+            let stale = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() > 3600);
+            if stale && e.file_name().to_string_lossy().starts_with("moss-test-") { let _ = std::fs::remove_dir_all(e.path()); }
+        }
+    });
     let d = std::env::temp_dir().join(format!("moss-test-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&d).unwrap();
     d

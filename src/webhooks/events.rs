@@ -109,8 +109,12 @@ pub fn spawn(st: &St) {
             let mut out = match e.kind {
                 "server" => { if e.data["id"].as_str().is_some() && crate::server::is_staging(&st1, e.data["id"].as_str().unwrap_or("")).await { vec![] } else { d.on_server(&e.data, Instant::now()) } }
                 "op" => {
-                    let names: HashMap<String, String> = crate::server::list_all(&st1).await.unwrap_or_default().into_iter().map(|s| (s.id, s.name)).collect();
-                    d.on_op(&e.data, |id| names.get(id).cloned().unwrap_or_default())
+                    // Only finished operations produce events, and only those need the server's name.
+                    let name = match (e.data["state"].as_str(), e.data["server_id"].as_str()) {
+                        (Some("completed" | "failed"), Some(sid)) => crate::server::get(&st1, sid).await.map(|s| s.name).unwrap_or_default(),
+                        _ => String::new(),
+                    };
+                    d.on_op(&e.data, |_| name.clone())
                 }
                 "notification" if e.data["kind"] == "update_available" => vec![Ev { kind: "update.available", server: None, data: json!({"title": e.data["title"], "body": e.data["body"]}) }],
                 _ => vec![],

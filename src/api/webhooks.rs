@@ -47,24 +47,38 @@ async fn server_ids(st: &St, l: &[String]) -> ApiResult<Vec<String>> {
     Ok(out)
 }
 
+fn render(e: &Endpoint, secret_set: bool, pending: i64, last: Option<Value>) -> Value {
+    json!({"id": e.id, "name": e.name, "url": e.url, "events": e.events, "server_ids": e.server_ids, "enabled": e.enabled, "disabled_reason": e.disabled_reason,
+        "consecutive_failures": e.failures, "secret": if secret_set { "set" } else { "not set" }, "pending": pending, "last_delivery": last, "created_at": e.created_at})
+}
+
+fn delivery_stats(c: &rusqlite::Connection, id: &str) -> rusqlite::Result<(i64, Option<Value>)> {
+    let n = c.query_row("SELECT COUNT(*) FROM webhook_deliveries WHERE endpoint_id=? AND state='pending'", [id], |r| r.get(0))?;
+    let last = c.query_row("SELECT state,COALESCE(finished_at,created_at),status_code FROM webhook_deliveries WHERE endpoint_id=? AND test=0 AND state!='pending' ORDER BY created_at DESC, id DESC LIMIT 1", [id],
+        |r| Ok(json!({"state": r.get::<_, String>(0)?, "at": r.get::<_, String>(1)?, "status_code": r.get::<_, Option<i64>>(2)?}))).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
+    Ok((n, last))
+}
+
 async fn view(st: &St, e: &Endpoint) -> ApiResult<Value> {
     let id = e.id.clone();
-    let (pending, last): (i64, Option<Value>) = st.db.call(move |c| {
-        let n = c.query_row("SELECT COUNT(*) FROM webhook_deliveries WHERE endpoint_id=? AND state='pending'", [&id], |r| r.get(0))?;
-        let last = c.query_row("SELECT state,COALESCE(finished_at,created_at),status_code FROM webhook_deliveries WHERE endpoint_id=? AND test=0 AND state!='pending' ORDER BY created_at DESC, id DESC LIMIT 1", [&id],
-            |r| Ok(json!({"state": r.get::<_, String>(0)?, "at": r.get::<_, String>(1)?, "status_code": r.get::<_, Option<i64>>(2)?}))).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
-        Ok((n, last))
-    }).await?;
-    Ok(json!({"id": e.id, "name": e.name, "url": e.url, "events": e.events, "server_ids": e.server_ids, "enabled": e.enabled, "disabled_reason": e.disabled_reason,
-        "consecutive_failures": e.failures, "secret": if secrets::get(&st.cfg.data_dir, &e.id).is_some() { "set" } else { "not set" }, "pending": pending, "last_delivery": last, "created_at": e.created_at}))
+    let (pending, last) = st.db.call(move |c| delivery_stats(c, &id)).await?;
+    let dir = st.cfg.data_dir.clone();
+    let id = e.id.clone();
+    let set = tokio::task::spawn_blocking(move || secrets::get(&dir, &id).is_some()).await.unwrap_or(false);
+    Ok(render(e, set, pending, last))
 }
 
 async fn find(st: &St, id: &str) -> ApiResult<Endpoint> { webhooks::get(st, id).await?.ok_or_else(|| ApiError::not_found("webhook")) }
 
 pub(super) async fn webhooks_list(State(st): State<St>, user: User) -> ApiResult<Json<Value>> {
     user.require_admin()?;
-    let mut items = vec![];
-    for e in webhooks::list(&st).await? { items.push(view(&st, &e).await?); }
+    let eps = webhooks::list(&st).await?;
+    let ids: Vec<String> = eps.iter().map(|e| e.id.clone()).collect();
+    let stats = st.db.call(move |c| ids.iter().map(|id| delivery_stats(c, id)).collect::<rusqlite::Result<Vec<_>>>()).await?;
+    let dir = st.cfg.data_dir.clone();
+    let ids: Vec<String> = eps.iter().map(|e| e.id.clone()).collect();
+    let set: Vec<bool> = tokio::task::spawn_blocking(move || ids.iter().map(|id| secrets::get(&dir, id).is_some()).collect()).await.unwrap_or_default();
+    let items: Vec<Value> = eps.iter().zip(stats).enumerate().map(|(n, (e, (p, l)))| render(e, set.get(n).copied().unwrap_or(false), p, l)).collect();
     Ok(Json(json!({"items": items, "event_types": EVENT_TYPES.iter().map(|(t, d)| json!({"type": t, "description": d})).collect::<Vec<_>>()})))
 }
 

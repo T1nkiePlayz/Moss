@@ -84,42 +84,49 @@ pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool
     if h.tailing.swap(true, std::sync::atomic::Ordering::SeqCst) { return; }
     let st = st.clone();
     tokio::spawn(async move {
-        let mut off = if from_end { std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0) } else { 0 };
-        let mut split = lines::LineSplitter::default();
-        let mut idle_after_exit = 0;
-        let mut idle_polls = 0u32;
-        loop {
-            let (new_off, chunk) = tokio::task::spawn_blocking({
-                let (log, off) = (log.clone(), off);
-                move || {
-                    let Ok(mut f) = std::fs::File::open(&log) else { return (off, Vec::new()) };
-                    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-                    let off = if len < off { 0 } else { off }; // log truncated/rotated
-                    let _ = f.seek(SeekFrom::Start(off));
-                    let mut buf = Vec::new();
-                    let _ = f.take(256 * 1024).read_to_end(&mut buf);
-                    (off + buf.len() as u64, buf)
+        let mut from_end = from_end;
+        'run: loop {
+            let mut off = if from_end { std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0) } else { 0 };
+            let mut split = lines::LineSplitter::default();
+            let mut idle_after_exit = 0;
+            let mut idle_polls = 0u32;
+            loop {
+                let (new_off, chunk) = tokio::task::spawn_blocking({
+                    let (log, off) = (log.clone(), off);
+                    move || {
+                        let Ok(mut f) = std::fs::File::open(&log) else { return (off, Vec::new()) };
+                        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+                        let off = if len < off { 0 } else { off }; // log truncated/rotated
+                        let _ = f.seek(SeekFrom::Start(off));
+                        let mut buf = Vec::new();
+                        let _ = f.take(256 * 1024).read_to_end(&mut buf);
+                        (off + buf.len() as u64, buf)
+                    }
+                }).await.unwrap_or((off, Vec::new()));
+                off = new_off;
+                if !chunk.is_empty() {
+                    idle_after_exit = 0;
+                    idle_polls = 0;
+                    split.feed(&chunk, |line| {
+                        if crate::lifecycle::looks_ready(&line) { crate::lifecycle::mark_ready(&st, &id); }
+                        push(&h, line);
+                    });
+                    continue;
                 }
-            }).await.unwrap_or((off, Vec::new()));
-            off = new_off;
-            if !chunk.is_empty() {
-                idle_after_exit = 0;
-                idle_polls = 0;
-                split.feed(&chunk, |line| {
-                    if crate::lifecycle::looks_ready(&line) { crate::lifecycle::mark_ready(&st, &id); }
-                    push(&h, line);
-                });
-                continue;
+                let alive = st.live.lock().unwrap().get(&id).is_some_and(|l| l.alive);
+                if !alive {
+                    idle_after_exit += 1;
+                    if idle_after_exit > 5 { split.flush(|l| push(&h, l)); break; }
+                }
+                idle_polls = idle_polls.saturating_add(1);
+                tokio::time::sleep(std::time::Duration::from_millis(next_poll_ms(alive, idle_polls))).await;
             }
+            h.tailing.store(false, std::sync::atomic::Ordering::SeqCst);
+            // A new run may have started after we decided to exit but before the flag cleared (its start_tailer returned early): take over.
             let alive = st.live.lock().unwrap().get(&id).is_some_and(|l| l.alive);
-            if !alive {
-                idle_after_exit += 1;
-                if idle_after_exit > 5 { split.flush(|l| push(&h, l)); break; }
-            }
-            idle_polls = idle_polls.saturating_add(1);
-            tokio::time::sleep(std::time::Duration::from_millis(next_poll_ms(alive, idle_polls))).await;
+            if alive && !h.tailing.swap(true, std::sync::atomic::Ordering::SeqCst) { from_end = false; continue 'run; }
+            break;
         }
-        h.tailing.store(false, std::sync::atomic::Ordering::SeqCst);
     });
 }
 

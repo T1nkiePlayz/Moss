@@ -19,6 +19,7 @@ fn supervise(st: &St) {
             n += 1;
             let Ok(servers) = server::list_all(&st1).await else { continue };
             if n.is_multiple_of(2) { super::ctr::refresh(&st1, &servers).await; } // one `ps` for every container server
+            let mut probe = vec![];
             for s in servers.iter().filter(|s| s.installed) {
                 let alive = process_alive(s);
                 let (was, ready, restart_due, started) = {
@@ -29,8 +30,7 @@ fn supervise(st: &St) {
                 if !alive && (s.pid.is_some() || was) { handle_exit(&st1, &s.id).await; }
                 if alive && !was { st1.live.lock().unwrap().entry(s.id.clone()).or_default().alive = true; }
                 if alive && !ready && n.is_multiple_of(3) && started.is_none_or(|t| t.elapsed().as_secs() > 4) {
-                    let ok = if s.is_mc() || s.runtime == "sim" { crate::mcping::ping(s.port as u16).await.is_ok() } else { true };
-                    if ok { mark_ready(&st1, &s.id); }
+                    if s.is_mc() || s.runtime == "sim" { probe.push(s); } else { mark_ready(&st1, &s.id); }
                 }
                 if restart_due {
                     st1.live.lock().unwrap().entry(s.id.clone()).or_default().restart_at = None;
@@ -38,6 +38,11 @@ fn supervise(st: &St) {
                     if let Err(e) = start(&st1, s, "system").await { set_detail(&st1, &s.id, &format!("automatic restart failed: {}", e.message)); crate::notify::restart_failed(&st1, s, &e.message).await; }
                 }
                 server::note_state(&st1, s);
+            }
+            // Readiness pings take up to 1.5s each; run them together so booting servers don't delay supervising the rest.
+            let pings = futures_util::future::join_all(probe.iter().map(|s| crate::mcping::ping(s.port as u16))).await;
+            for (s, p) in probe.into_iter().zip(pings) {
+                if p.is_ok() { mark_ready(&st1, &s.id); server::note_state(&st1, s); }
             }
         }
     });
@@ -61,6 +66,14 @@ fn sample(st: &St) {
                 let mem: HashMap<String, u64> = ids.into_iter().filter_map(|id| Some((id.clone(), cg?.memory_current(&id)?))).collect();
                 (platform::group_usage_all(), mem)
             }).await else { continue };
+            // A server deleted after `list_all` above may have had a sample re-added; drop history for servers that are gone.
+            st2.stats.lock().unwrap().retain(|id, _| servers.iter().any(|s| &s.id == id));
+            // Player pings for every ready game server at once rather than up to 1.5s each in turn.
+            let pinged: Vec<&crate::server::Srv> = {
+                let live = st2.live.lock().unwrap();
+                servers.iter().filter(|s| s.installed && s.pid.is_some() && (s.is_mc() || s.runtime == "sim") && live.get(&s.id).is_some_and(|l| l.ready)).collect()
+            };
+            let mut pings: HashMap<String, _> = pinged.iter().map(|s| s.id.clone()).zip(futures_util::future::join_all(pinged.iter().map(|s| crate::mcping::ping(s.port as u16))).await).collect();
             for s in servers.iter().filter(|s| s.installed && s.pid.is_some()) {
                 let Some(pid) = s.pid else { continue };
                 let from_engine = s.in_container.then(|| cstats.get(&crate::container::container_name(&s.id)).copied());
@@ -86,7 +99,7 @@ fn sample(st: &St) {
                 };
                 let mut players = None;
                 if ready && (s.is_mc() || s.runtime == "sim")
-                    && let Ok(p) = crate::mcping::ping(s.port as u16).await {
+                    && let Some(Ok(p)) = pings.remove(&s.id) {
                         players = Some(p.online);
                         let mut live = st2.live.lock().unwrap();
                         let l = live.entry(s.id.clone()).or_default();

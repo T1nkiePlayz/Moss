@@ -20,9 +20,9 @@ pub(super) async fn ticket(State(st): State<St>, user: User) -> ApiResult<Json<V
     let t = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
     {
         let mut m = st.tickets.lock().unwrap();
-        m.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(30));
+        m.retain(|_, (at, _, _)| at.elapsed() < Duration::from_secs(30));
         if m.len() >= 2000 { return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "ticket.busy", "too many outstanding tickets")); }
-        m.insert(t.clone(), (Instant::now(), user));
+        m.insert(t.clone(), (Instant::now(), user, crate::auth::epoch()));
     }
     Ok(Json(json!({"ticket": t})))
 }

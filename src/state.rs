@@ -60,7 +60,7 @@ pub struct Inner {
     pub live: Mutex<HashMap<String, Live>>,
     pub hubs: Mutex<HashMap<String, Arc<crate::console::Hub>>>,
     pub stats: Mutex<HashMap<String, VecDeque<Sample>>>,
-    pub tickets: Mutex<HashMap<String, (Instant, crate::auth::User)>>,
+    pub tickets: Mutex<HashMap<String, (Instant, crate::auth::User, u64)>>, // minted at, user snapshot, auth epoch
     pub ops: Mutex<crate::ops::Registry>,
     pub locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub cache: Mutex<HashMap<String, (Instant, Value)>>,

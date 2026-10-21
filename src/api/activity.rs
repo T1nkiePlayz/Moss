@@ -36,11 +36,14 @@ pub(super) async fn activity(State(st): State<St>, user: User, Query(q): Q) -> A
 pub(super) async fn events(State(st): State<St>, headers: axum::http::HeaderMap, Query(q): Q) -> ApiResult<Response> {
     super::origin::check(&st, &headers)?;
     let user = take_ticket(&st, q.get("ticket"))?;
+    let epoch = auth::epoch();
     let vis = auth::visible_servers(&st, &user).await?;
     let admin = user.is_admin();
     let rx = st.bus.subscribe();
     let hello = tokio_stream::once(Ok::<_, std::convert::Infallible>(sse::Event::default().event("hello").data(json!({"server_time": crate::db::now()}).to_string())));
-    let stream = BroadcastStream::new(rx).filter_map(move |e| {
+    // `vis` and `admin` are a snapshot: once any user or grant changes, end the stream so the client reconnects
+    // through authorization again rather than keep receiving events it may no longer be allowed to see.
+    let stream = BroadcastStream::new(rx).take_while(move |_| auth::epoch() == epoch).filter_map(move |e| {
         let e = match e {
             Ok(e) => e,
             Err(_lagged) => return Some(Ok(sse::Event::default().event("resync").data("{}"))),

@@ -82,16 +82,23 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
     let default_port = if r.runtime == "velocity" { 25577 } else { 25565 };
     let port = match r.port {
         Some(p) if !(1..=65535).contains(&p) => return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")),
-        Some(p) if existing.contains(&p) => return Err(ApiError::conflict("port.taken", format!("port {p} is already assigned to another Moss server")).field("port", "already assigned")),
         Some(p) => p,
         None => free_port(&st, default_port, &existing).await,
     };
     let (id, now) = (uuid::Uuid::now_v7().to_string(), crate::db::now());
     let eula = (is_mc && r.accept_eula == Some(true)).then(|| now.clone());
     let row = (id.clone(), name.clone(), r.runtime.clone(), r.game_version.clone(), r.loader_version.clone(), port, mem, flags, r.autostart.unwrap_or(false), eula, user.email.clone(), custom, now);
-    st.db.call(move |c| c.execute(
-        "INSERT INTO servers(id,name,runtime,game_version,loader_version,port,memory_mb,flags_profile,autostart,eula_at,eula_by,custom_cmd,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        rusqlite::params![row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10, row.11, row.12])).await?;
+    // The port check and the INSERT share one transaction so two concurrent creates cannot both take the same port.
+    let inserted = st.db.call(move |c| {
+        let tx = c.unchecked_transaction()?;
+        if tx.query_row("SELECT EXISTS(SELECT 1 FROM servers WHERE port=?)", [row.5], |r| r.get::<_, bool>(0))? { return Ok(false); }
+        tx.execute(
+            "INSERT INTO servers(id,name,runtime,game_version,loader_version,port,memory_mb,flags_profile,autostart,eula_at,eula_by,custom_cmd,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            rusqlite::params![row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10, row.11, row.12])?;
+        tx.commit()?;
+        Ok(true)
+    }).await?;
+    if !inserted { return Err(ApiError::conflict("port.taken", format!("port {port} is already assigned to another Moss server")).field("port", "already assigned")); }
     limits::save(&st, &id, lim).await?;
     let s = server::get(&st, &id).await?;
     tokio::fs::create_dir_all(s.dir(&st)).await?;
@@ -131,22 +138,26 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     authz(&st, &user, &id, "config.write").await?;
     not_staging(&st, &id).await?;
     let s = server::get(&st, &id).await?;
-    if let Some(n) = &p.name && (n.trim().is_empty() || n.chars().count() > 48) { return Err(ApiError::bad("validation", "invalid name").field("name", "1–48 characters")); }
+    if let Some(n) = &p.name && (n.trim().is_empty() || n.trim().chars().count() > 48 || n.chars().any(|c| c.is_control())) { return Err(ApiError::bad("validation", "invalid name").field("name", "1–48 characters, no control characters")); }
     if let Some(m) = p.memory_mb && !(256..=262144).contains(&m) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", "256–262144")); }
     let lim = limits::LimitsPatch { memory: p.memory_limit_mb, cpu: p.cpu_limit_pct, pids: p.pids_limit };
     limits::validate_now(&lim)?;
     if let Some(f) = &p.flags_profile && f != "balanced" && f != "minimal" { return Err(ApiError::bad("validation", "unknown flags profile").field("flags_profile", "balanced | minimal")); }
-    if let Some(port) = p.port {
-        if !(1..=65535).contains(&port) { return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")); }
-        if server::list_all(&st).await?.iter().any(|o| o.id != id && o.port == port) { return Err(ApiError::conflict("port.taken", "port already assigned to another Moss server").field("port", "already assigned")); }
-        if crate::container::ports::clashes_with_extra(port, &id, &server::list_all(&st).await?) { return Err(ApiError::conflict("port.taken", "port is used as an extra port by another Moss server").field("port", "already assigned")); }
-    }
+    if let Some(port) = p.port && !(1..=65535).contains(&port) { return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")); }
     let iso = isolation_patch(&st, &user, &s, &p).await?;
     let net = network_patch(&st, &user, &s, &p).await?;
     let now = crate::db::now();
     let (i, p2, now2) = (id.clone(), (p.name.clone(), p.memory_mb, p.port, p.flags_profile.clone(), p.autostart, p.restart_policy.as_ref().map(|r| (r.enabled, r.max_per_10m.clamp(0, 20))), p.tags.clone().map(|t| serde_json::to_string(&t.into_iter().map(|x| x.trim().chars().take(32).collect::<String>()).filter(|x| !x.is_empty()).take(12).collect::<Vec<_>>()).unwrap()), p.notes.clone(), p.accept_eula), now);
-    st.db.call(move |c| {
+    let conflict = st.db.call(move |c| {
         let (name, mem, port, flags, auto, rp, tags, notes, eula) = p2;
+        let tx = c.unchecked_transaction()?;
+        let c = &*tx;
+        // The port checks and the UPDATE share one transaction so concurrent requests cannot both claim a port.
+        if let Some(v) = port {
+            if c.query_row("SELECT EXISTS(SELECT 1 FROM servers WHERE id!=? AND port=?)", rusqlite::params![i, v], |r| r.get::<_, bool>(0))? { return Ok(Some("port already assigned to another Moss server")); }
+            let all = c.prepare(&format!("SELECT {} FROM servers", server::COLS))?.query_map([], Srv::from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            if crate::container::ports::clashes_with_extra(v, &i, &all) { return Ok(Some("port is used as an extra port by another Moss server")); }
+        }
         if let Some(v) = name { c.execute("UPDATE servers SET name=? WHERE id=?", rusqlite::params![v.trim(), i])?; }
         if let Some(v) = mem { c.execute("UPDATE servers SET memory_mb=? WHERE id=?", rusqlite::params![v, i])?; }
         if let Some(v) = port { c.execute("UPDATE servers SET port=? WHERE id=?", rusqlite::params![v, i])?; }
@@ -156,8 +167,10 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
         if let Some(v) = tags { c.execute("UPDATE servers SET tags=? WHERE id=?", rusqlite::params![v, i])?; }
         if let Some(v) = notes { c.execute("UPDATE servers SET notes=? WHERE id=?", rusqlite::params![v.chars().take(4000).collect::<String>(), i])?; }
         if eula == Some(true) { c.execute("UPDATE servers SET eula_at=COALESCE(eula_at,?), eula_by=COALESCE(eula_by,'owner') WHERE id=?", rusqlite::params![now2, i])?; }
-        Ok(())
+        tx.commit()?;
+        Ok(None)
     }).await?;
+    if let Some(m) = conflict { return Err(ApiError::conflict("port.taken", m).field("port", "already assigned")); }
     limits::save(&st, &id, lim).await?;
     if let Some((mode, image)) = iso { apply_isolation(&st, &user, &s, mode, image).await?; }
     if let Some((network, extra)) = net { apply_network(&st, &user, &s, network, extra).await?; }

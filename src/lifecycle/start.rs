@@ -29,16 +29,16 @@ async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     // Java discovery may run `java -version`, so keep it off the async worker threads.
     let argv = tokio::task::spawn_blocking({ let (st, s) = (st.clone(), s.clone()); move || build_command(&st, &s) }).await.map_err(anyhow::Error::from)??;
     let (dir, mdir) = (s.dir(st), s.moss_dir(st));
-    std::fs::create_dir_all(&mdir)?;
+    tokio::fs::create_dir_all(&mdir).await?;
     let fifo = mdir.join("console.fifo");
     if !fifo.exists() {
         let c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).unwrap();
         if unsafe { libc::mkfifo(c.as_ptr(), 0o600) } != 0 { return Err(std::io::Error::last_os_error().into()); }
     }
-    let _ = std::fs::remove_file(mdir.join("exit"));
+    let _ = tokio::fs::remove_file(mdir.join("exit")).await;
     let log = mdir.join("console.log");
-    if std::fs::metadata(&log).map(|m| m.len() > 0).unwrap_or(false) { let _ = std::fs::rename(&log, mdir.join("console.log.1")); }
-    std::fs::write(&log, format!("[moss] starting {} ({} {})\n", s.name, s.runtime, s.game_version))?;
+    if tokio::fs::metadata(&log).await.map(|m| m.len() > 0).unwrap_or(false) { let _ = tokio::fs::rename(&log, mdir.join("console.log.1")).await; }
+    tokio::fs::write(&log, format!("[moss] starting {} ({} {})\n", s.name, s.runtime, s.game_version)).await?;
 
     let ctr = s.isolation == "container";
     let (pid, pstart) = if ctr {

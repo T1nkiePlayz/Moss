@@ -52,11 +52,12 @@ pub fn build_archive(root: PathBuf, out: PathBuf, manifest: String, token: tokio
     let mut stack = vec![(root.clone(), true)];
     while let Some((dir, top)) = stack.pop() {
         let rd = match std::fs::read_dir(&dir) { Ok(rd) => rd, Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue, Err(e) => bail!("cannot read {}: {e}", dir.display()) };
-        for e in rd.flatten() {
+        for e in rd {
             if token.is_cancelled() { bail!("cancelled"); }
+            let e = match e { Ok(e) => e, Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue, Err(err) => bail!("cannot read {}: {err}", dir.display()) };
             let name = e.file_name().to_string_lossy().to_string();
             if top && EXCLUDE_TOP.contains(&name.as_str()) { continue; }
-            let Ok(t) = e.file_type() else { continue };
+            let t = match e.file_type() { Ok(t) => t, Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue, Err(err) => bail!("cannot read {}: {err}", e.path().display()) };
             let rel = e.path().strip_prefix(&root)?.to_path_buf();
             if t.is_dir() {
                 tar.append_dir(&rel, e.path()).ok();

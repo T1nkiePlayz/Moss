@@ -16,7 +16,7 @@ pub mod tokens;
 pub use error::AuthError;
 pub use mfa::Mode as MfaMode;
 pub use extract::{Claimant, MfaExempt};
-pub use provision::{drop_all, drop_cached};
+pub use provision::{drop_all, drop_cached, epoch};
 pub use throttle::Guard;
 
 #[derive(Clone, Debug, Serialize)]

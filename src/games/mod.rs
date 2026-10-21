@@ -12,6 +12,7 @@ use std::{collections::{HashMap, HashSet}, path::Path, sync::{LazyLock, Mutex}};
 pub mod a2s;
 pub mod install;
 pub mod track;
+pub mod updates;
 pub mod versions;
 
 /// Moss-managed, user-editable `key=value` settings for games whose launch needs values (Valheim, Zomboid).

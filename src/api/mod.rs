@@ -24,6 +24,7 @@ mod activity;
 mod assets;
 mod backup_destinations;
 mod container;
+mod game_update;
 mod java;
 mod limits;
 mod metrics;
@@ -40,7 +41,7 @@ mod tokens;
 mod webhooks;
 mod workflows;
 
-use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
+use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use game_update::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
 use {analytics::*, metrics::*, notifications::*, status_pages::*, support::*, webhooks::*, workflows::*};
 pub use servers::{create_server_from_value, free_port_for};
 
@@ -84,6 +85,7 @@ pub fn router(st: St) -> Router {
         .route("/container/status", get(container_status))
         .route("/servers/{id}/container/pull", post(container_pull))
         .route("/servers/{id}/actions/reinstall", post(server_reinstall))
+        .route("/servers/{id}/game-update", get(game_update_status).post(game_update_start))
         .route("/servers/{id}/actions/{action}", post(server_action))
         .route("/servers/{id}/command", post(server_command))
         .route("/servers/{id}/stats", get(server_stats))

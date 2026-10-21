@@ -55,6 +55,7 @@ pub async fn get(st: &St, id: &str) -> anyhow::Result<Option<Endpoint>> {
 }
 
 /// An event ready to be queued.
+#[derive(Clone)]
 pub struct Ev { pub kind: &'static str, pub server: Option<(String, String)>, pub data: Value }
 
 /// The JSON delivered for an event. Oversized `data` is replaced so one body never exceeds 64 KiB.
@@ -64,8 +65,15 @@ pub fn body(event_id: &str, kind: &str, time: &str, server: Option<&(String, Str
     if b.len() > 64 << 10 { mk(&json!({"truncated": true})) } else { b }
 }
 
+/// Every derived event is also broadcast here (before any endpoint filtering) so other features, such as workflows,
+/// react to the exact same stream instead of re-deriving events. Lagging receivers lose events, never block `publish`.
+static TAP: std::sync::OnceLock<tokio::sync::broadcast::Sender<Ev>> = std::sync::OnceLock::new();
+fn tap() -> &'static tokio::sync::broadcast::Sender<Ev> { TAP.get_or_init(|| tokio::sync::broadcast::channel(256).0) }
+pub fn subscribe() -> tokio::sync::broadcast::Receiver<Ev> { tap().subscribe() }
+
 /// Queue the event for every enabled endpoint that subscribes to it. Never fails the caller.
 pub async fn publish(st: &St, ev: Ev) {
+    let _ = tap().send(ev.clone());
     let eps = match list(st).await { Ok(v) => v, Err(e) => { tracing::warn!("webhooks: could not read endpoints: {e:#}"); return; } };
     let sid = ev.server.as_ref().map(|s| s.0.as_str());
     let targets: Vec<String> = eps.iter().filter(|e| e.enabled && e.wants(ev.kind, sid)).map(|e| e.id.clone()).collect();

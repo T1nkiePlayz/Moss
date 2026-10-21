@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 
 const axeSource = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const SERVER_TABS = ['', 'console', 'files', 'config', 'content', 'upgrade', 'backups', 'players', 'settings', 'access'];
-const PAGES = ['', 'servers', 'servers/new', 'servers/import', 'backups', 'activity', 'users', 'settings'];
+const PAGES = ['', 'servers', 'servers/new', 'servers/import', 'backups', 'activity', 'workflows', 'users', 'settings'];
 
 async function audit(page: Page, label: string, scope?: string) {
   await page.addScriptTag({ path: axeSource });
@@ -124,6 +124,30 @@ test('webhooks: add form validates, the secret is shown once, test event and log
   await expect(page.getByText(/Copy the signing secret for Dashboard now/)).toBeVisible();
   await expect(page.getByLabel('Signing secret')).toHaveValue(/^whsec_/);
   await audit(page, 'webhook secret shown');
+  expect(errors).toEqual([]);
+});
+
+test('workflows: list, editor with dry run and history, validation and adding one', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/#/workflows');
+  await expect(page.getByText('Restart after a crash').first()).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Run Welcome new players' })).toBeChecked();
+  await audit(page, 'workflows list');
+  await page.getByRole('button', { name: 'Edit' }).nth(1).click();
+  const dlg = page.getByRole('dialog');
+  await dlg.getByRole('button', { name: 'Dry run with a sample event' }).click();
+  await expect(dlg.getByText('Would run.')).toBeVisible();
+  await expect(dlg.getByRole('list', { name: 'Recent runs of Restart after a crash' })).toBeVisible();
+  await audit(page, 'workflow editor', '[role="dialog"]');
+  await dlg.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Add workflow' }).first().click();
+  await dlg.getByRole('button', { name: 'Add workflow' }).click();
+  await expect(dlg.getByText('Give the workflow a name.')).toBeVisible();
+  await audit(page, 'new workflow dialog', '[role="dialog"]');
+  await dlg.getByLabel('Name', { exact: true }).fill('Greeter');
+  await dlg.getByRole('button', { name: 'Add workflow' }).click();
+  await expect(page.getByText('Greeter').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
 

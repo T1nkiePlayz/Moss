@@ -93,7 +93,9 @@ async fn enrich_backup(st: &St, e: &mut Ev) {
 
 fn system_admin() -> crate::auth::User { crate::auth::User { id: "system".into(), email: "system".into(), role: "owner".into(), token: None, via_token: None, aal: None } }
 
-async fn wanted(st: &St, kind: &str) -> bool { super::list(st).await.is_ok_and(|l| l.iter().any(|e| e.enabled && e.events.iter().any(|k| k == kind))) }
+async fn wanted(st: &St, kind: &str) -> bool {
+    super::list(st).await.is_ok_and(|l| l.iter().any(|e| e.enabled && e.events.iter().any(|k| k == kind))) || crate::workflows::wants(st, kind).await
+}
 
 pub fn spawn(st: &St) {
     let st1 = st.clone();

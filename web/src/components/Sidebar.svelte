@@ -10,6 +10,7 @@
     { href: '#/servers', name: 'servers', label: 'Servers', icon: 'server' },
     { href: '#/backups', name: 'backups', label: 'Backups', icon: 'archive' },
     { href: '#/activity', name: 'activity', label: 'Activity', icon: 'activity' },
+    { href: '#/workflows', name: 'workflows', label: 'Workflows', icon: 'zap' },
     ...(isAdmin() ? [{ href: '#/users', name: 'users', label: 'Users', icon: 'users' }] : []),
     { href: '#/settings', name: 'settings', label: 'Settings', icon: 'settings' },
   ]);

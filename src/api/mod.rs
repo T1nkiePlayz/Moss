@@ -38,9 +38,10 @@ mod setup;
 mod support;
 mod tokens;
 mod webhooks;
+mod workflows;
 
 use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
-use {analytics::*, metrics::*, notifications::*, status_pages::*, support::*, webhooks::*};
+use {analytics::*, metrics::*, notifications::*, status_pages::*, support::*, webhooks::*, workflows::*};
 pub use servers::{create_server_from_value, free_port_for};
 
 type Q = Query<HashMap<String, String>>;
@@ -166,6 +167,10 @@ pub fn router(st: St) -> Router {
         .route("/webhooks/{id}/test", post(webhooks_test))
         .route("/webhooks/{id}/deliveries", get(webhooks_deliveries))
         .route("/webhooks/{id}/deliveries/{did}/retry", post(webhooks_retry))
+        .route("/workflows", get(workflows_list).post(workflows_create))
+        .route("/workflows/{id}", get(workflows_get).patch(workflows_patch).delete(workflows_delete))
+        .route("/workflows/{id}/test", post(workflows_test))
+        .route("/workflows/{id}/runs", get(workflows_runs))
         .route("/servers/{id}/metrics", get(server_metrics))
         .route("/servers/{id}/analytics", get(server_analytics))
         .route("/metrics/host", get(host_metrics))

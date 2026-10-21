@@ -2,6 +2,7 @@
 import type * as A from './api';
 import { ApiError } from './api';
 import { handleWebhooks, NONE as NOT_WEBHOOK } from './mock-webhooks';
+import { handleWorkflows, NONE as NOT_WORKFLOW } from './mock-workflows';
 import { handleRemote, NONE as NOT_REMOTE, seedRemote } from './mock-remote';
 import { extraRuntimes, handleContent, inspectModpack, itemsFromPack, NONE, seedContent, versionsFor } from './mock-content';
 import { handleOps, handleOpsGlobal, revertConfig } from './mock-ops';
@@ -546,6 +547,8 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
   if (p.startsWith('/status-pages')) return handleStatusPages(method, p, b);
   const wh = await handleWebhooks({ uid, now, servers }, method, p, b);
   if (wh !== NOT_WEBHOOK) return wh;
+  const wf = await handleWorkflows({ uid, now, servers }, method, p, b);
+  if (wf !== NOT_WORKFLOW) return wf;
   const rem = await handleRemote({ uid, now, op: (...a) => startOp(...a), backups, servers }, method, p, method === 'DELETE' ? { ...b, force: qs.get('force') === '1' } : b);
   if (rem !== NOT_REMOTE) return rem;
   let m: RegExpMatchArray | null;

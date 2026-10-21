@@ -17,6 +17,7 @@
     server: () => import('./routes/Server.svelte'),
     backups: () => import('./routes/AllBackups.svelte'),
     activity: () => import('./routes/Activity.svelte'),
+    workflows: () => import('./routes/Workflows.svelte'),
     users: () => import('./routes/Users.svelte'),
     settings: () => import('./routes/Settings.svelte'),
     notfound: () => import('./routes/NotFound.svelte'),

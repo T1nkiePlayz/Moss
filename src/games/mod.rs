@@ -250,7 +250,6 @@ pub fn read_settings(dir: &Path) -> HashMap<String, String> {
 /// The argument vector for a game server (never a shell string). Called from `lifecycle::command::build_command`.
 pub fn command(dir: &Path, s: &Srv) -> ApiResult<Vec<String>> {
     let g = get(&s.runtime).ok_or_else(|| ApiError::bad("runtime.unsupported", "unknown game"))?;
-    if s.isolation == "container" { return Err(ApiError::bad("container.unsupported", format!("{} servers cannot run in a container", g.name))); }
     if !g.supported_here() { return Err(ApiError::conflict("platform.unsupported", format!("{} is not supported on this host ({})", g.name, g.platforms.join(" / ")))); }
     let cfg = read_settings(dir);
     let max = cfg.get("max_players").and_then(|v| v.parse().ok()).unwrap_or(g.max_players);
@@ -474,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn command_needs_installed_files_and_no_container() {
+    fn command_needs_installed_files_and_runs_in_a_container_too() {
         use crate::runtimes::launch::test_srv;
         let dir = std::env::temp_dir().join(format!("moss-games-cmd-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -488,7 +487,7 @@ mod tests {
         std::fs::write(dir.join("bedrock_server"), "").unwrap();
         assert_eq!(command(&dir, &s).unwrap().last().map(String::as_str), Some("./bedrock_server"));
         s.isolation = "container".into();
-        assert_eq!(command(&dir, &s).unwrap_err().code, "container.unsupported");
+        assert_eq!(command(&dir, &s).unwrap().last().map(String::as_str), Some("./bedrock_server"), "same argv inside the container");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

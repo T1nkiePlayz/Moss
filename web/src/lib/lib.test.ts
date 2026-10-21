@@ -111,8 +111,10 @@ describe('container isolation text', () => {
     expect(imageHint('')).toBeNull();
     expect(imageHint('eclipse-temurin:21-jre')).toBeNull();
     expect(imageHint('ghcr.io/me/java:21')).toBeNull();
+    expect(imageHint('steamcmd/steamcmd:ubuntu-24')).toBeNull();
+    expect(imageHint('debian:bookworm-slim')).toBeNull();
     expect(imageHint('eclipse-temurin')).toContain('tag');
-    expect(imageHint('ubuntu:24.04')).toContain('allowed');
+    expect(imageHint('alpine:3.20')).toContain('allowed');
     expect(imageHint('ghcr.io/me/java:21 --privileged')).toContain('spaces');
   });
 });

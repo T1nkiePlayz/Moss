@@ -47,6 +47,15 @@ pub fn gameonly_network_args() -> Vec<String> {
     ["network", "create", "--driver", "bridge", "--opt", "com.docker.network.bridge.enable_ip_masquerade=false", ports::GAMEONLY_NET].map(String::from).into()
 }
 
+/// `-p` values for the game port span: `port..=port+span` with the game's protocol; a UDP game also gets TCP on the
+/// base port (remote console).
+fn game_ports(s: &RunSpec) -> Vec<String> {
+    let range = if s.span == 0 { format!("{0}:{0}", s.port) } else { let end = s.port.saturating_add(s.span); format!("{0}-{1}:{0}-{1}", s.port, end) };
+    let mut v = vec![format!("{range}/{}", s.proto.name())];
+    if s.proto == ports::Proto::Udp { v.push(format!("{0}:{0}/tcp", s.port)); }
+    v
+}
+
 /// `docker run` arguments (after the CLI name) for a long-running game server.
 pub fn run_args(info: &EngineInfo, s: &RunSpec) -> Vec<String> {
     let mut a: Vec<String> = ["run", "--detach", "--name"].map(String::from).into();
@@ -55,8 +64,8 @@ pub fn run_args(info: &EngineInfo, s: &RunSpec) -> Vec<String> {
     a.extend(hardening(info, s.uid, s.gid, s.memory_mb, s.pids));
     if let Some(c) = s.cpus { a.push(format!("--cpus={c:.2}")); }
     a.extend(["-v".into(), mount(&s.dir, s.selinux), "-w".into(), DATA.into()]);
-    // only the game port, published on the same number inside and out so the port the UI shows is the real one
-    a.extend(["-p".into(), format!("{0}:{0}/tcp", s.port)]);
+    // the game's whole port span, published on the same numbers inside and out so the port the UI shows is the real one
+    for p in game_ports(s) { a.extend(["-p".into(), p]); }
     for e in &s.extra_ports { a.extend(["-p".into(), format!("{0}:{0}/{1}", e.port, e.proto.name())]); }
     if s.network == Network::GameOnly { a.extend(game_only(info)); }
     a.extend(["-e".into(), "HOME=/data".into(), "-e".into(), "LANG=C.UTF-8".into()]);
@@ -84,7 +93,7 @@ mod tests {
 
     pub fn info(kind: Kind, rootless: bool) -> EngineInfo { EngineInfo { kind, cli: PathBuf::from("/usr/bin/docker"), version: "27".into(), rootless } }
     pub fn spec() -> RunSpec {
-        RunSpec { name: "moss-abc".into(), server_id: "abc".into(), image: "docker.io/library/eclipse-temurin:21-jre".into(), dir: PathBuf::from("/srv/moss/servers/abc"), port: 25570, network: Network::Open, extra_ports: vec![],
+        RunSpec { name: "moss-abc".into(), server_id: "abc".into(), image: "docker.io/library/eclipse-temurin:21-jre".into(), dir: PathBuf::from("/srv/moss/servers/abc"), port: 25570, proto: ports::Proto::Tcp, span: 0, network: Network::Open, extra_ports: vec![],
             memory_mb: 3072, cpus: Some(1.5), pids: 4096, uid: 1000, gid: 1001, selinux: false, argv: vec!["java".into(), "-Xmx2048M".into(), "-jar".into(), "server.jar".into(), "nogui".into()] }
     }
 
@@ -96,6 +105,18 @@ mod tests {
             "--cpus=1.50", "-v", "/srv/moss/servers/abc:/data", "-w", "/data", "-p", "25570:25570/tcp", "-e", "HOME=/data", "-e", "LANG=C.UTF-8",
             "--entrypoint", "/bin/sh", "docker.io/library/eclipse-temurin:21-jre", "-c", RUN_SCRIPT, "moss-run", "java", "-Xmx2048M", "-jar", "server.jar", "nogui"];
         assert_eq!(a, want);
+    }
+
+    #[test]
+    fn a_udp_game_publishes_its_span_as_udp_and_tcp_on_the_base_port() {
+        let published = |s: &RunSpec| -> Vec<String> { let a = run_args(&info(Kind::Docker, false), s); a.iter().zip(a.iter().skip(1)).filter(|(f, _)| *f == "-p").map(|(_, v)| v.clone()).collect() };
+        let mut s = spec();
+        s.port = 2456; s.proto = ports::Proto::Udp; s.span = 2;
+        assert_eq!(published(&s), ["2456-2458:2456-2458/udp", "2456:2456/tcp"]);
+        s.span = 0;
+        assert_eq!(published(&s), ["2456:2456/udp", "2456:2456/tcp"]);
+        s.proto = ports::Proto::Tcp; s.span = 1; s.port = 27015;
+        assert_eq!(published(&s), ["27015-27016:27015-27016/tcp"]);
     }
 
     #[test]

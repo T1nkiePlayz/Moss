@@ -28,7 +28,7 @@ fn setup_with(game_cmd: &str, installer: &str, extra_env: &str) -> Env {
 }
 
 fn spec(e: &Env, name: &str) -> RunSpec {
-    RunSpec { name: name.into(), server_id: "x".into(), image: "docker.io/library/eclipse-temurin:21-jre".into(), dir: e.dir.clone(), port: 25599, network: ports::Network::Open, extra_ports: vec![], memory_mb: 1024, cpus: None, pids: 512, uid: 1000, gid: 1000, selinux: false, argv: vec!["java".into(), "-jar".into(), "server.jar".into()] }
+    RunSpec { name: name.into(), server_id: "x".into(), image: "docker.io/library/eclipse-temurin:21-jre".into(), dir: e.dir.clone(), port: 25599, proto: ports::Proto::Tcp, span: 0, network: ports::Network::Open, extra_ports: vec![], memory_mb: 1024, cpus: None, pids: 512, uid: 1000, gid: 1000, selinux: false, argv: vec!["java".into(), "-jar".into(), "server.jar".into()] }
 }
 
 #[test]

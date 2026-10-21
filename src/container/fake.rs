@@ -59,6 +59,7 @@ impl Engine for Fake {
         Ok(self.containers.lock().unwrap().iter().filter(|(_, i)| i.running).map(|(n, _)| n.clone()).collect())
     }
     fn stop(&self, name: &str, t: u32) -> Result<()> { self.rec(format!("stop {name} {t}"))?; self.set(name, exited(0, false)); Ok(()) }
+    fn signal(&self, name: &str, sig: i32) -> Result<()> { self.rec(format!("signal {name} {sig}")) }
     fn kill(&self, name: &str) -> Result<()> { self.rec(format!("kill {name}"))?; self.set(name, exited(137, false)); Ok(()) }
     fn rm(&self, name: &str) -> Result<()> { self.rec(format!("rm {name}"))?; self.containers.lock().unwrap().remove(name); Ok(()) }
     fn logs(&self, name: &str, _tail: u32) -> Result<String> { self.rec(format!("logs {name}"))?; Ok("Error: could not find or load main class\n".into()) }

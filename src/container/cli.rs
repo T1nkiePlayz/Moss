@@ -132,6 +132,11 @@ impl Engine for CliEngine {
         if o.code != 0 && !not_found(&o.stderr) && !o.stderr.to_lowercase().contains("not running") { bail!("kill failed: {}", first_line(&o.stderr)); }
         Ok(())
     }
+    fn signal(&self, name: &str, sig: i32) -> Result<()> {
+        let o = exec(&self.info.cli, &s(&["kill", "--signal", &sig.to_string(), name]), Duration::from_secs(20))?;
+        if o.code != 0 && !not_found(&o.stderr) && !o.stderr.to_lowercase().contains("not running") { bail!("signal failed: {}", first_line(&o.stderr)); }
+        Ok(())
+    }
     fn rm(&self, name: &str) -> Result<()> {
         let o = exec(&self.info.cli, &s(&["rm", "--force", name]), Duration::from_secs(60))?;
         if o.code != 0 && !not_found(&o.stderr) { bail!("remove failed: {}", first_line(&o.stderr)); }

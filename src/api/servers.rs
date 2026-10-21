@@ -219,7 +219,7 @@ async fn isolation_patch(st: &St, user: &User, s: &Srv, p: &PatchReq) -> ApiResu
         None => s.container_image.clone(),
     };
     if mode == "container" {
-        if !crate::container::supported(s, st.cfg.dev_runtimes) { return Err(ApiError::bad("container.unsupported", "only Minecraft servers can run in a container").field("isolation", "not available for this server type")); }
+        if !crate::container::supported(s, st.cfg.dev_runtimes) { return Err(ApiError::bad("container.unsupported", "custom servers cannot run in a container").field("isolation", "not available for this server type")); }
         if s.isolation != "container" || p.container_image.is_some() {
             crate::container::engine(st).await.map_err(|m| ApiError::conflict("container.engine_missing", m).field("isolation", "no container engine"))?;
         }

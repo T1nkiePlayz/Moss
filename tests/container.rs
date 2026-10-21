@@ -77,7 +77,7 @@ async fn container_servers_start_stop_reattach_and_recover() {
     // engine status and input validation: nothing but the allow-listed fields is accepted
     let status = get(&c, format!("{base}/container/status")).await.unwrap();
     assert_eq!((status["available"].clone(), status["engine"].clone(), status["rootless"].clone()), (json!(true), json!("docker"), json!(false)));
-    for bad in [json!({"isolation": "privileged"}), json!({"container_image": "evil.example.com/x:1"}), json!({"container_image": "ubuntu:24.04"}), json!({"container_image": "ghcr.io/o/i:1 --privileged"})] {
+    for bad in [json!({"isolation": "privileged"}), json!({"container_image": "evil.example.com/x:1"}), json!({"container_image": "alpine:3.20"}), json!({"container_image": "ghcr.io/o/i:1 --privileged"})] {
         let r = c.patch(format!("{base}/servers/{id}")).json(&bad).send().await.unwrap();
         assert_eq!(r.status(), 400, "{bad}");
     }

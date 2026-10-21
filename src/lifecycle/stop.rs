@@ -22,6 +22,7 @@ fn signal_game(pid: i64, sig: i32) {
 pub async fn stop_and_wait(st: &St, s: &Srv, graceful: Duration) {
     match (s.game().map(|g| g.stop), s.pid) {
         (Some(Stop::Signal(sig)), Some(pid)) if !s.in_container => signal_game(pid, sig),
+        (Some(Stop::Signal(sig)), _) if s.in_container => ctr::signal_container(st, s, sig).await,
         _ => { let _ = send_command(st, s, stop_command(s)).await; }
     }
     let wait = |d: Duration| async move {

@@ -13,15 +13,15 @@ export function describeEngine(s: ContainerStatus | null | undefined): EngineInf
   return { tone: 'ok', badge: `${name} ${s.version ?? ''} (${mode})`.replace('  ', ' '), detail: `Servers set to container mode run inside ${name}.${tip}` };
 }
 
-const REPOS = ['docker.io/library/eclipse-temurin', 'docker.io/azul/zulu-openjdk', 'docker.io/library/amazoncorretto'];
+const REPOS = ['docker.io/library/eclipse-temurin', 'docker.io/azul/zulu-openjdk', 'docker.io/library/amazoncorretto', 'docker.io/library/debian', 'docker.io/library/ubuntu', 'docker.io/steamcmd/steamcmd', 'docker.io/itzg/minecraft-bedrock-server'];
 /** Quick client-side hint; the server validates strictly and is the authority. */
 export function imageHint(raw: string): string | null {
   const v = raw.trim();
   if (v === '') return null;
   if (/\s/.test(v)) return 'An image name has no spaces.';
   if (!/[:@]/.test(v.replace(/^[^/]*\//, '')) && !/@sha256:/.test(v)) return 'Add a tag, for example :21-jre.';
-  const full = v.startsWith('ghcr.io/') || REPOS.some((r) => v.startsWith(`${r}:`) || v.startsWith(`${r}@`)) || /^(eclipse-temurin|azul\/zulu-openjdk|amazoncorretto):/.test(v);
-  return full ? null : 'Only eclipse-temurin, azul/zulu-openjdk, amazoncorretto and ghcr.io images are allowed.';
+  const full = v.startsWith('ghcr.io/') || REPOS.some((r) => v.startsWith(`${r}:`) || v.startsWith(`${r}@`)) || /^(eclipse-temurin|azul\/zulu-openjdk|amazoncorretto|debian|ubuntu|steamcmd\/steamcmd|itzg\/minecraft-bedrock-server):/.test(v);
+  return full ? null : 'Only eclipse-temurin, azul/zulu-openjdk, amazoncorretto, debian, ubuntu, steamcmd/steamcmd, itzg/minecraft-bedrock-server and ghcr.io images are allowed.';
 }
 
 /** "19132/udp, 24454/tcp" (a bare number means TCP) to a port list, or the first problem in plain words. */
@@ -42,7 +42,7 @@ export function parseExtraPorts(text: string): { ports: ExtraPort[]; error: stri
 export const formatExtraPorts = (p: ExtraPort[] | undefined) => (p ?? []).map((x) => `${x.port}/${x.proto}`).join(', ');
 
 export const ISOLATION_NOTES = [
-  'Only the server folder is shared with the container, the game port is the only port opened, and the container cannot gain extra privileges.',
+  'Only the server folder is shared with the container, only the game ports are opened, and the container cannot gain extra privileges.',
   'With the Open network the server can still reach the internet and the rest of your network. Game-only blocks new outgoing connections to the internet.',
   'Game-only needs Docker. It also stops online-mode servers from reaching Mojang to check player accounts, so use it for servers behind a proxy that signs players in, or in offline mode. The computer Moss runs on stays reachable from the server.',
   'Plugins that need their own ports (voice chat, Geyser) work once you list those ports below.',

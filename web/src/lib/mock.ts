@@ -479,7 +479,38 @@ function metricsFor(range: A.MetricRange, base: { cpu: number; mem: number; play
 }
 const err500 = () => new ApiError(500, 'internal', 'The backend returned an unexpected error (mock).', [], 'req_mock123');
 
+const statusPages: A.StatusPage[] = [{ id: 'sp-main', slug: 'k3x9f2m7qa4tz8', path: '/status/k3x9f2m7qa4tz8', title: 'Our servers', description: 'Live status of the community servers.', enabled: true, show_players: true, show_address: 'play.example.com', server_ids: servers.slice(0, 2).map((s) => s.id), created_at: '2026-01-10T12:00:00Z' }];
+function handleStatusPages(method: string, p: string, b: Record<string, any>): unknown {
+  const bad = (field: string, message: string) => new ApiError(422, 'validation', message, [{ path: field, message }]);
+  const check = (x: Record<string, any>, partial: boolean) => {
+    if ((!partial || x.title !== undefined) && !String(x.title ?? '').trim()) throw bad('title', 'Give the page a title of up to 80 characters.');
+    if (x.slug !== undefined && x.slug !== '' && !/^(?!-)[a-z0-9-]{3,40}(?<!-)$/.test(x.slug)) throw bad('slug', 'Use 3 to 40 lowercase letters, digits or dashes, not starting or ending with a dash.');
+    if (x.slug && statusPages.some((q) => q.slug === x.slug && q.id !== x.id)) throw new ApiError(409, 'status_page.slug_taken', 'That address is already used by another status page.', [{ path: 'slug', message: 'Already in use.' }]);
+    for (const s of x.server_ids ?? []) if (!servers.some((q) => q.id === s)) throw bad('server_ids', 'One of the chosen servers no longer exists.');
+  };
+  let m: RegExpMatchArray | null;
+  if (p === '/status-pages' && method === 'GET') return { items: statusPages };
+  if (p === '/status-pages' && method === 'POST') {
+    check(b, false);
+    const slug = b.slug || Array.from({ length: 14 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
+    const page: A.StatusPage = { id: uid(), slug, path: `/status/${slug}`, title: String(b.title).trim(), description: String(b.description ?? '').trim(), enabled: b.enabled ?? true, show_players: !!b.show_players, show_address: String(b.show_address ?? '').trim() || null, server_ids: b.server_ids ?? [], created_at: now() };
+    statusPages.push(page);
+    return page;
+  }
+  if ((m = p.match(/^\/status-pages\/([^/]+)$/))) {
+    const page = statusPages.find((q) => q.id === m![1]);
+    if (!page) throw new ApiError(404, 'not_found', 'status page not found');
+    if (method === 'DELETE') { statusPages.splice(statusPages.indexOf(page), 1); return {}; }
+    check({ ...b, id: page.id }, true);
+    Object.assign(page, Object.fromEntries(Object.entries(b).filter(([k]) => ['title', 'slug', 'description', 'enabled', 'show_players', 'show_address', 'server_ids'].includes(k))));
+    page.path = `/status/${page.slug}`;
+    return page;
+  }
+  throw new ApiError(404, 'mock.not_found', `Mock has no route for ${method} ${p}`);
+}
+
 async function handleX(method: string, p: string, qs: URLSearchParams, b: Record<string, any>): Promise<unknown> {
+  if (p.startsWith('/status-pages')) return handleStatusPages(method, p, b);
   const wh = await handleWebhooks({ uid, now, servers }, method, p, b);
   if (wh !== NOT_WEBHOOK) return wh;
   const rem = await handleRemote({ uid, now, op: (...a) => startOp(...a), backups, servers }, method, p, method === 'DELETE' ? { ...b, force: qs.get('force') === '1' } : b);

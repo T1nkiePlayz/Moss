@@ -1,5 +1,6 @@
 <script lang="ts">
   import States from '../../components/States.svelte';
+  import PlayerListSubs from './PlayerListSubs.svelte';
   import { apiExtra } from '../../lib/api-extra';
   import { apiOps, errMsg, type AnalyticsDays, type OnlinePlayers, type PlayerAnalytics, type Server } from '../../lib/api';
   import { confirmDialog, poll, toast, toastError } from '../../lib/stores.svelte';
@@ -56,6 +57,8 @@
   const hh = (c: number) => `${String(c).padStart(2, '0')}:00`;
   const summary = $derived(data ? `${data.unique_players} unique players, busiest ${data.peak.count} at once` : '');
 </script>
+
+<PlayerListSubs server={s} />
 
 {#if running}
   <section class="card" style="margin-bottom:14px">

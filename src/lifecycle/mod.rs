@@ -49,6 +49,7 @@ pub fn mark_ready(st: &St, id: &str) {
         tokio::spawn(async move {
             st.timeline(&id, "ready", "").await;
             if let Ok(s) = server::get(&st, &id).await { server::note_state(&st, &s); }
+            crate::playerlists::apply(&st, &id).await;
         });
     }
 }

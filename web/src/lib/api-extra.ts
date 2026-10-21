@@ -26,3 +26,22 @@ export const gameMods = {
 };
 
 export const isGameServer = (s: Pick<Server, 'runtime' | 'capabilities'>) => !s.capabilities.includes('java') && s.runtime !== 'custom' && s.runtime !== 'sim';
+
+export interface PlayerList { id: string; name: string; kind: 'allow' | 'ban'; created_at?: string; entries: number; servers: number }
+export interface PlayerListEntry { name: string; uuid: string | null; reason: string; added_by: string; added_at: string }
+export interface ServerPlayerLists {
+  lists: { id: string; name: string; kind: 'allow' | 'ban'; entries: number; subscribed: boolean }[];
+  support: { allow: boolean; ban: boolean; note: string | null };
+  pending: { allow: number; ban: number };
+  allowlist_enabled: boolean | null;
+}
+export const playerLists = {
+  list: () => get<{ items: PlayerList[] }>('/player-lists', { ttl: 0 }),
+  create: (name: string, kind: 'allow' | 'ban') => send<PlayerList>('POST', '/player-lists', { name, kind }),
+  remove: (id: string) => send('DELETE', `/player-lists/${e(id)}`),
+  entries: (id: string) => get<{ items: PlayerListEntry[] }>(`/player-lists/${e(id)}/entries`, { ttl: 0 }),
+  addEntry: (id: string, name: string, reason?: string) => send<PlayerListEntry>('POST', `/player-lists/${e(id)}/entries`, { name, reason }),
+  removeEntry: (id: string, name: string) => send('DELETE', `/player-lists/${e(id)}/entries/${e(name)}`),
+  forServer: (id: string) => get<ServerPlayerLists>(`/servers/${e(id)}/player-lists`, { ttl: 0 }),
+  subscribe: (id: string, list_ids: string[]) => send<{ list_ids: string[] }>('PUT', `/servers/${e(id)}/player-lists`, { list_ids }),
+};

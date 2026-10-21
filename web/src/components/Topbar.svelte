@@ -6,10 +6,16 @@
   import { serverById, ui, activeOps, prefs, setPref, cycleTheme } from '../lib/stores.svelte';
   import { auth, signOut } from '../lib/auth.svelte';
   import { initials } from '../lib/format';
-  import { gravatarUrl } from '../lib/gravatar';
 
   // Falls back to initials when Gravatar cannot be reached (offline, blocked).
   let avatarFailed = $state(false);
+  // Loaded on demand: the hashing code stays out of the initial bundle.
+  let avatarUrl = $state('');
+  $effect(() => {
+    const email = auth.email;
+    if (!email) { avatarUrl = ''; return; }
+    import('../lib/gravatar').then((m) => { if (auth.email === email) avatarUrl = m.gravatarUrl(email); });
+  });
 
   const crumbs = $derived.by(() => {
     const r = router.route;
@@ -62,7 +68,7 @@
     <Icon name={dark ? 'sun' : 'moon'} />
   </button>
   <div class="um" bind:this={menu}>
-    <button class="av" onclick={() => (ui.userMenu = !ui.userMenu)} aria-haspopup="menu" aria-expanded={ui.userMenu} aria-label="User menu">{#if auth.email && !avatarFailed}<img src={gravatarUrl(auth.email)} alt="" width="32" height="32" referrerpolicy="no-referrer" onerror={() => (avatarFailed = true)} />{:else}{initials(auth.email || 'dev')}{/if}</button>
+    <button class="av" onclick={() => (ui.userMenu = !ui.userMenu)} aria-haspopup="menu" aria-expanded={ui.userMenu} aria-label="User menu">{#if avatarUrl && !avatarFailed}<img src={avatarUrl} alt="" width="32" height="32" referrerpolicy="no-referrer" onerror={() => (avatarFailed = true)} />{:else}{initials(auth.email || 'dev')}{/if}</button>
     {#if ui.userMenu}
       <div class="pop" role="menu">
         <div class="who"><div class="ellipsis"><b>{auth.email || 'Local session'}</b></div><div class="xs muted">{auth.me?.role ?? 'owner'}{auth.config?.mode === 'dev' ? ' · dev mode' : ''}</div></div>

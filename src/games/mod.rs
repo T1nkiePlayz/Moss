@@ -479,6 +479,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("moss-games-cmd-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut s = test_srv("bedrock", "1.21.0", None, "balanced");
+        if !cfg!(target_os = "linux") { // Bedrock is Linux-only: elsewhere it is refused before anything else
+            assert_eq!(command(&dir, &s).unwrap_err().code, "platform.unsupported");
+            return;
+        }
         let missing = command(&dir, &s).unwrap_err();
         assert_eq!(missing.code, "server.not_installed");
         std::fs::write(dir.join("bedrock_server"), "").unwrap();

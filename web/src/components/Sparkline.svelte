@@ -36,6 +36,6 @@
 <style>
   .spark { position: relative; width: 100%; }
   svg { width: 100%; height: 100%; display: block; overflow: visible; touch-action: pan-y; }
-  .tip { position: absolute; top: -26px; transform: translateX(-50%); background: var(--s3); border: 1px solid var(--line2); padding: 1px 8px; border-radius: 6px; font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 2; }
+  .tip { position: absolute; top: -26px; transform: translateX(-50%); background: var(--s3); border: 1px solid var(--line2); padding: 1px 8px; border-radius: 6px; font-size: calc(11px * var(--ts, 1)); white-space: nowrap; pointer-events: none; z-index: 2; }
   .tip.r { transform: translateX(-100%); }
 </style>

@@ -54,7 +54,7 @@
 <style>
   .rc { position: relative; width: 100%; margin-top: 18px; }
   svg { width: 100%; height: 100%; display: block; overflow: visible; touch-action: pan-y; border-radius: 4px; }
-  .tip { position: absolute; top: -28px; transform: translateX(-50%); background: var(--s3); border: 1px solid var(--line2); padding: 1px 8px; border-radius: 6px; font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 2; }
+  .tip { position: absolute; top: -28px; transform: translateX(-50%); background: var(--s3); border: 1px solid var(--line2); padding: 1px 8px; border-radius: 6px; font-size: calc(11px * var(--ts, 1)); white-space: nowrap; pointer-events: none; z-index: 2; }
   .tip.r { transform: translateX(-100%); }
   .sum { display: flex; gap: 18px; margin: 8px 0 0; color: var(--muted); } .sum div { display: flex; gap: 5px; } .sum dt { color: var(--faint); } .sum dd { margin: 0; color: var(--text); font-weight: 550; }
   .fb { margin-top: 18px; } .fb p { margin: 6px 0 0; }

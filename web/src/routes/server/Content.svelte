@@ -353,11 +353,11 @@
 {#if plan}<PlanModal plan={plan.plan} alt={plan.alt} title={plan.title} confirmLabel={plan.label} busy={applying} onconfirm={apply} oncancel={() => (plan = null)} />{/if}
 
 <style>
-  .cnt { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--a-ink); color: var(--a-text); font-size: 11px; margin-left: 2px; }
+  .cnt { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--a-ink); color: var(--a-text); font-size: calc(11px * var(--ts, 1)); margin-left: 2px; }
   .trk { position: relative; margin-bottom: 12px; }
   .trk .x { position: absolute; bottom: 8px; right: 10px; }
   .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--s2); }
-  .segb { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
+  .segb { border: 0; background: none; color: var(--muted); font: inherit; font-size: calc(13px * var(--ts, 1)); padding: 4px 12px; border-radius: 6px; cursor: pointer; }
   .segb[aria-checked='true'] { background: var(--a-soft); color: var(--a-text); font-weight: 600; }
   .segb:disabled { opacity: 0.5; cursor: not-allowed; }
   .segb:focus-visible { outline: 2px solid var(--a-text); outline-offset: 1px; }

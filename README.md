@@ -86,7 +86,7 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 **Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · support bundle with secrets redacted.
 
-**Interface** · dark, light, system and high-contrast themes with a **theme editor** (live preview, contrast checker, import/export) · accent and density options · saved views for lists · command palette that searches servers, backups, content and files (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>) · keyboard first, responsive, axe-checked in CI.
+**Interface** · dark, light, system and high-contrast themes with a **theme editor** (live preview, contrast checker, import/export) · accent and density options · saved views for lists · command palette that searches servers, backups, content and files (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>) · **accessibility settings** (text size up to 150%, strong focus ring, always-underlined links, wider text spacing, reduced motion and effects, following the system's high-contrast request) · keyboard first, responsive, axe-checked in CI. See [ACCESSIBILITY.md](ACCESSIBILITY.md).
 
 **Access and recovery** · roles and per-server grants enforced everywhere · personal API tokens · login throttling · optional MFA requirement · activity log · **`moss recover`** command line for locked-out owners, stuck operations and integrity checks.
 
@@ -357,6 +357,7 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | [docs/architecture.md](docs/architecture.md) · [docs/adr](docs/adr) | How it works and why |
 | [docs/api.md](docs/api.md) · [docs/openapi.json](docs/openapi.json) | HTTP API reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing and releasing |
+| [ACCESSIBILITY.md](ACCESSIBILITY.md) | Accessibility target, settings, testing, known limits and how to report a problem |
 
 ## License
 

@@ -177,11 +177,11 @@
 
 <style>
   .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .kpi { padding: 14px 16px; } .big { font-size: 28px; font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
+  .kpi { padding: 14px 16px; } .big { font-size: calc(28px * var(--ts, 1)); font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
   @media (max-width: 760px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
   .rc { position: relative; width: 100%; height: 120px; margin-top: 22px; }
   svg { width: 100%; height: 100%; display: block; overflow: visible; touch-action: pan-y; border-radius: 4px; }
-  .tip { position: absolute; top: -28px; transform: translateX(-50%); background: var(--s3); border: 1px solid var(--line2); padding: 1px 8px; border-radius: 6px; font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 2; }
+  .tip { position: absolute; top: -28px; transform: translateX(-50%); background: var(--s3); border: 1px solid var(--line2); padding: 1px 8px; border-radius: 6px; font-size: calc(11px * var(--ts, 1)); white-space: nowrap; pointer-events: none; z-index: 2; }
   .tip.r { transform: translateX(-100%); }
   .heat { display: grid; grid-template-columns: 34px repeat(24, minmax(0, 1fr)); gap: 2px; align-items: center; }
   .hc { height: 18px; border-radius: 3px; } .hl { line-height: 18px; } .hx { text-align: left; line-height: 14px; }

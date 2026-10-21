@@ -76,6 +76,6 @@
   h2 { display: flex; align-items: center; gap: 8px; }
   .g { gap: 24px; }
   .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .kpi { padding: 14px 16px; text-align: left; } .big { font-size: 28px; font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
+  .kpi { padding: 14px 16px; text-align: left; } .big { font-size: calc(28px * var(--ts, 1)); font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
   @media (max-width: 760px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
 </style>

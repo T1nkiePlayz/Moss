@@ -216,7 +216,7 @@
   .linkish { background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
   .linkish:hover, .linkish[aria-pressed='true'] { color: var(--a-text); }
   .linkish.inline { color: var(--a-text); text-decoration: underline; font-size: inherit; }
-  .diff { max-height: 460px; overflow: auto; font-size: 12.5px; line-height: 20px; border: 1px solid var(--line2); border-radius: var(--r-sm); background: var(--bg); }
+  .diff { max-height: 460px; overflow: auto; font-size: calc(12.5px * var(--ts, 1)); line-height: 20px; border: 1px solid var(--line2); border-radius: var(--r-sm); background: var(--bg); }
   .dl { white-space: pre; padding: 0 12px 0 0; display: flex; }
   .dl .sign { width: 24px; flex: none; text-align: center; color: var(--muted); user-select: none; }
   .dl.add { background: var(--ok-soft); } .dl.del { background: var(--danger-soft); }

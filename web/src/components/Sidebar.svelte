@@ -50,7 +50,7 @@
   .side.collapsed { width: 64px; align-items: stretch; }
   .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 14px; color: var(--text); text-decoration: none !important; }
   .collapsed .brand { justify-content: center; padding-inline: 0; }
-  .word { font-size: 20px; font-weight: 700; letter-spacing: -.03em; }
+  .word { font-size: calc(20px * var(--ts, 1)); font-weight: 700; letter-spacing: -.03em; }
   nav { display: flex; flex-direction: column; gap: 2px; }
   .item { position: relative; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 10px; border-radius: 10px; color: var(--muted); font-weight: 550; font-size: var(--fs-sm); text-decoration: none !important; background: none; border: 0; cursor: pointer; width: 100%; text-align: left; transition: background var(--t), color var(--t); }
   .collapsed .item { justify-content: center; padding: 0; }
@@ -59,9 +59,9 @@
   .item[aria-current='page']::before { content: ''; position: absolute; left: -10px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: linear-gradient(var(--a1), var(--a2)); box-shadow: 0 0 12px var(--a-glow); }
   .item[aria-current='page'] :global(svg) { color: var(--a-text); }
   .item.sm { height: 30px; font-weight: 500; }
-  .pip { margin-left: auto; min-width: 18px; height: 18px; border-radius: 9px; background: var(--a1); color: var(--a-ink); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+  .pip { margin-left: auto; min-width: 18px; height: 18px; border-radius: 9px; background: var(--a1); color: var(--a-ink); font-size: calc(11px * var(--ts, 1)); font-weight: 700; display: grid; place-items: center; }
   .collapsed .pip { position: absolute; top: 2px; right: 6px; margin: 0; }
-  .sect { display: flex; align-items: center; justify-content: space-between; padding: 16px 12px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--faint); font-weight: 600; min-height: 34px; }
+  .sect { display: flex; align-items: center; justify-content: space-between; padding: 16px 12px 4px; font-size: calc(11px * var(--ts, 1)); text-transform: uppercase; letter-spacing: .09em; color: var(--faint); font-weight: 600; min-height: 34px; }
   .add { color: var(--muted); display: grid; } .add:hover { color: var(--a-text); }
   .toggle { margin-top: 8px; }
   @media (max-width: 860px) { .side { display: none; } }

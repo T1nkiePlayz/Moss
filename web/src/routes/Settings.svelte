@@ -3,13 +3,24 @@
   import States from '../components/States.svelte';
   import Lazy from '../components/Lazy.svelte';
   import { api, apiOps, ApiError, errMsg, type JavaInstall, type Settings as S } from '../lib/api';
-  import { confirmDialog, host, prefs, setPref, toast, toastError, trackOp, type Prefs } from '../lib/stores.svelte';
+  import { confirmDialog, host, prefs, resetA11y, setPref, toast, toastError, trackOp, type Prefs } from '../lib/stores.svelte';
+  import { A11Y_DEFAULTS, TEXT_SIZES } from '../lib/a11y';
   import { can, isAdmin } from '../lib/auth.svelte';
   import { duration } from '../lib/format';
 
   const themes: [Prefs['theme'], string, string[]][] = [
     ['system', 'System', ['#090d0b', '#f5f6f1']], ['dark', 'Deep forest', ['#090d0b', '#1a241f']], ['light', 'Paper', ['#f5f6f1', '#ffffff']], ['contrast', 'High contrast', ['#000', '#fff']],
   ];
+  type Opt<K extends keyof Prefs> = { key: K; label: string; hint: string; options: [Prefs[K], string][] };
+  const a11yOpts: Opt<'motion' | 'focus' | 'links' | 'spacing' | 'effects' | 'contrast'>[] = [
+    { key: 'motion', label: 'Motion', hint: 'Reduce turns off animations and transitions.', options: [['system', 'Follow system'], ['reduce', 'Reduce']] },
+    { key: 'focus', label: 'Focus indicator', hint: 'Strong draws a thicker ring around whatever has keyboard focus, inputs included.', options: [['standard', 'Standard'], ['strong', 'Strong']] },
+    { key: 'links', label: 'Underline links', hint: 'Links in text are underlined all the time, not only on hover.', options: [['hover', 'On hover'], ['always', 'Always']] },
+    { key: 'spacing', label: 'Text spacing', hint: 'Wider adds line, letter and word spacing for easier reading.', options: [['standard', 'Standard'], ['wide', 'Wider']] },
+    { key: 'effects', label: 'Transparency and effects', hint: 'Reduce removes the background grain, glows and see-through overlays.', options: [['standard', 'Standard'], ['reduce', 'Reduce']] },
+    { key: 'contrast', label: 'System high contrast', hint: 'With the System theme, switch to High contrast when your device asks for more contrast.', options: [['system', 'Follow'], ['ignore', 'Ignore']] },
+  ];
+  const a11yChanged = $derived(prefs.motion !== 'system' || (Object.keys(A11Y_DEFAULTS) as (keyof typeof A11Y_DEFAULTS)[]).some((k) => prefs[k] !== A11Y_DEFAULTS[k]));
   const accents: [Prefs['accent'], string, string][] = [['moss', 'Moss', '#7fd36f'], ['teal', 'Teal', '#4fd1c2'], ['amber', 'Amber', '#f2b04c'], ['violet', 'Violet', '#a98cf5']];
 
   let st = $state<S | null>(null);
@@ -54,7 +65,7 @@
   const loadBundle = () => import('../components/settings/SupportBundle.svelte');
 </script>
 
-<div class="page-head"><div><h1>Settings</h1><p>Appearance, instance defaults, notifications, backup destinations, API tokens and runtimes.</p></div></div>
+<div class="page-head"><div><h1>Settings</h1><p>Appearance, accessibility, instance defaults, notifications, backup destinations, API tokens and runtimes.</p></div></div>
 
 <div class="col" style="gap:var(--gap)">
   <section class="card" aria-labelledby="ap">
@@ -68,17 +79,36 @@
         </button>
       {/each}
     </div>
-    <div class="grid cols-3" style="margin-top:18px">
+    <div class="grid cols-2" style="margin-top:18px">
       <div><div class="label" id="la">Accent</div><div class="row g6" role="radiogroup" aria-labelledby="la">
         {#each accents as [k, l, c]}<button class="acc" role="radio" aria-checked={prefs.accent === k} aria-label={l} title={l} style="--c:{c}" onclick={() => setPref('accent', k)}>{#if prefs.accent === k}<Icon name="check" size={14} />{/if}</button>{/each}
       </div></div>
       <div><div class="label" id="ld">Density</div><div class="row g6" role="radiogroup" aria-labelledby="ld">
         {#each ['comfortable', 'compact'] as d}<button class="chip" role="radio" aria-checked={prefs.density === d} onclick={() => setPref('density', d as Prefs['density'])} style="text-transform:capitalize">{d}</button>{/each}
       </div></div>
-      <div><div class="label" id="lm">Motion</div><div class="row g6" role="radiogroup" aria-labelledby="lm">
-        {#each [['system', 'Follow system'], ['reduce', 'Reduce']] as [k, l]}<button class="chip" role="radio" aria-checked={prefs.motion === k} onclick={() => setPref('motion', k as Prefs['motion'])}>{l}</button>{/each}
-      </div></div>
     </div>
+  </section>
+
+  <section class="card" aria-labelledby="a11y">
+    <div class="card-title" id="a11y"><Icon name="eye" size={14} />Accessibility</div>
+    <p class="muted sm">Saved in this browser, like the appearance settings. Moss also follows your system's reduced-motion setting. The High contrast theme is under Appearance.</p>
+    <div class="label" id="lts" style="margin-top:14px">Text size</div>
+    <div class="row g6 wrap" role="radiogroup" aria-labelledby="lts" aria-describedby="lts-h">
+      {#each TEXT_SIZES as n}<button class="chip" role="radio" aria-checked={prefs.textSize === n} onclick={() => setPref('textSize', n)}>{n}%</button>{/each}
+    </div>
+    <div class="hint" id="lts-h" style="margin-top:4px">Scales text across the app. Your browser's zoom works too, on top of this.</div>
+    <div class="grid cols-2" style="margin-top:18px">
+      {#each a11yOpts as o}
+        <div>
+          <div class="label" id="l-{o.key}">{o.label}</div>
+          <div class="row g6 wrap" role="radiogroup" aria-labelledby="l-{o.key}" aria-describedby="h-{o.key}">
+            {#each o.options as [v, l]}<button class="chip" role="radio" aria-checked={prefs[o.key] === v} onclick={() => setPref(o.key, v as never)}>{l}</button>{/each}
+          </div>
+          <div class="hint" id="h-{o.key}" style="margin-top:4px">{o.hint}</div>
+        </div>
+      {/each}
+    </div>
+    <div class="row" style="margin-top:18px"><button class="btn sm" disabled={!a11yChanged} onclick={() => { resetA11y(); toast('success', 'Accessibility settings reset'); }}>Reset accessibility settings</button></div>
   </section>
 
   <Lazy load={loadTheme} />

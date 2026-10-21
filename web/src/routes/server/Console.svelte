@@ -3,12 +3,13 @@
   import AnsiLine from '../../components/AnsiLine.svelte';
   import { api, openConsole, saveBlob, errMsg, type ConsoleSocket, type Server } from '../../lib/api';
   import { levelOf, stripAnsi, type Level } from '../../lib/ansi';
-  import { toastError } from '../../lib/stores.svelte';
+  import { prefs, toastError } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';
   import { tick } from 'svelte';
 
   let { server: s }: { server: Server } = $props();
-  const CAP = 5000, ROW = 20, OVER = 20;
+  const CAP = 5000, OVER = 20;
+  const ROW = $derived(Math.round((20 * Math.min(150, Math.max(100, Number(prefs.textSize) || 100))) / 100)); // line height follows Settings > Accessibility > Text size
 
   let lines = $state.raw<string[]>([]);
   let conn = $state<'connecting' | 'live' | 'down'>('connecting');
@@ -126,7 +127,7 @@
       {:else if !filtered.length}
         <div class="msg faint">{lines.length ? 'No lines match the filter.' : conn === 'live' ? 'Waiting for output…' : 'No output yet.'}</div>
       {:else}
-        <div style="height:{filtered.length * ROW}px;position:relative;min-width:max-content">
+        <div style="height:{filtered.length * ROW}px;position:relative;min-width:max-content;--lh:{ROW}px">
           <div class="win" style="top:{start * ROW}px">
             {#each slice as l, i (start + i)}
               <div class="ln {levelOf(l)}"><AnsiLine line={l} /></div>
@@ -153,10 +154,10 @@
   .ico { position: absolute; left: 9px; top: 8px; color: var(--faint); pointer-events: none; display: grid; }
   .term { position: relative; flex: 1; min-height: 0; background: #060908; border: 1px solid var(--line); border-radius: var(--r); box-shadow: inset 0 1px 0 var(--hl); overflow: hidden; color: #d7e3db; }
   :root[data-theme='light'] .term { background: #0e1511; }
-  .vp { position: absolute; inset: 0; overflow: auto; font-size: 12.5px; padding: 8px 0; outline: none; overscroll-behavior: contain; }
+  .vp { position: absolute; inset: 0; overflow: auto; font-size: calc(12.5px * var(--ts, 1)); padding: 8px 0; outline: none; overscroll-behavior: contain; }
   .vp:focus-visible { box-shadow: inset 0 0 0 2px var(--a1); }
   .win { position: absolute; left: 0; right: 0; }
-  .ln { height: 20px; line-height: 20px; white-space: pre; padding: 0 14px; }
+  .ln { height: var(--lh, 20px); line-height: var(--lh, 20px); white-space: pre; padding: 0 14px; }
   .ln:hover { background: rgb(255 255 255 / .04); }
   .ln.warn { color: #f2b04c; background: rgb(242 176 76 / .05); } .ln.error { color: #ff7d71; background: rgb(255 107 94 / .08); }
   .ln.debug { color: #8a9d92; } .ln.chat { color: #b9f2a0; }

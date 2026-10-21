@@ -52,6 +52,32 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(await page.evaluate(() => localStorage.getItem('moss.theme'))).toBeNull();
     });
 
+    test('Settings: accessibility options apply, persist, pass axe and reset', async ({ page }) => {
+      await page.goto('/#/settings');
+      const card = page.getByRole('region', { name: 'Accessibility' });
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('button', { name: 'Reset accessibility settings' })).toBeDisabled();
+      const html = page.locator('html');
+      const body = await page.evaluate(() => parseFloat(getComputedStyle(document.body).fontSize));
+      await card.getByRole('radio', { name: '150%' }).click();
+      await expect(html).toHaveAttribute('data-text', '150');
+      expect(await page.evaluate(() => parseFloat(getComputedStyle(document.body).fontSize))).toBeCloseTo(body * 1.5, 0);
+      for (const [group, option, attr, value] of [
+        ['Focus indicator', 'Strong', 'data-focus', 'strong'], ['Underline links', 'Always', 'data-links', 'always'],
+        ['Text spacing', 'Wider', 'data-spacing', 'wide'], ['Transparency and effects', 'Reduce', 'data-effects', 'reduce'],
+      ]) {
+        await card.getByRole('radiogroup', { name: group }).getByRole('radio', { name: option }).click();
+        await expect(html).toHaveAttribute(attr, value);
+      }
+      await audit(page, 'settings with every accessibility option on');
+      await page.reload(); // kept in this browser
+      await expect(html).toHaveAttribute('data-text', '150');
+      await expect(html).toHaveAttribute('data-effects', 'reduce');
+      await page.getByRole('region', { name: 'Accessibility' }).getByRole('button', { name: 'Reset accessibility settings' }).click();
+      await expect(html).toHaveAttribute('data-text', '100');
+      await expect(html).toHaveAttribute('data-focus', 'standard');
+    });
+
     test('Servers: a search and filter can be saved as a view and reapplied', async ({ page }) => {
       await page.goto('/#/servers');
       await page.getByRole('button', { name: 'Running now', exact: true }).click();

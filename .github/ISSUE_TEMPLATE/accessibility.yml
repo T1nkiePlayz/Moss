@@ -1,0 +1,33 @@
+name: Accessibility problem
+description: Something in Moss is hard or impossible to use with your setup (keyboard, screen reader, zoom, contrast, motion…)
+labels: [accessibility]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for telling us. You don't need to know which guideline is involved; describe what got in your way. See [ACCESSIBILITY.md](https://github.com/T1nkiePlayz/Moss/blob/main/ACCESSIBILITY.md) for what Moss supports today.
+  - type: textarea
+    id: what
+    attributes:
+      label: What were you trying to do, and what happened?
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where in Moss
+      placeholder: "Server → Console, Settings → Backups, the New server page…"
+  - type: input
+    id: setup
+    attributes:
+      label: Assistive technology, browser and OS
+      placeholder: NVDA 2026.1, Firefox 140, Windows 11 — or keyboard only, 200% zoom, high contrast…
+  - type: input
+    id: settings
+    attributes:
+      label: Moss accessibility settings in use
+      description: Settings → Accessibility (text size, focus indicator, text spacing…), if you changed any.
+  - type: input
+    id: version
+    attributes:
+      label: Moss version
+      description: Shown in Settings, or run `moss --version`.

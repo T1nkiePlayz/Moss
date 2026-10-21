@@ -296,7 +296,7 @@
   .steps { list-style: none; display: flex; gap: 8px; padding: 0; margin: 0 0 24px; flex-wrap: wrap; }
   .steps li { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: var(--fs-sm); font-weight: 600; padding-right: 14px; }
   .steps li:not(:last-child)::after { content: ''; width: 28px; height: 1px; background: var(--line2); margin-left: 6px; }
-  .n { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line2); font-size: 12px; }
+  .n { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line2); font-size: calc(12px * var(--ts, 1)); }
   .on { color: var(--text); } .on .n { background: linear-gradient(135deg, var(--a1), var(--a2)); color: var(--a-ink); border-color: transparent; box-shadow: 0 0 14px var(--a-glow); }
   .done .n { color: var(--a-text); border-color: var(--a2); }
   @media (max-width: 560px) { .lb { display: none; } .on .lb { display: inline; } }

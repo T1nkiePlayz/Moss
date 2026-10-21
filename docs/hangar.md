@@ -10,7 +10,7 @@ You do not need an account or a key.
 - **Hosted files only.** Some versions only link to a download elsewhere. Moss shows them with the link but never installs them or downloads from an external address. Download the file yourself and upload it in **Files**.
 - **Checksums.** Every Hangar download is verified against the SHA-256 checksum Hangar publishes, and goes through the usual change plan and undo snapshot.
 - **Dependencies.** Required dependencies that live on Hangar are added to the change plan. Required dependencies that are not on Hangar are listed as "install manually".
-- **Not covered.** Hangar has no modpacks, and it cannot identify unknown files by hash, so Identify does not match against it. Many well-known plugins (LuckPerms, for example) are not on Hangar; use Modrinth or CurseForge for those.
+- **Not covered.** Hangar has no modpacks,. Identify also matches unknown files by SHA-256 on Paper-family and Velocity servers. Many well-known plugins (LuckPerms, for example) are not on Hangar; use Modrinth or CurseForge for those.
 
 ## Outages
 

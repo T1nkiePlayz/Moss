@@ -36,7 +36,7 @@
   {/if}
   <span class="grow"></span>
   {#if canManage}
-    <button class="btn sm" class:spin={identifying} disabled={identifying || !unknown} title={unknown ? 'Match unknown files against Modrinth and CurseForge by hash (Hangar has no hash lookup) so they can be updated' : 'Every file is already identified'} onclick={onidentify}><Icon name="search" size={13} />{identifying ? 'Identifying…' : `Identify unknown files${unknown ? ` (${unknown})` : ''}`}</button>
+    <button class="btn sm" class:spin={identifying} disabled={identifying || !unknown} title={unknown ? 'Match unknown files against Modrinth and CurseForge by hash so they can be updated' : 'Every file is already identified'} onclick={onidentify}><Icon name="search" size={13} />{identifying ? 'Identifying…' : `Identify unknown files${unknown ? ` (${unknown})` : ''}`}</button>
   {/if}
 </div>
 

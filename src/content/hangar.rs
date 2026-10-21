@@ -193,5 +193,23 @@ pub(super) async fn build_plan_hg(st: &St, s: &Srv, c: &Compat, project_id: &str
     Ok((steps, warnings))
 }
 
+/// Matches an unmanaged file to a Hangar version by SHA-256 (`/versions/hash/{sha256}` answers with the project).
+/// Returns `(slug, title, version name)`; the version name is empty when it is not among the project's newest versions.
+pub(super) async fn hg_identify(st: &St, c: &Compat, sha256: &str) -> Result<Option<(String, String, String)>> {
+    let Some(platform) = hangar_platform(c) else { return Ok(None) };
+    if sha256.len() != 64 || !sha256.chars().all(|ch| ch.is_ascii_hexdigit()) { return Ok(None); }
+    let p = match hg_send(st.http.get(format!("{}/versions/hash/{sha256}", base(st)))).await {
+        Ok(p) => p,
+        Err(e) if e.downcast_ref::<cf::CfError>().is_some_and(|c| !c.rate_limited && c.msg == "Not found on Hangar.") => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let Some(slug) = p["namespace"]["slug"].as_str().filter(|s| hangar_id(s)) else { return Ok(None) };
+    let vs = hg(st, &format!("/projects/{slug}/versions"), &[("limit", "25".into()), ("platform", platform.into())]).await?;
+    let name = vs["result"].as_array().into_iter().flatten()
+        .find(|v| v["downloads"][platform]["fileInfo"]["sha256Hash"].as_str().is_some_and(|h| h.eq_ignore_ascii_case(sha256)))
+        .and_then(|v| v["name"].as_str()).unwrap_or_default().to_string();
+    Ok(Some((slug.to_string(), p["name"].as_str().unwrap_or(slug).to_string(), name)))
+}
+
 #[cfg(test)]
 mod tests;

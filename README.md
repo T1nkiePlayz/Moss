@@ -325,16 +325,11 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | **M0 Foundations** | ✅ | Threat model, design decisions ([docs/adr](docs/adr)), kill-and-reattach tests, [console-flood results](docs/spikes/console-flood.md) | |
 | **M1 Hello, server** | ✅ | Lifecycle, console, files, recovery CLI | |
 | **M2 Plugins** | ✅ | Modrinth and CurseForge, Paper-family config editors, outage tests | |
-| **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | Feedback from real S3 providers |
-| **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode with game-only network and extra UDP/TCP ports | Verification against real Docker and Podman |
-| **M5 Polish** | 🟡 | Four themes plus editor, saved views, blueprints and share codes, import, search, axe suite, visual-regression suite, first load of 34 KB, desktop shell source | Build and ship the desktop app (never compiled here) |
-| **M6 Open it up and 1.0** | 🟡 | OpenAPI document and [freeze with compatibility tests](docs/api-policy.md), MFA policy, API tokens, [event webhooks](docs/webhooks.md), [internal security review](docs/security-review.md), dependency audit, soak tests, cosign-signed checksums, [SECURITY.md](SECURITY.md) | External security review, a 20-minute release-profile soak, first signed release |
-
-**Next:** an external security review, trying container mode on real Docker and Podman, building the desktop app, and a first signed release.
-
-| **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and nine SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages | Run every game end to end on real hardware |
-
-**After 1.0:** multi-node, extensions and SDK.
+| **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | |
+| **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode with game-only network and extra UDP/TCP ports | |
+| **M6 Release 1.0** | ✅ | OpenAPI document and [freeze with compatibility tests](docs/api-policy.md), MFA policy, API tokens, [event webhooks](docs/webhooks.md), [internal security review](docs/security-review.md), dependency audit, soak tests, cosign-signed checksums, [SECURITY.md](SECURITY.md) | A 20-minute release-profile soak, first signed release |
+| **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and nine SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages | Run every game end to end on hardware |
+| **M8 After First Release** | 🔴 | - | Multi-node, extensions and SDK. |
 
 ## Documentation
 

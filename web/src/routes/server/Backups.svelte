@@ -4,7 +4,7 @@
   import BackupList from '../../components/BackupList.svelte';
   import StagedModal from '../../components/StagedModal.svelte';
   import TimezoneSelect from '../../components/TimezoneSelect.svelte';
-  import { api, apiOps, errMsg, type Backup, type Schedule, type Server, type ServerDestination, type StagedRestore } from '../../lib/api';
+  import { api, apiOps, errMsg, isGameServer, type Backup, type Schedule, type Server, type ServerDestination, type StagedRestore } from '../../lib/api';
   import { backupNow } from '../../lib/actions';
   import { confirmDialog, onOp, toast, toastError } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';
@@ -92,7 +92,7 @@
   <div class="card-title"><Icon name="clock" size={14} />Schedules <span class="grow"></span>{#if manage}<button class="btn sm" style="text-transform:none;letter-spacing:0" onclick={() => (f.adding = !f.adding)}><Icon name="plus" size={13} />Add schedule</button>{/if}</div>
   {#if f.adding}
     <form class="sf" onsubmit={addSched}>
-      <div class="field"><label for="sk">Action</label><select id="sk" class="select" bind:value={f.kind}><option value="backup">Backup</option><option value="restart">Restart</option><option value="command">Run command</option><option value="start">Start</option><option value="stop">Stop</option></select></div>
+      <div class="field"><label for="sk">Action</label><select id="sk" class="select" bind:value={f.kind}><option value="backup">Backup</option><option value="restart">Restart</option><option value="command">Run command</option><option value="start">Start</option><option value="stop">Stop</option>{#if isGameServer(s)}<option value="game_update">Update game (when available)</option>{/if}</select></div>
       {#if f.kind === 'command'}<div class="field"><label for="sc">Command</label><input id="sc" class="input mono" required bind:value={f.command} placeholder="say Restarting soon" /></div>{/if}
       <div class="field"><label for="sm">Repeat</label><select id="sm" class="select" bind:value={f.mode}><option value="daily">Daily at a time</option><option value="every">Every N minutes</option></select></div>
       {#if f.mode === 'daily'}
@@ -120,7 +120,7 @@
         <li>
           <input type="checkbox" class="switch" checked={x.enabled} disabled={!manage} aria-label="Enable schedule" onchange={() => toggle(x)} />
           <div class="grow">
-            <div><b style="text-transform:capitalize">{x.kind}</b>{#if x.command} <code>{x.command}</code>{/if} · {when(x)}{#if x.keep} · keep {x.keep}{/if}</div>
+            <div><b style="text-transform:capitalize">{x.kind.replace('_', ' ')}</b>{#if x.command} <code>{x.command}</code>{/if} · {when(x)}{#if x.keep} · keep {x.keep}{/if}</div>
             <div class="xs muted">Last run {x.last_run ? relTime(x.last_run) : 'never'}{x.last_status ? ` (${x.last_status})` : ''} · next {x.enabled ? relTime(x.next_run) : 'paused'}</div>
             {#if nr}<div class="xs muted" title="Next run in the schedule's zone and in your zone">{nr.inZone}{#if !nr.same} · <span style="color:var(--text)">{nr.local}</span> your time{/if}</div>{/if}
           </div>

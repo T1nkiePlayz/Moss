@@ -145,6 +145,8 @@ Server object gains `limits:{memory_mb:number|null, cpu_pct:number|null, pids:nu
 
 ### Actions
 - `POST /servers/{id}/actions/reinstall {keep_data:boolean}` → 202 `{operation}`. Allowed when the install failed or the server is stopped; `keep_data:true` only re-downloads the server jar/loader files.
+- `GET /servers/{id}/game-update[?refresh=true]` → `{installed, latest, available, checked_at, source}` for game servers (Steam: installed `buildid` from `steamapps/appmanifest_<appid>.acf` vs the public branch on steamcmd.net; Factorio: `data/base/info.json` vs factorio.com; Terraria/Bedrock: stored version vs upstream). Lookups are cached for an hour; a fresh lookup that finds an update raises the admin-only `update_available` notification. `server.view`.
+- `POST /servers/{id}/game-update` → 202 `{operation}` (kind `server.game_update`): pre-change backup, stop if running, reinstall over the files (worlds, saves and config files are kept), record the version, start again if it was running. 409 `game_update.current` when already up to date, `server.installing` while installing. `config.write`. Schedules may use `kind:"game_update"` (updates only when one is available).
 - `DELETE /java/{major}` → 204. Managed Java only; 409 `java.in_use` naming servers that need it. `POST /java/install` returns 409 `java.in_use` if any running server uses that major (install into a temp dir, atomic swap only when none run).
 - `GET /status` host gains `os: "Linux"|"macOS"`.
 

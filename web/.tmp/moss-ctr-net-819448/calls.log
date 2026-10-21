@@ -1,0 +1,11 @@
+info--format{{.ServerVersion}}|{{.SecurityOptions}}
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly
+networkcreate--driverbridge--optcom.docker.network.bridge.enable_ip_masquerade=falsemoss-gameonly
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly
+imageinspect--format{{.Id}}docker.io/library/eclipse-temurin:21-jre
+pulldocker.io/library/eclipse-temurin:21-jre
+imageinspect--format{{.Id}}docker.io/library/eclipse-temurin:21-jre
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly
+rm--forcemoss-01a15d4f-34ef-7180-9501-755268fe275a
+run--detach--namemoss-01a15d4f-34ef-7180-9501-755268fe275a--labelmoss.managed=true--labelmoss.server=01a15d4f-34ef-7180-9501-755268fe275a--restart=no--user1000:982--cap-drop=ALL--security-opt=no-new-privileges--read-only--tmpfs/tmp:rw,nosuid,nodev,size=512m--pids-limit=4096--memory=1152m--memory-swap=1152m-v/storage/Projects/Languages/Rust/Moss/web/.tmp/moss-ctr-net-819448/data/servers/01a15d4f-34ef-7180-9501-755268fe275a:/data-w/data-p34807:34807/tcp-p19132:19132/udp--networkmoss-gameonly--dns=192.0.2.1-eHOME=/data-eLANG=C.UTF-8--entrypoint/bin/shdocker.io/library/eclipse-temurin:21-jre-cexec "$@" <>/data/.moss/console.fifo >>/data/.moss/console.log 2>&1moss-run/storage/Projects/Languages/Rust/Moss/target/debug/mosssim-server--port34807
+inspect--typecontainer--format{{.State.Status}}|{{.State.Running}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.State.Pid}}moss-01a15d4f-34ef-7180-9501-755268fe275a

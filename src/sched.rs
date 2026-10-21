@@ -34,10 +34,17 @@ pub async fn list(State(st): State<St>, user: User, Path(id): Path<String>) -> A
 #[derive(Deserialize)]
 pub struct Req { kind: Option<String>, command: Option<String>, every_minutes: Option<i64>, daily_at: Option<String>, tz: Option<String>, tz_offset_min: Option<i64>, enabled: Option<bool>, keep: Option<i64> }
 
+const KINDS: [&str; 6] = ["backup", "restart", "start", "stop", "command", "game_update"];
+
+/// The permission a schedule of this kind needs: the one of the action it performs.
+fn permission(kind: &str) -> &'static str {
+    match kind { "backup" => "backup.manage", "command" => "server.console.write", "game_update" => "config.write", _ => "server.power" }
+}
+
 fn validate(r: &Req, creating: bool) -> ApiResult<()> {
     if creating {
         let kind = r.kind.as_deref().unwrap_or_default();
-        if !["backup", "restart", "start", "stop", "command"].contains(&kind) { return Err(ApiError::bad("validation", "unknown kind").field("kind", "backup | restart | start | stop | command")); }
+        if !KINDS.contains(&kind) { return Err(ApiError::bad("validation", "unknown kind").field("kind", "backup | restart | start | stop | command | game_update")); }
         if kind == "command" && r.command.as_deref().is_none_or(|c| c.trim().is_empty()) { return Err(ApiError::bad("validation", "command required").field("command", "required")); }
         if r.every_minutes.is_none() == r.daily_at.is_none() { return Err(ApiError::bad("validation", "set exactly one of every_minutes or daily_at")); }
     }
@@ -56,7 +63,8 @@ fn requested_zone(r: &Req) -> Option<Zone> {
 
 pub async fn create(State(st): State<St>, user: User, Path(id): Path<String>, Json(r): Json<Req>) -> ApiResult<(StatusCode, Json<Value>)> {
     validate(&r, true)?;
-    let s = server_for(&st, &user, &id, if r.kind.as_deref() == Some("backup") { "backup.manage" } else { "server.power" }).await?;
+    let s = server_for(&st, &user, &id, permission(r.kind.as_deref().unwrap_or_default())).await?;
+    if r.kind.as_deref() == Some("game_update") && !s.is_game() { return Err(ApiError::bad("validation", "game updates apply to game servers only").field("kind", "not a game server")); }
     if r.kind.as_deref() == Some("command") { crate::auth::authz(&st, &user, &id, "server.console.write").await?; }
     let sid = uuid::Uuid::now_v7().to_string();
     let zone = requested_zone(&r).unwrap_or(Zone::UTC);
@@ -76,8 +84,7 @@ async fn get_one(st: &St, id: &str) -> ApiResult<Value> {
 
 async fn authorize(st: &St, user: &User, sched: &Value) -> ApiResult<()> {
     let sid = sched["server_id"].as_str().unwrap_or_default();
-    let perm = if sched["kind"] == "backup" { "backup.manage" } else if sched["kind"] == "command" { "server.console.write" } else { "server.power" };
-    crate::auth::authz(st, user, sid, perm).await
+    crate::auth::authz(st, user, sid, permission(sched["kind"].as_str().unwrap_or_default())).await
 }
 
 pub async fn patch(State(st): State<St>, user: User, Path(id): Path<String>, Json(r): Json<Req>) -> ApiResult<Json<Value>> {
@@ -125,6 +132,7 @@ async fn execute(st: &St, sc: &Value, actor: &str) {
                 "stop" => lifecycle::stop(st, &s, actor).await.map(|_| "stopping".into()).map_err(|e| e.message),
                 "restart" => lifecycle::restart(st, &s, actor).await.map(|_| "restarting".into()).map_err(|e| e.message),
                 "command" => lifecycle::send_command(st, &s, sc["command"].as_str().unwrap_or_default()).await.map(|_| "command sent".into()).map_err(|e| e.message),
+                "game_update" => crate::games::updates::scheduled(st, &s, actor).await,
                 _ => Err("unknown kind".into()),
             };
             match res { Ok(m) => m, Err(e) => format!("skipped: {e}") }
@@ -145,4 +153,28 @@ pub fn spawn_background(st: &St) {
             for sc in due { execute(&st, &sc, "schedule").await; }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(kind: &str) -> Req { Req { kind: Some(kind.into()), command: None, every_minutes: Some(60), daily_at: None, tz: None, tz_offset_min: None, enabled: None, keep: None } }
+
+    #[test]
+    fn game_update_is_a_valid_kind_and_others_are_not() {
+        assert!(validate(&req("game_update"), true).is_ok());
+        assert!(validate(&req("backup"), true).is_ok());
+        assert!(validate(&req("reinstall"), true).is_err());
+        let mut both = req("game_update");
+        both.daily_at = Some("04:00".into());
+        assert!(validate(&both, true).is_err(), "exactly one of every_minutes or daily_at");
+    }
+
+    #[test]
+    fn permissions_follow_the_action() {
+        assert_eq!(permission("game_update"), "config.write");
+        assert_eq!(permission("backup"), "backup.manage");
+        assert_eq!(permission("restart"), "server.power");
+    }
 }

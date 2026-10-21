@@ -16,6 +16,7 @@ pub mod mods;
 pub mod rcon;
 pub mod rcon_setup;
 pub mod track;
+pub mod updates;
 pub mod versions;
 
 /// Moss-managed, user-editable `key=value` settings for games whose launch needs values (Valheim, Zomboid).

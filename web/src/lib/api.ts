@@ -119,7 +119,7 @@ export interface Backup {
   verified_at: string | null; note: string; kind: 'manual' | 'scheduled' | 'pre-change'; consistent: boolean; files: number;
 }
 export interface Schedule {
-  id: string; server_id: string; kind: 'backup' | 'restart' | 'start' | 'stop' | 'command'; command: string | null;
+  id: string; server_id: string; kind: 'backup' | 'restart' | 'start' | 'stop' | 'command' | 'game_update'; command: string | null;
   every_minutes: number | null; daily_at: string | null; tz_offset_min: number; enabled: boolean; keep: number | null;
   last_run: string | null; next_run: string | null; last_status: string | null;
 }
@@ -597,6 +597,8 @@ export const apiOps = {
   downloadSupportBundle: () => download('/support-bundle', 'moss-support-bundle.zip'),
   removeJava: (major: number) => send('DELETE', `/java/${major}`),
   reinstall: (id: string, keep_data: boolean) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/actions/reinstall`, { keep_data }),
+  gameUpdate: (id: string, refresh = false) => get<GameUpdate>(`/servers/${e(id)}/game-update${(refresh ? '?refresh=true' : '')}`, { ttl: 0 }),
+  startGameUpdate: (id: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/game-update`),
   containerStatus: () => get<ContainerStatus>('/container/status'),
   patchIsolation: (id: string, b: { isolation?: Isolation; container_image?: string | null; network?: ContainerNetwork; extra_ports?: ExtraPort[] }) => send<Server>('PATCH', `/servers/${e(id)}`, b),
   pullImage: (id: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/container/pull`),
@@ -623,3 +625,7 @@ export const gameMods = {
   setWorkshop: (id: string, b: { collection?: string; map?: string }) => send('PUT', `/servers/${e(id)}/game-mods/workshop`, b),
   setCredentials: (id: string, username: string, token?: string) => send('PUT', `/servers/${e(id)}/game-mods/credentials`, { username, token }),
 };
+/** GET /servers/{id}/game-update: installed vs latest version of a game server's software. */
+export interface GameUpdate { installed: string | null; latest: string | null; available: boolean; checked_at: string; source: string }
+/** Game servers (everything that is not a Minecraft Java server, a custom command or the simulator). */
+export const isGameServer = (s: Pick<Server, 'runtime' | 'capabilities'>) => !s.capabilities.includes('java') && s.runtime !== 'custom' && s.runtime !== 'sim';

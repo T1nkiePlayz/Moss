@@ -1,0 +1,2 @@
+info--format{{.ServerVersion}}|{{.SecurityOptions}}
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly

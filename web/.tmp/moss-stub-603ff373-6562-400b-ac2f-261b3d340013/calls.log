@@ -1,0 +1,2 @@
+info--format{{.ServerVersion}}|{{.SecurityOptions}}
+run--rm--namemoss-x-installer--labelmoss.managed=true--user1000:1000--cap-drop=ALL--security-opt=no-new-privileges--read-only--tmpfs/tmp:rw,nosuid,nodev,size=512m--pids-limit=256--memory=512m--memory-swap=512m-v/storage/Projects/Languages/Rust/Moss/web/.tmp/moss-stub-603ff373-6562-400b-ac2f-261b3d340013/server:/data-w/data-eHOME=/data-eLANG=C.UTF-8docker.io/library/eclipse-temurin:21-jrejava-jar/data/.moss/installer.jar

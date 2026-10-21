@@ -1,0 +1,7 @@
+info--format{{.ServerVersion}}|{{.SecurityOptions}}
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly
+networkcreate--driverbridge--optcom.docker.network.bridge.enable_ip_masquerade=falsemoss-gameonly
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly
+run--detach--namemoss-stubN--labelmoss.managed=true--labelmoss.server=x--restart=no--user1000:1000--cap-drop=ALL--security-opt=no-new-privileges--read-only--tmpfs/tmp:rw,nosuid,nodev,size=512m--pids-limit=512--memory=1024m--memory-swap=1024m-v/storage/Projects/Languages/Rust/Moss/web/.tmp/moss-stub-93f7332a-2d6c-4142-8e31-7d59f423d58f/server:/data-w/data-p25599:25599/tcp-p19132:19132/udp--networkmoss-gameonly--dns=192.0.2.1-eHOME=/data-eLANG=C.UTF-8--entrypoint/bin/shdocker.io/library/eclipse-temurin:21-jre-cexec "$@" <>/data/.moss/console.fifo >>/data/.moss/console.log 2>&1moss-runjava-jarserver.jar
+rm--forcemoss-stubN

@@ -759,6 +759,14 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
     emitServer(s);
     return s;
   }
+  if (M(/^\/servers\/([^/]+)\/game-update$/)) {
+    const s = sv(m![1]);
+    const behind = s.runtime === 'terraria' || s.runtime === 'valheim';
+    const st: A.GameUpdate = { installed: s.runtime === 'valheim' ? '25800001' : s.game_version, latest: s.runtime === 'valheim' ? '25909431' : s.runtime === 'terraria' ? '1.4.5.0' : s.game_version, available: behind, checked_at: new Date().toISOString(), source: s.runtime === 'terraria' ? 'terraria.org' : s.runtime === 'valheim' ? 'steamcmd.net' : 'factorio.com' };
+    if (method !== 'POST') return st;
+    if (!st.available) throw new ApiError(409, 'game_update.current', 'the server is already up to date');
+    return op2('server.game_update', `Update ${s.name}`, s.id, ['Taking a pre-change backup', 'Stopping the server', 'Updating', 'Starting the server'], () => { if (s.runtime === 'terraria') s.game_version = '1.4.5.0'; });
+  }
   if (M(/^\/servers\/([^/]+)\/actions\/reinstall$/)) {
     const s = sv(m![1]);
     if (s.state !== 'failed' && s.state !== 'stopped') throw new ApiError(409, 'server.bad_state', 'Reinstall needs the server stopped or the install failed.');

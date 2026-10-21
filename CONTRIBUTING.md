@@ -36,7 +36,7 @@ Every new HTTP route goes in `src/api/mod.rs` (the single route list), `docs/ope
 
 Layout: `src/` (`api/`, `auth/`, `lifecycle/`, `container/`, `content/`, `backups/`, `platform/`, `runtimes/`, `installer/`, `providers/`, `notify/`, `jars/`, `cfgfiles/`, `cli/`, `db/` plus single-purpose modules), `web/`, `supabase/` (the CurseForge relay function and its test: `node supabase/functions/curseforge/index.test.mts`, Node 22.18+), `docs/`, `packaging/`, `scripts/`, `tests/`.
 
-CI (`.github/workflows/ci.yml`) runs the UI checks, the relay test and the backend on Linux and macOS.
+CI (`.github/workflows/ci.yml`) runs the UI checks, the relay test and the backend on Linux and macOS, as parallel jobs. The backend tests run with [cargo-nextest](https://nexte.st) (`cargo nextest run --profile ci`, settings in `.config/nextest.toml`), which runs every test in its own process and the test files side by side; `cargo test` still works locally. A test must not depend on other tests running in the same process.
 
 ## Releasing
 

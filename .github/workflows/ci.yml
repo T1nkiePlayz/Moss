@@ -12,9 +12,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The visual regression runs as its own job beside the web checks; "Web UI", the check the main branch
+# ruleset requires, is a small gate that passes only when both did.
 jobs:
   web:
-    name: Web UI
+    name: Web checks
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -38,10 +40,45 @@ jobs:
         run: npm run build
       - name: Bundle-size budget (initial JavaScript, per-route chunks reported)
         run: node ../scripts/bundle-budget.mjs
+      # The browser download is keyed on the lockfile, which pins the Playwright version.
+      - name: Cache the browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
       - name: Install the browser for UI checks
         run: npx playwright install --with-deps chromium
       - name: UI checks (every page renders cleanly and passes axe)
         run: npm run test:ui
+      - name: CurseForge edge function test
+        working-directory: .
+        run: node supabase/functions/curseforge/index.test.mts
+
+  web-visual:
+    name: Web visual regression
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # The browser download is keyed on the lockfile, which pins the Playwright version.
+      - name: Cache the browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Install the browser for UI checks
+        run: npx playwright install --with-deps chromium
       - name: Visual regression (screenshots of key pages against the committed baselines)
         run: npm run test:visual
       - name: Keep the visual diffs when they fail
@@ -54,9 +91,15 @@ jobs:
             web/visual-report
           if-no-files-found: ignore
           retention-days: 14
-      - name: CurseForge edge function test
-        working-directory: .
-        run: node supabase/functions/curseforge/index.test.mts
+
+  web-gate:
+    name: Web UI
+    needs: [web, web-visual]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Web checks and visual regression passed
+        run: test "${{ needs.web.result }}" = success && test "${{ needs.web-visual.result }}" = success
 
   backend:
     name: Backend
@@ -75,13 +118,19 @@ jobs:
         with:
           # PR caches are only reused by the same PR; main's cache serves every PR.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # nextest runs the test binaries side by side (cargo test runs them one after another).
+      # The crate is a binary with no library, so there are no doctests for it to miss.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-nextest@0.9.146
       # The binary embeds web/dist; an empty directory is enough to compile and test the backend.
       - name: Prepare embedded UI directory
         run: mkdir -p web/dist
       - name: Lint
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Test
-        run: cargo test --locked
+        run: cargo nextest run --locked --profile ci
 
   # macOS compiles src/platform/macos.rs, which Linux CI never sees. Same checks, same caching approach.
   backend-macos:
@@ -100,9 +149,15 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # nextest runs the test binaries side by side (cargo test runs them one after another).
+      # The crate is a binary with no library, so there are no doctests for it to miss.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-nextest@0.9.146
       - name: Prepare embedded UI directory
         run: mkdir -p web/dist
       - name: Test
-        run: cargo test --locked
+        run: cargo nextest run --locked --profile ci
       - name: Lint
         run: cargo clippy --locked --all-targets -- -D warnings

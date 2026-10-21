@@ -1,0 +1,6 @@
+# cargo-nextest settings (https://nexte.st). CI runs `cargo nextest run --profile ci`.
+[profile.ci]
+# Run every test and report all failures, not just the first.
+fail-fast = false
+# Print a failing test's output when it fails and again in the summary at the end.
+failure-output = "immediate-final"

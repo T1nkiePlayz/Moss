@@ -7,3 +7,7 @@ web/dist/
 .env.local
 .env.*.local
 .DS_Store
+
+# AI
+CLAUDE.md
+.claude/

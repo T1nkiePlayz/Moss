@@ -25,7 +25,7 @@
       { id: 'p-activity', title: 'Activity', hint: 'Operations and audit log', icon: 'activity', group: 'Pages', run: () => navigate('/activity') },
       { id: 'p-users', title: 'Users', hint: 'Invite and manage users', icon: 'users', group: 'Pages', run: () => navigate('/users') },
       { id: 'p-settings', title: 'Settings', hint: 'Appearance, instance, Java', icon: 'settings', group: 'Pages', run: () => navigate('/settings') },
-      { id: 'a-theme', title: 'Toggle light / dark theme', hint: 'Switch appearance', icon: 'sun', group: 'Actions', kw: 'theme dark light', run: () => setPref('theme', document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') },
+      { id: 'a-theme', title: 'Toggle light / dark theme', hint: 'Switch appearance', icon: 'sun', group: 'Actions', kw: 'theme dark light', run: () => setPref('theme', document.documentElement.dataset.scheme === 'dark' ? 'light' : 'dark') },
       { id: 'a-density', title: prefs.density === 'compact' ? 'Use comfortable density' : 'Use compact density', hint: 'Change spacing', icon: 'list', group: 'Actions', run: () => setPref('density', prefs.density === 'compact' ? 'comfortable' : 'compact') },
     ];
     for (const s of servers.list) {

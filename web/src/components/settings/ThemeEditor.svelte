@@ -4,7 +4,7 @@
   import { checks, cssVars, DEFAULTS, exportTheme, hasCustom, isHex, minimal, normHex, parseTheme, resolve, TOKENS, type Colors, type CustomTheme, type Scheme, type TokenKey } from '../../lib/theme';
   import { custom, setCustomTheme, toast, toastError } from '../../lib/stores.svelte';
 
-  let scheme = $state<Scheme>(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+  let scheme = $state<Scheme>(document.documentElement.dataset.scheme === 'light' ? 'light' : 'dark');
   let draft = $state<Record<Scheme, Colors>>({ light: resolve(custom.theme, 'light'), dark: resolve(custom.theme, 'dark') });
   let json = $state('');
   let jsonErr = $state('');
@@ -55,7 +55,7 @@
 
 <section class="card" aria-labelledby="te">
   <div class="card-title" id="te"><Icon name="sliders" size={14} />Custom colours</div>
-  <p class="muted sm" style="margin:0 0 12px">Change the main colours of the light or dark look. Text must stay readable (WCAG AA), so colours that are too faint cannot be applied. Your colours are kept in this browser{#if custom.theme} and are in use{/if}.</p>
+  <p class="muted sm" style="margin:0 0 12px">Change the main colours of the Deep forest (dark) and Paper (light) themes, and System, which uses them. Text must stay readable (WCAG AA), so colours that are too faint cannot be applied. Your colours are kept in this browser{#if custom.theme} and are in use{/if}.</p>
 
   <div class="row g6" role="radiogroup" aria-label="Which look to edit" style="margin-bottom:14px">
     {#each [['light', 'Light'], ['dark', 'Dark']] as [k, l]}<button class="chip" role="radio" aria-checked={scheme === k} onclick={() => (scheme = k as Scheme)}>{l}</button>{/each}

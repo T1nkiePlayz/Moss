@@ -153,7 +153,7 @@
   .cwrap { display: flex; flex-direction: column; gap: 10px; height: calc(100dvh - 250px); min-height: 380px; }
   .ico { position: absolute; left: 9px; top: 8px; color: var(--faint); pointer-events: none; display: grid; }
   .term { position: relative; flex: 1; min-height: 0; background: #060908; border: 1px solid var(--line); border-radius: var(--r); box-shadow: inset 0 1px 0 var(--hl); overflow: hidden; color: #d7e3db; }
-  :root[data-theme='light'] .term { background: #0e1511; }
+  :root[data-scheme='light'] .term { background: #0e1511; }
   .vp { position: absolute; inset: 0; overflow: auto; font-size: calc(12.5px * var(--ts, 1)); padding: 8px 0; outline: none; overscroll-behavior: contain; }
   .vp:focus-visible { box-shadow: inset 0 0 0 2px var(--a1); }
   .win { position: absolute; left: 0; right: 0; }

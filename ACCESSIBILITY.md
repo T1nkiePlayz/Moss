@@ -23,9 +23,9 @@ Open **Settings → Accessibility**. The choices are saved in your browser, like
 **Reset accessibility settings** puts them all back to the defaults.
 
 Under **Settings → Appearance**:
-- The **High contrast** theme is available.
+- The **High contrast** theme is available, along with thirteen other themes. Each one's text, accent and status colours are tested against WCAG AA (4.5:1).
 - Density can be **Compact** or **Comfortable**.
-- You can make your own colours with the **theme editor**. It checks every text and background pair against WCAG AA (4.5:1) and will not apply colours that fail.
+- You can change the colours of the Deep forest and Paper themes (and System, which uses them) with the **theme editor**. It checks every text and background pair against WCAG AA (4.5:1) and will not apply colours that fail.
 
 ## What is in place
 
@@ -41,14 +41,15 @@ Under **Settings → Appearance**:
   - Charts have a text summary.
   - Status changes such as operation progress and validation errors are announced through live regions.
 - **Colour:**
-  - Light, dark and high-contrast themes are available.
+  - Light, dark, high-contrast and eleven other themes are available.
   - Server and operation states have text labels on server pages, lists and badges.
 - **Layout:** the panel works at phone width without horizontal scrolling, and at 150% text size.
 
 ## How it is tested
 
 - Every page is checked with [axe-core](https://github.com/dequelabs/axe-core) against WCAG 2 A and AA, in the light and dark themes, on every pull request (`npm run test:ui` in `web/`, run in CI). Serious or critical findings fail the build.
-- The accessibility settings have their own test. It turns every option on, checks that each one takes effect and survives a reload, and runs axe with all of them on.
+- Every theme's colour pairs are checked for 4.5:1 contrast by a unit test, and each added theme is run through axe on the main pages.
+- The accessibility settings have their own test. It turns every option on, checks that each one takes effect and survives a reload, runs axe with all of them on, checks that the System theme follows the device's contrast request, and checks that pages don't scroll sideways at phone width with 150% text and wider spacing.
 - Visual snapshots on desktop and phone catch layout regressions (`npm run test:visual`, also run in CI).
 - Automated tools catch only part of what matters, so new and changed screens should also be tried with the keyboard alone (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 

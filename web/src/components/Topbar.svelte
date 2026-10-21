@@ -38,7 +38,7 @@
     return c;
   });
   const n = $derived(activeOps().length);
-  const dark = $derived(document.documentElement.dataset.theme !== 'light');
+  const dark = $derived(document.documentElement.dataset.scheme !== 'light');
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
   let menu: HTMLDivElement | undefined = $state();
   $effect(() => {

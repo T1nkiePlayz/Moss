@@ -10,6 +10,9 @@
 
   const themes: [Prefs['theme'], string, string[]][] = [
     ['system', 'System', ['#090d0b', '#f5f6f1']], ['dark', 'Deep forest', ['#090d0b', '#1a241f']], ['light', 'Paper', ['#f5f6f1', '#ffffff']], ['contrast', 'High contrast', ['#000', '#fff']],
+    ['nether', 'Nether', ['#130907', '#ff8a3d']], ['void', 'Void', ['#0c0913', '#d9a8ff']], ['deepsea', 'Deep sea', ['#061219', '#5fe0d4']],
+    ['synthwave', 'Synthwave', ['#140a1f', '#ff6ec7']], ['terminal', 'Amber terminal', ['#0b0904', '#ffb000']], ['midnight', 'Midnight', ['#0b1020', '#9fb4ff']],
+    ['campfire', 'Campfire', ['#15100b', '#ffb36b']], ['sakura', 'Cherry blossom', ['#fbf3f5', '#c2436f']], ['desert', 'Desert', ['#f6efe3', '#c0562f']], ['tundra', 'Tundra', ['#eef4f8', '#2a73a8']],
   ];
   type Opt<K extends keyof Prefs> = { key: K; label: string; hint: string; options: [Prefs[K], string][] };
   const a11yOpts: Opt<'motion' | 'focus' | 'links' | 'spacing' | 'effects' | 'contrast'>[] = [
@@ -21,7 +24,9 @@
     { key: 'contrast', label: 'System high contrast', hint: 'With the System theme, switch to High contrast when your device asks for more contrast.', options: [['system', 'Follow'], ['ignore', 'Ignore']] },
   ];
   const a11yChanged = $derived(prefs.motion !== 'system' || (Object.keys(A11Y_DEFAULTS) as (keyof typeof A11Y_DEFAULTS)[]).some((k) => prefs[k] !== A11Y_DEFAULTS[k]));
-  const accents: [Prefs['accent'], string, string][] = [['moss', 'Moss', '#7fd36f'], ['teal', 'Teal', '#4fd1c2'], ['amber', 'Amber', '#f2b04c'], ['violet', 'Violet', '#a98cf5']];
+  // 'moss' is the theme's own accent: green for the four original themes, the second swatch colour for the others
+  const ownAccent = $derived(themes.findIndex(([k]) => k === prefs.theme) > 3 ? themes.find(([k]) => k === prefs.theme)![2][1] : '#7fd36f');
+  const accents: [Prefs['accent'], string, string][] = $derived([['moss', 'Theme accent', ownAccent], ['teal', 'Teal', '#4fd1c2'], ['amber', 'Amber', '#f2b04c'], ['violet', 'Violet', '#a98cf5']]);
 
   let st = $state<S | null>(null);
   let err = $state('');
@@ -94,7 +99,7 @@
     <p class="muted sm">Saved in this browser, like the appearance settings. Moss also follows your system's reduced-motion setting. The High contrast theme is under Appearance.</p>
     <div class="label" id="lts" style="margin-top:14px">Text size</div>
     <div class="row g6 wrap" role="radiogroup" aria-labelledby="lts" aria-describedby="lts-h">
-      {#each TEXT_SIZES as n}<button class="chip" role="radio" aria-checked={prefs.textSize === n} onclick={() => setPref('textSize', n)}>{n}%</button>{/each}
+      {#each TEXT_SIZES as n}<button class="chip" role="radio" aria-checked={Number(prefs.textSize) === n} onclick={() => setPref('textSize', n)}>{n}%</button>{/each}
     </div>
     <div class="hint" id="lts-h" style="margin-top:4px">Scales text across the app. Your browser's zoom works too, on top of this.</div>
     <div class="grid cols-2" style="margin-top:18px">

@@ -23,7 +23,8 @@ fn game_host(h: &str) -> bool { GAME_HOSTS.iter().any(|d| h == *d || h.ends_with
 fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| reqwest::Client::builder()
-        .user_agent(format!("moss/{}", env!("CARGO_PKG_VERSION")))
+        // minecraft.net (Bedrock) never answers clients that do not present a browser-style "Mozilla/5.0" token.
+        .user_agent(format!("Mozilla/5.0 (compatible; moss/{})", env!("CARGO_PKG_VERSION")))
         .redirect(reqwest::redirect::Policy::custom(|a| {
             if a.previous().len() > 5 { return a.error("too many redirects"); }
             if a.url().scheme() == "https" && a.url().host_str().is_some_and(game_host) { a.follow() } else { a.error("redirect to a host that is not on the allow-list") }

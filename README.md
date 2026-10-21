@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Game servers that keep growing, quietly.</strong><br>
-  A fast, local-first controller for Minecraft and a dozen other game servers on Linux and macOS: one small binary, a polished web panel, full mod and plugin support with compatibility checks, and servers that survive everything except you pulling the plug.
+  A fast, local-first controller for Minecraft and nineteen other game servers on Linux and macOS: one small binary, a polished web panel, full mod and plugin support with compatibility checks, and servers that survive everything except you pulling the plug.
 </p>
 
 <p align="center">
@@ -338,7 +338,7 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | |
 | **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode with game-only network and extra UDP/TCP ports | |
 | **M6 Release 1.0** | ✅ | OpenAPI document and [freeze with compatibility tests](docs/api-policy.md), MFA policy, API tokens, [event webhooks](docs/webhooks.md), [internal security review](docs/security-review.md), dependency audit, soak tests, cosign-signed checksums, [SECURITY.md](SECURITY.md) | A 20-minute release-profile soak, first signed release |
-| **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and nine SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages, RCON admin, game mods, game updates, game config editors, container isolation for games, shared player lists, live maps, installable app with Web Push | Run every game end to end on hardware |
+| **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and sixteen SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages, RCON admin, game mods, game updates, game config editors, container isolation for games, shared player lists, live maps, installable app with Web Push | Run every game end to end on hardware |
 | **M8 After First Release** | 🔴 | - | Multi-node, extensions and SDK. |
 
 ## Documentation

@@ -202,6 +202,8 @@ async fn matching_events_run_actions_and_loops_and_floods_are_stopped() {
     let runs = wait_runs(&st, &w3.id, 12).await;
     let skipped = runs.iter().filter(|r| r["log"].to_string().contains("rate limit")).count();
     assert_eq!((runs.len(), skipped), (12, 2), "{runs:?}");
+    // the allowed runs are spawned and may finish after the skips, so check last_result on a skip made after they all landed
+    run::handle(&st, &on("R1", "srv-R1", 1)).await;
     let last = workflows::get(&st, &w3.id).await.unwrap().unwrap().last_result.unwrap();
     assert!(last.contains("rate limit"), "{last}");
 }

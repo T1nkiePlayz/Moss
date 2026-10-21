@@ -11,3 +11,4 @@ web/dist/
 # AI
 CLAUDE.md
 .claude/
+.tmp/

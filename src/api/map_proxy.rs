@@ -28,7 +28,8 @@ pub(super) async fn map_info(State(st): State<St>, user: User, Path(id): Path<St
     let s = server_for(&st, &user, &id, "server.view").await?;
     let Some(m) = maps::detect(&st, &s) else { return Ok(Json(json!({"available": false}))) };
     let running = server::view(&s, &st)["state"] == "running";
-    let up = running && reachable(m.port).await;
+    let others = server::list(&st).await.unwrap_or_default();
+    let up = running && maps::port_belongs_to(&s, m.port, &others) && reachable(m.port).await;
     let (url, exp) = maps::link(&st, &s.id, Scope::User, maps::TOKEN_TTL_SECS);
     Ok(Json(json!({"available": true, "kind": m.kind, "running": running, "reachable": up, "url": url, "expires_at": exp})))
 }
@@ -87,6 +88,8 @@ async fn proxy(State(st): State<St>, req: Request) -> Response {
     }
     let Ok(s) = server::get(&st, id).await else { return not_found() };
     let Some(m) = maps::detect(&st, &s) else { return not_found() };
+    let others = server::list(&st).await.unwrap_or_default();
+    if !maps::port_belongs_to(&s, m.port, &others) { return plain(StatusCode::BAD_GATEWAY, "The map is not being served by this server.") }
     let Some(up_path) = maps::normalise_path(rest) else { return plain(StatusCode::BAD_REQUEST, "Bad path.") };
     let query = req.uri().query();
     if query.is_some_and(|q| q.len() > MAX_QUERY) { return plain(StatusCode::URI_TOO_LONG, "Query too long.") }
@@ -125,10 +128,10 @@ mod tests {
         base
     }
 
-    /// A Paper server whose BlueMap web server is configured for `port`.
+    /// A Paper server whose BlueMap web server is configured for `port` (its pid is this test process, which holds the fake upstream's socket).
     async fn server_with_map(st: &St, id: &str, port: u16) {
         let i = id.to_string();
-        st.db.call(move |c| c.execute("INSERT INTO servers(id,name,runtime,game_version,port,memory_mb,created_at,installed) VALUES (?,'Survival','paper','1.21.1',25599,512,'2026-01-01T00:00:00Z',1)", [&i])).await.unwrap();
+        st.db.call(move |c| c.execute("INSERT INTO servers(id,name,runtime,game_version,port,memory_mb,created_at,installed,pid) VALUES (?1,'Survival','paper','1.21.1',25599,512,'2026-01-01T00:00:00Z',1,?2)", rusqlite::params![&i, i64::from(std::process::id())])).await.unwrap();
         let d = st.cfg.servers_dir().join(id).join("plugins/BlueMap");
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("webserver.conf"), format!("enabled: true\nport: {port}\n")).unwrap();

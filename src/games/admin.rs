@@ -72,11 +72,12 @@ pub fn parse_list(f: Flavor, text: &str) -> Vec<Online> {
 
 // ---------- commands ----------
 
-/// A name or reason that is safe inside a quoted console argument.
-pub fn safe_text(s: &str, max: usize) -> bool { !s.is_empty() && s.len() <= max && !s.contains(['"', '\\']) && !s.chars().any(char::is_control) }
+/// A name or reason that is safe inside a console argument: no quotes, no `;` (Source and Factorio chain commands
+/// with it), no control characters, and no leading `@` (a Minecraft target selector such as `@a` would hit everyone).
+pub fn safe_text(s: &str, max: usize) -> bool { !s.is_empty() && s.len() <= max && !s.starts_with('@') && !s.contains(['"', '\\', ';']) && !s.chars().any(char::is_control) }
 
 fn need_safe(s: &str, what: &str) -> ApiResult<()> {
-    if safe_text(s, 128) { Ok(()) } else { Err(ApiError::bad("player.name", format!("{what} is empty, too long or contains quotes or control characters"))) }
+    if safe_text(s, 128) { Ok(()) } else { Err(ApiError::bad("player.name", format!("{what} is empty, too long or contains quotes, `;`, a leading `@` or control characters"))) }
 }
 
 /// The RCON command to kick or ban `p`.
@@ -188,7 +189,8 @@ pub async fn act(st: &St, s: &Srv, name: &str, reason: Option<&str>, ban: bool) 
 
 /// Player counts for every ready RCON or API game in `servers`, queried together. Failures are left out.
 pub async fn poll_players(st: &St, servers: &[&Srv]) -> HashMap<String, Players> {
-    let res = futures_util::future::join_all(servers.iter().map(|s| async move {
+    // each query is bounded so one misbehaving endpoint never holds up the monitor loop
+    let res = futures_util::future::join_all(servers.iter().map(|s| async move { tokio::time::timeout(std::time::Duration::from_secs(10), async move {
         let g = s.game()?;
         let cfg = read_settings(&s.dir(st));
         let max = cfg.get("max_players").and_then(|v| v.parse().ok()).unwrap_or(g.max_players);
@@ -203,7 +205,7 @@ pub async fn poll_players(st: &St, servers: &[&Srv]) -> HashMap<String, Players>
             return Some((s.id.clone(), Players { online: n, max: if limit > 0 { limit } else { max }, sample: vec![] }));
         }
         None
-    })).await;
+    }).await.ok().flatten() })).await;
     res.into_iter().flatten().collect()
 }
 

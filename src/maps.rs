@@ -90,6 +90,44 @@ fn dynmap_port(t: &str) -> Option<u16> {
 }
 
 /// `detect_in` for a server, cached for 30 seconds (the server view is built often). Only Minecraft Java servers qualify.
+/// Whether the map port really belongs to this server. The port comes from files anyone with file access can edit, so
+/// without this check `/map/...` could be pointed at any other loopback service. On Linux the listening socket must be
+/// held by the server's process tree (`/proc/net/tcp*` inode matched against `/proc/<pid>/fd`); where `/proc` is not
+/// available, the port must at least not belong to another Moss server.
+pub fn port_belongs_to(s: &Srv, port: u16, others: &[Srv]) -> bool {
+    match listening_inodes(port) {
+        Some(inodes) => {
+            let Some(root) = s.pid.filter(|p| *p > 0) else { return false };
+            if inodes.is_empty() { return false; }
+            let mut pids = crate::games::descendants(root, &crate::games::proc_parents());
+            pids.push(root);
+            pids.iter().any(|pid| holds_socket(*pid, &inodes))
+        }
+        None => !crate::games::clashes_with_span(i64::from(port), 0, &s.id, others),
+    }
+}
+
+/// Inodes of sockets listening on `port` (any address), or `None` when `/proc/net/tcp` cannot be read (not Linux).
+fn listening_inodes(port: u16) -> Option<Vec<u64>> {
+    let v4 = std::fs::read_to_string("/proc/net/tcp").ok()?;
+    let v6 = std::fs::read_to_string("/proc/net/tcp6").unwrap_or_default();
+    Some(parse_listeners(&format!("{v4}\n{v6}"), port))
+}
+
+fn parse_listeners(table: &str, port: u16) -> Vec<u64> {
+    table.lines().filter_map(|l| {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        if f.len() < 10 || f[3] != "0A" { return None; } // 0A = LISTEN
+        let p = u16::from_str_radix(f[1].rsplit(':').next()?, 16).ok()?;
+        (p == port).then(|| f[9].parse().ok()).flatten()
+    }).collect()
+}
+
+fn holds_socket(pid: i64, inodes: &[u64]) -> bool {
+    let Ok(rd) = std::fs::read_dir(format!("/proc/{pid}/fd")) else { return false };
+    rd.flatten().any(|e| std::fs::read_link(e.path()).ok().and_then(|t| t.to_str()?.strip_prefix("socket:[")?.strip_suffix(']')?.parse::<u64>().ok()).is_some_and(|i| inodes.contains(&i)))
+}
+
 pub fn detect(st: &Inner, s: &Srv) -> Option<MapPlugin> {
     if !s.is_mc() || s.is_proxy() { return None; }
     let key = format!("map:{}", s.id);
@@ -389,5 +427,33 @@ mod tests {
         assert_eq!(rewrite_location("http://127.0.0.1:8100/a?b=1", p).as_deref(), Some("/map/s/t/a?b=1"));
         assert_eq!(rewrite_location("index.html", p).as_deref(), Some("index.html"));
         for bad in ["//evil.com/x", "https://evil.com/", "http://127.0.0.1.evil.com/x", "http://127.0.0.1@evil.com/", "\\\\evil", "/a\r\nSet-Cookie: x"] { assert_eq!(rewrite_location(bad, p), None, "{bad}"); }
+    }
+}
+
+#[cfg(test)]
+mod port_owner_tests {
+    use super::*;
+    #[test]
+    fn listener_table_parsing() {
+        let t = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:1FA4 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1 0\n   1: 0100007F:1FA4 0100007F:9C40 01 00000000:00000000 00:00000000 00000000  1000        0 4343 1 0\n   2: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 99 1 0";
+        assert_eq!(parse_listeners(t, 8100), vec![4242]);
+        assert_eq!(parse_listeners(t, 8080), vec![99]);
+        assert!(parse_listeners(t, 1234).is_empty());
+    }
+    #[test]
+    fn a_port_held_by_another_process_is_refused() {
+        if listening_inodes(1).is_none() { return; }
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let mut s = crate::runtimes::launch::test_srv("paper", "1.21.1", None, "balanced");
+        s.pid = None;
+        assert!(!port_belongs_to(&s, port, &[]));
+        let mut other = std::process::Command::new("sleep").arg("5").spawn().unwrap(); // Rust opens sockets close-on-exec, so it holds none
+        s.pid = Some(i64::from(other.id()));
+        assert!(!port_belongs_to(&s, port, &[]));
+        let _ = other.kill();
+        let _ = other.wait();
+        s.pid = Some(i64::from(std::process::id()));
+        assert!(port_belongs_to(&s, port, &[]));
     }
 }

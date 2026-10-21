@@ -67,10 +67,30 @@ fn write_if_changed(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::write(path, text)
 }
 
-fn apply_palworld(dir: &Path, port: u16, pw: &str) -> std::io::Result<()> {
+/// The non-empty `AdminPassword` already set in a `PalWorldSettings.ini` (Palworld's RCON uses it).
+pub fn palworld_admin_password(text: &str) -> Option<String> {
+    let at = text.find("OptionSettings=(")? + "OptionSettings=(".len();
+    split_items(&text[at..]).into_iter().find_map(|i| {
+        let (k, v) = i.split_once('=')?;
+        (k.trim() == "AdminPassword").then(|| v.trim().trim_end_matches(')').trim_matches('"').to_string()).filter(|v| !v.is_empty())
+    })
+}
+
+/// Patches RCON into Palworld's settings. An AdminPassword the operator set (Config tab) wins: it becomes the RCON
+/// password in `moss-game.cfg` instead of being overwritten. Returns the password in use.
+fn apply_palworld(dir: &Path, port: u16, pw: &str) -> std::io::Result<String> {
     let path = dir.join("Pal/Saved/Config/LinuxServer/PalWorldSettings.ini");
     let base = std::fs::read_to_string(&path).or_else(|_| std::fs::read_to_string(dir.join("DefaultPalWorldSettings.ini"))).unwrap_or_default();
-    write_if_changed(&path, &patch_palworld(&base, port, pw))
+    let pw = match palworld_admin_password(&base) {
+        Some(own) if own != pw && admin::safe_text(&own, 128) => {
+            let cfg = dir.join(SETTINGS_FILE);
+            std::fs::write(&cfg, set_properties(&std::fs::read_to_string(&cfg).unwrap_or_default(), &[("rcon_password", own.clone())]))?;
+            own
+        }
+        _ => pw.to_string(),
+    };
+    write_if_changed(&path, &patch_palworld(&base, port, &pw))?;
+    Ok(pw)
 }
 
 fn apply_zomboid(dir: &Path, servername: &str, port: u16, pw: &str) -> std::io::Result<()> {
@@ -83,12 +103,9 @@ fn apply_zomboid(dir: &Path, servername: &str, port: u16, pw: &str) -> std::io::
 /// Everything a start needs for remote admin: returns the settings with `rcon_password` filled in.
 pub fn prepare(dir: &Path, g: &Game, port: u16, cfg: &mut HashMap<String, String>) {
     let Ok(Some(pw)) = ensure_password(dir, g) else { return };
+    let pw = if g.id == "palworld" { apply_palworld(dir, port, &pw).unwrap_or(pw) } else { pw };
     cfg.insert("rcon_password".into(), pw.clone());
-    let _ = match g.id {
-        "palworld" => apply_palworld(dir, port, &pw),
-        "zomboid" => apply_zomboid(dir, cfg.get("servername").map_or("moss", String::as_str), port, &pw),
-        _ => Ok(()),
-    };
+    if g.id == "zomboid" { let _ = apply_zomboid(dir, cfg.get("servername").map_or("moss", String::as_str), port, &pw); }
 }
 
 #[cfg(test)]
@@ -148,5 +165,22 @@ mod tests {
         let ini = std::fs::read_to_string(d.join("Zomboid/Server/moss.ini")).unwrap();
         assert!(ini.contains("PVP=true\n") && ini.contains("RCONPort=16261\n") && ini.contains(&format!("RCONPassword={}\n", cfg["rcon_password"])));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_operator_set_palworld_admin_password_is_kept_and_used_for_rcon() {
+        let dir = std::env::temp_dir().join(format!("moss-pal-own-{}", uuid::Uuid::new_v4()));
+        let ini = dir.join("Pal/Saved/Config/LinuxServer/PalWorldSettings.ini");
+        std::fs::create_dir_all(ini.parent().unwrap()).unwrap();
+        std::fs::write(&ini, "[/Script/Pal.PalGameWorldSettings]\nOptionSettings=(ServerName=\"x\",AdminPassword=\"mine123\")\n").unwrap();
+        std::fs::write(dir.join(SETTINGS_FILE), "rcon_password=generated\n").unwrap();
+        let mut cfg = HashMap::new();
+        prepare(&dir, super::super::get("palworld").unwrap(), 8211, &mut cfg);
+        assert_eq!(cfg["rcon_password"], "mine123");
+        assert_eq!(read_settings(&dir)["rcon_password"], "mine123");
+        let t = std::fs::read_to_string(&ini).unwrap();
+        assert!(t.contains("AdminPassword=\"mine123\"") && t.contains("RCONEnabled=True"));
+        assert_eq!(palworld_admin_password("OptionSettings=(AdminPassword=\"\")"), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

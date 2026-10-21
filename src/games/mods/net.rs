@@ -124,12 +124,19 @@ pub fn extract_zip(zip_path: &Path, root: &Path, map: &dyn Fn(&str) -> Option<St
         safe_join(root, &dest).map_err(|e| anyhow::anyhow!(e.message))?;
         plan.push((i, dest));
     }
+    // files the archive replaces are moved aside first, so a failed extraction restores them instead of deleting them
     let mut written: Vec<String> = vec![];
+    let mut saved: Vec<(std::path::PathBuf, std::path::PathBuf)> = vec![];
     let res: Result<()> = (|| {
         let mut budget = MAX_UNPACKED;
         for (i, dest) in &plan {
             let path = safe_join(root, dest).map_err(|e| anyhow::anyhow!(e.message))?;
             if let Some(d) = path.parent() { std::fs::create_dir_all(d)?; }
+            if path.is_file() && !written.contains(dest) {
+                let aside = path.with_file_name(format!(".{}.moss-old", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()));
+                std::fs::rename(&path, &aside)?;
+                saved.push((path.clone(), aside));
+            }
             let mut out = std::fs::File::create(&path)?;
             written.push(dest.clone());
             let n = std::io::copy(&mut z.by_index(*i)?.take(budget + 1), &mut out)?;
@@ -141,7 +148,9 @@ pub fn extract_zip(zip_path: &Path, root: &Path, map: &dyn Fn(&str) -> Option<St
     })();
     if let Err(e) = res {
         for w in &written { let _ = std::fs::remove_file(root.join(w)); }
+        for (orig, aside) in &saved { let _ = std::fs::rename(aside, orig); }
         return Err(e);
     }
+    for (_, aside) in &saved { let _ = std::fs::remove_file(aside); }
     Ok(written)
 }

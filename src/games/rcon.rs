@@ -56,7 +56,12 @@ async fn read_packet(s: &mut TcpStream, wait: Duration) -> Result<(i32, i32, Str
 /// Connects, authenticates and runs one command, returning its (possibly multi-packet) output.
 pub async fn exec(addr: SocketAddr, password: &str, cmd: &str) -> Result<String, RconError> { exec_with(addr, password, cmd, Timeouts::default()).await }
 
+/// The whole exchange is bounded too: a peer that keeps sending packets with other ids never resets a read timeout forever.
 pub async fn exec_with(addr: SocketAddr, password: &str, cmd: &str, t: Timeouts) -> Result<String, RconError> {
+    timeout(t.connect + t.read * 2, exchange(addr, password, cmd, t)).await.map_err(|_| RconError::Timeout)?
+}
+
+async fn exchange(addr: SocketAddr, password: &str, cmd: &str, t: Timeouts) -> Result<String, RconError> {
     let mut s = timeout(t.connect, TcpStream::connect(addr)).await.map_err(|_| RconError::Timeout)?.map_err(|e| RconError::Connect(e.to_string()))?;
     let w = |e: std::io::Error| RconError::Protocol(e.to_string());
     timeout(t.read, s.write_all(&packet(1, AUTH, password))).await.map_err(|_| RconError::Timeout)?.map_err(w)?;

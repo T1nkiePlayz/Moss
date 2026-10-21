@@ -495,3 +495,20 @@ mod api {
         assert!(Manifest::load(&dir).unwrap().mods.is_empty());
     }
 }
+
+#[test]
+fn a_failed_extraction_restores_the_files_it_replaced() {
+    // the second entry needs `keep.txt` to be a directory, so the extraction fails after overwriting it
+    let (root, z) = write_zip(&[("keep.txt", "new"), ("fresh.txt", "x"), ("keep.txt/inner", "boom")]);
+    std::fs::write(root.join("keep.txt"), "original").unwrap();
+    assert!(net::extract_zip(&z, &root, &same).is_err());
+    assert_eq!(std::fs::read_to_string(root.join("keep.txt")).unwrap(), "original");
+    assert!(!root.join("fresh.txt").exists());
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "no leftovers");
+    // a successful one leaves no set-aside copies either
+    let (root, z) = write_zip(&[("keep.txt", "new")]);
+    std::fs::write(root.join("keep.txt"), "original").unwrap();
+    net::extract_zip(&z, &root, &same).unwrap();
+    assert_eq!(std::fs::read_to_string(root.join("keep.txt")).unwrap(), "new");
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+}

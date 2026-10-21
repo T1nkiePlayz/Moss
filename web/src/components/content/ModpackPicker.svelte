@@ -93,7 +93,7 @@
 
 <style>
   .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--s2); width: fit-content; max-width: 100%; }
-  .segb { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
+  .segb { border: 0; background: none; color: var(--muted); font: inherit; font-size: calc(13px * var(--ts, 1)); padding: 4px 12px; border-radius: 6px; cursor: pointer; }
   .segb[aria-checked='true'] { background: var(--a-soft); color: var(--a-text); font-weight: 600; }
   .segb:disabled { opacity: .5; cursor: not-allowed; }
   .segb:focus-visible { outline: 2px solid var(--a-text); outline-offset: 1px; }

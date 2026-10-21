@@ -1,6 +1,6 @@
 <script lang="ts">
   import MetricsPanel from './MetricsPanel.svelte';
-  import { apiOps } from '../lib/api';
+  import { apiOps } from '../lib/api-ops';
   import { bytes } from '../lib/format';
   import { host } from '../lib/stores.svelte';
   import type { ChartDef } from '../lib/metrics';

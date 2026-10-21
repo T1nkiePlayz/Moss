@@ -38,7 +38,7 @@
     return c;
   });
   const n = $derived(activeOps().length);
-  const dark = $derived(document.documentElement.dataset.theme !== 'light');
+  const dark = $derived(document.documentElement.dataset.scheme !== 'light');
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
   let menu: HTMLDivElement | undefined = $state();
   $effect(() => {
@@ -99,9 +99,9 @@
   .ph { flex: 1; text-align: left; font-size: var(--fs-sm); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } .keys { display: flex; gap: 3px; }
   .msearch { display: none; }
   .ops { position: relative; }
-  .badge-n { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--a1); color: var(--a-ink); font-size: 10px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); animation: pulse 2.2s infinite; }
+  .badge-n { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--a1); color: var(--a-ink); font-size: calc(10px * var(--ts, 1)); font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); animation: pulse 2.2s infinite; }
   .um { position: relative; }
-  .av { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line2); background: linear-gradient(135deg, var(--s3), var(--s2)); color: var(--a-text); font-weight: 700; font-size: 12px; cursor: pointer; padding: 0; overflow: hidden; }
+  .av { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line2); background: linear-gradient(135deg, var(--s3), var(--s2)); color: var(--a-text); font-weight: 700; font-size: calc(12px * var(--ts, 1)); cursor: pointer; padding: 0; overflow: hidden; }
   .av img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .pop { position: absolute; right: 0; top: 40px; width: 240px; padding: 6px; background: var(--s2); border: 1px solid var(--line2); border-radius: var(--r); box-shadow: 0 16px 40px rgb(0 0 0 / .45); animation: rise .14s var(--ease); z-index: 5; }
   .who { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }

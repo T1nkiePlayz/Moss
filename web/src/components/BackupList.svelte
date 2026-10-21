@@ -1,7 +1,8 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import RestoreModal from './RestoreModal.svelte';
-  import { api, apiOps, download, backupDownloadPath, type Backup } from '../lib/api';
+  import { api, download, backupDownloadPath, type Backup } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { isPreChange, canDeleteBackup, deleteHint } from '../lib/backupPreview';
   import { canCopyToRemote, isRemoteOnly, remoteBadge } from '../lib/remote';
   import { bytes, relTime, dateTime } from '../lib/format';
@@ -77,7 +78,7 @@
   tr.pre { background: color-mix(in srgb, var(--info-soft), transparent 40%); }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; max-width: 210px; }
   @media (max-width: 1360px) { .ck { display: none; } }
-  .wchip { font-size: 11px; padding: 0 6px; border-radius: 6px; background: var(--s3); color: var(--muted); border: 1px solid var(--line); }
+  .wchip { font-size: calc(11px * var(--ts, 1)); padding: 0 6px; border-radius: 6px; background: var(--s3); color: var(--muted); border: 1px solid var(--line); }
   .stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px 0; }
   td, th { padding-inline: 10px; }
   .btn.locked { opacity: .4; cursor: not-allowed; }

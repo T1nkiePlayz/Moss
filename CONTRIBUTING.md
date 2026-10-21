@@ -26,6 +26,8 @@ npx playwright install chromium && npm run test:ui   # every page renders cleanl
 node ../scripts/bundle-budget.mjs                   # first-load JavaScript budget
 ```
 
+UI changes must keep the panel accessible ([ACCESSIBILITY.md](ACCESSIBILITY.md)): `npm run test:ui` runs axe on every page, and new screens should also be tried with the keyboard alone and at 150% text size (Settings → Accessibility).
+
 The API is covered by a stability policy ([docs/api-policy.md](docs/api-policy.md)): `tests/api_compat.rs` fails if you remove or break anything in `docs/openapi.frozen.json`. After adding routes or fields, run `node scripts/api-freeze.mjs` to extend the snapshot and commit it.
 
 The soak test (`tests/soak.rs`, ignored by default) runs the real binary with the simulated game server through random start/stop/restart, console spam, backups, restores, schedules, controller SIGKILLs and provider outages, checking invariants as it goes. Run it with `MOSS_SOAK_MINUTES=5 cargo test --release --test soak -- --ignored --nocapture`; a failure prints its seed (`MOSS_SOAK_SEED`) and keeps the data and controller log under `MOSS_SOAK_DIR`. It also runs nightly (`.github/workflows/soak.yml`).

@@ -1,5 +1,6 @@
 // Reinstall / repair (POST /servers/{id}/actions/reinstall), with the right amount of confirmation.
-import { apiOps, type Server } from './api';
+import { type Server } from './api';
+import { apiOps } from './api-ops';
 import { confirmDialog, toast, toastError, trackOp } from './stores.svelte';
 
 /** Reinstall is allowed when the install failed or the server is stopped. */

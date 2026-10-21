@@ -2,7 +2,8 @@
   import Icon from '../Icon.svelte';
   import States from '../States.svelte';
   import WebhookForm from './WebhookForm.svelte';
-  import { apiOps, errMsg, type Webhook, type WebhookDelivery, type WebhookEventType } from '../../lib/api';
+  import { errMsg, type Webhook, type WebhookDelivery, type WebhookEventType } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { confirmDialog, servers, toast, toastError } from '../../lib/stores.svelte';
   import { copyWithToast } from '../../lib/clipboard';
   import { dateTime } from '../../lib/format';

@@ -2,7 +2,8 @@
   import Icon from '../Icon.svelte';
   import States from '../States.svelte';
   import Modal from '../Modal.svelte';
-  import { apiOps, ApiError, errMsg, type StatusPage } from '../../lib/api';
+  import { ApiError, errMsg, type StatusPage } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { confirmDialog, servers, toast, toastError } from '../../lib/stores.svelte';
   import { copyWithToast } from '../../lib/clipboard';
 

@@ -1,7 +1,8 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
   import States from '../States.svelte';
-  import { api, apiOps, errMsg, type AuditMode, type Settings } from '../../lib/api';
+  import { api, errMsg, type AuditMode, type Settings } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { toast, toastError } from '../../lib/stores.svelte';
   import { webhookKinds, defaultEvents } from '../../lib/notify';
 

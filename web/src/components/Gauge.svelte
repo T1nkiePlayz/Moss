@@ -27,7 +27,7 @@
 <style>
   .gauge { display: flex; gap: 14px; align-items: center; }
   .ring { position: relative; width: 76px; height: 76px; flex: none; }
-  .num { position: absolute; inset: 0; display: grid; place-items: center; font-size: 18px; font-weight: 650; }
-  .num small { font-size: 10px; color: var(--muted); margin-left: 1px; align-self: center; }
+  .num { position: absolute; inset: 0; display: grid; place-items: center; font-size: calc(18px * var(--ts, 1)); font-weight: 650; }
+  .num small { font-size: calc(10px * var(--ts, 1)); color: var(--muted); margin-left: 1px; align-self: center; }
   .num { display: flex; align-items: center; justify-content: center; }
 </style>

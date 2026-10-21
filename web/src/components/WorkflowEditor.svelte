@@ -3,7 +3,8 @@
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import States from './States.svelte';
-  import { apiOps, ApiError, errMsg, type Workflow, type WebhookEventType, type WorkflowAction, type WorkflowPlan, type WorkflowRun } from '../lib/api';
+  import { ApiError, errMsg, type Workflow, type WebhookEventType, type WorkflowAction, type WorkflowPlan, type WorkflowRun } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { ACTION_TYPES, CONDITION_FIELDS, CONDITION_OPS, MAX_ACTIONS, MAX_WAIT, PLACEHOLDERS, blankAction, buildCondition, hasServer, move, workflowProblems } from '../lib/workflows';
   import { servers, toast } from '../lib/stores.svelte';
   import { dateTime } from '../lib/format';

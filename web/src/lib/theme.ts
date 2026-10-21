@@ -44,7 +44,7 @@ const alpha = (hex: string, a: number) => { const [r, g, b] = rgb(hex); return `
 export const inkOn = (bg: string) => (contrast(bg, '#ffffff') >= contrast(bg, '#000000') ? '#ffffff' : '#000000');
 
 export interface Check { id: string; label: string; fg: string; bg: string; ratio: number; need: number; ok: boolean }
-/** WCAG 2.1 AA: 4.5:1 for normal text. Every colour that is used as text, or as the fill behind button text, is checked. */
+/** WCAG 2.2 AA (unchanged since 2.1): 4.5:1 for normal text. Every colour that is used as text, or as the fill behind button text, is checked. */
 export function checks(c: Colors): Check[] {
   const rows: [string, string, string, string][] = [
     ['text-bg', 'Text on background', c.text, c.bg],

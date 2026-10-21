@@ -2,7 +2,8 @@
   import Icon from '../components/Icon.svelte';
   import States from '../components/States.svelte';
   import WorkflowEditor from '../components/WorkflowEditor.svelte';
-  import { apiOps, errMsg, type Workflow, type WebhookEventType } from '../lib/api';
+  import { errMsg, type Workflow, type WebhookEventType } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { confirmDialog, servers, toast, toastError } from '../lib/stores.svelte';
   import { relTime, dateTime } from '../lib/format';
   import { describeAction, scopeText, workflowStatus } from '../lib/workflows';

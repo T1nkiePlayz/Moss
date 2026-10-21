@@ -90,8 +90,8 @@
   .tabbar { display: none; }
   @media (max-width: 860px) {
     .page { padding: 16px 14px 96px; }
-    .tabbar { position: fixed; z-index: 40; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--s1), transparent 4%); border-top: 1px solid var(--line2); }
-    .tabbar a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; font-size: 10.5px; font-weight: 600; color: var(--muted); text-decoration: none; border-radius: 10px; }
+    .tabbar { position: fixed; z-index: 40; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--s1), transparent 4%); border-top: 1px solid var(--line2); }
+    .tabbar a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; min-width: 0; font-size: calc(10.5px * min(var(--ts, 1), 1.3)); letter-spacing: normal; word-spacing: normal; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); text-decoration: none; border-radius: 10px; }
     .tabbar a[aria-current='page'] { color: var(--a-text); }
     .tabbar a[aria-current='page'] :global(svg) { filter: drop-shadow(0 0 6px var(--a-glow)); }
   }

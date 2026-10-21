@@ -6,7 +6,8 @@
   import AnsiLine from '../../components/AnsiLine.svelte';
   import States from '../../components/States.svelte';
   import StatusBadge from '../../components/StatusBadge.svelte';
-  import { api, apiOps, errMsg, type Server, type MetricSample, type TimelineEvent, type Finding, type UndoEntry } from '../../lib/api';
+  import { api, errMsg, type Server, type MetricSample, type TimelineEvent, type Finding, type UndoEntry } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import type { ChartDef } from '../../lib/metrics';
   import { poll, toast, toastError, confirmDialog } from '../../lib/stores.svelte';
   import { power, consequence } from '../../lib/actions';
@@ -148,14 +149,14 @@
   .hero.bad { border-color: color-mix(in srgb, var(--danger), transparent 55%); }
   .hero.bad::before { content: ''; position: absolute; inset: -40% -10% auto -10%; height: 200px; background: radial-gradient(closest-side, var(--danger-soft), transparent); pointer-events: none; }
   .orb { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: var(--s3); border: 1px solid var(--line2); flex: none; }
-  .big { font-size: 30px; font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
+  .big { font-size: calc(30px * var(--ts, 1)); font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
   .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); position: relative; }
   .facts > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .copy { padding: 0 6px; margin-left: -6px; width: fit-content; max-width: 100%; color: var(--text); }
   .motd { margin-top: 14px; padding: 8px 12px; background: var(--bg); border-radius: 8px; color: var(--muted); border: 1px solid var(--line); position: relative; }
   .plist { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
   .plist li { display: flex; align-items: center; gap: 10px; }
-  .av { width: 26px; height: 26px; border-radius: 7px; background: var(--a-soft); color: var(--a-text); display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+  .av { width: 26px; height: 26px; border-radius: 7px; background: var(--a-soft); color: var(--a-text); display: grid; place-items: center; font-weight: 700; font-size: calc(12px * var(--ts, 1)); }
   .sec { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
   .sq { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .undo { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }

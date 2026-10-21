@@ -52,6 +52,49 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(await page.evaluate(() => localStorage.getItem('moss.theme'))).toBeNull();
     });
 
+    test('Settings: accessibility options apply, persist, pass axe and reset', async ({ page }) => {
+      await page.goto('/#/settings');
+      const card = page.getByRole('region', { name: 'Accessibility' });
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('button', { name: 'Reset accessibility settings' })).toBeDisabled();
+      const html = page.locator('html');
+      const body = await page.evaluate(() => parseFloat(getComputedStyle(document.body).fontSize));
+      await card.getByRole('radio', { name: '150%' }).click();
+      await expect(html).toHaveAttribute('data-text', '150');
+      expect(await page.evaluate(() => parseFloat(getComputedStyle(document.body).fontSize))).toBeCloseTo(body * 1.5, 0);
+      const set: [string, string, string, string][] = [
+        ['Motion', 'Reduce', 'data-motion', 'reduce'], ['Focus indicator', 'Strong', 'data-focus', 'strong'],
+        ['Underline links', 'Always', 'data-links', 'always'], ['Text spacing', 'Wider', 'data-spacing', 'wide'],
+        ['Transparency and effects', 'Reduce', 'data-effects', 'reduce'],
+      ];
+      for (const [group, option, attr, value] of set) {
+        await card.getByRole('radiogroup', { name: group }).getByRole('radio', { name: option }).click();
+        await expect(html).toHaveAttribute(attr, value);
+      }
+      await audit(page, 'settings with every accessibility option on');
+      // the System theme follows the device's contrast request unless told to ignore it
+      await page.emulateMedia({ contrast: 'more' });
+      await expect(html).toHaveAttribute('data-theme', 'contrast');
+      await card.getByRole('radiogroup', { name: 'System high contrast' }).getByRole('radio', { name: 'Ignore' }).click();
+      await expect(html).toHaveAttribute('data-theme', scheme);
+      await page.reload(); // kept in this browser
+      await expect(html).toHaveAttribute('data-text', '150');
+      for (const [, , attr, value] of set) await expect(html).toHaveAttribute(attr, value);
+      await expect(html).toHaveAttribute('data-theme', scheme);
+      // largest text with wider spacing still fits a phone without sideways scrolling
+      await page.setViewportSize({ width: 375, height: 812 });
+      for (const path of ['/#/', '/#/servers', '/#/settings']) {
+        await page.goto(path);
+        await page.locator('main h1').first().waitFor();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${path} overflows at 150%`).toBeLessThanOrEqual(0);
+      }
+      await page.getByRole('region', { name: 'Accessibility' }).getByRole('button', { name: 'Reset accessibility settings' }).click();
+      await expect(html).toHaveAttribute('data-text', '100');
+      await expect(html).toHaveAttribute('data-focus', 'standard');
+      await expect(html).toHaveAttribute('data-motion', 'system');
+      await expect(html).toHaveAttribute('data-theme', 'contrast'); // following the device again
+    });
+
     test('Servers: a search and filter can be saved as a view and reapplied', async ({ page }) => {
       await page.goto('/#/servers');
       await page.getByRole('button', { name: 'Running now', exact: true }).click();
@@ -157,3 +200,18 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   });
 }
+
+test.describe('themes', () => {
+  test.setTimeout(60000);
+  for (const theme of ['nether', 'void', 'deepsea', 'synthwave', 'terminal', 'midnight', 'campfire', 'sakura', 'desert', 'tundra']) {
+    test(`${theme} theme passes axe on the main pages`, async ({ page }) => {
+      await page.addInitScript((t) => localStorage.setItem('moss.prefs', JSON.stringify({ theme: t })), theme);
+      for (const path of ['/#/', '/#/servers', '/#/servers/srv-survival-smp', '/#/settings']) {
+        await page.goto(path);
+        await page.locator('main h1').first().waitFor();
+        await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+        await audit(page, `${theme} ${path}`);
+      }
+    });
+  }
+});

@@ -110,5 +110,5 @@
   .steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 700; background: var(--a-soft); color: var(--a-text); }
   .qr { width: 188px; height: 188px; border-radius: 10px; border: 1px solid var(--line2); }
   .secret { font-size: var(--fs-sm); letter-spacing: .04em; overflow-wrap: anywhere; }
-  .otp { font-size: 22px; letter-spacing: .3em; text-align: center; height: 48px; }
+  .otp { font-size: calc(22px * var(--ts, 1)); letter-spacing: .3em; text-align: center; height: 48px; }
 </style>

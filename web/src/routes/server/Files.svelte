@@ -205,7 +205,7 @@
   .ed { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
   .editor { display: flex; height: calc(100dvh - 330px); min-height: 320px; background: var(--bg); border: 1px solid var(--line2); border-radius: var(--r-sm); overflow: hidden; }
   .editor:focus-within { border-color: var(--a1); box-shadow: 0 0 0 3px var(--a-soft); }
-  .gutter { width: 52px; flex: none; overflow: hidden; text-align: right; padding: 12px 10px 12px 0; color: var(--faint); background: var(--s1); border-right: 1px solid var(--line); font-size: 12.5px; line-height: 20px; user-select: none; }
-  textarea { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); padding: 12px 14px; font-size: 12.5px; line-height: 20px; white-space: pre; overflow: auto; tab-size: 2; }
+  .gutter { width: 52px; flex: none; overflow: hidden; text-align: right; padding: 12px 10px 12px 0; color: var(--faint); background: var(--s1); border-right: 1px solid var(--line); font-size: calc(12.5px * var(--ts, 1)); line-height: calc(20px * var(--ts, 1)); user-select: none; }
+  textarea { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); padding: 12px 14px; font-size: calc(12.5px * var(--ts, 1)); line-height: calc(20px * var(--ts, 1)); white-space: pre; overflow: auto; tab-size: 2; }
   .crumbs { min-width: 0; }
 </style>

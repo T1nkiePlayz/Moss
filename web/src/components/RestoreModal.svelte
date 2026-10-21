@@ -3,7 +3,8 @@
   import Icon from './Icon.svelte';
   import RestoreSummary from './RestoreSummary.svelte';
   import StagedModal from './StagedModal.svelte';
-  import { apiOps, ApiError, errMsg, type Backup, type RestorePreview } from '../lib/api';
+  import { ApiError, errMsg, type Backup, type RestorePreview } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { isRemoteOnly } from '../lib/remote';
   import { bytes, dateTime } from '../lib/format';
   import { untrack } from 'svelte';

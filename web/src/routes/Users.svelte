@@ -59,5 +59,5 @@
 {/if}
 
 <style>
-  .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--a-soft); color: var(--a-text); font-size: 11px; font-weight: 700; flex: none; }
+  .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--a-soft); color: var(--a-text); font-size: calc(11px * var(--ts, 1)); font-weight: 700; flex: none; }
 </style>

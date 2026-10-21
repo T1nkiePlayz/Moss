@@ -86,7 +86,7 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 **Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · support bundle with secrets redacted.
 
-**Interface** · dark, light, system and high-contrast themes with a **theme editor** (live preview, contrast checker, import/export) · accent and density options · saved views for lists · command palette that searches servers, backups, content and files (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>) · keyboard first, responsive, axe-checked in CI.
+**Interface** · fourteen themes: dark, light, system and high contrast, plus game-inspired and seasonal ones such as Nether, Synthwave, Amber terminal, Deep sea, Campfire and Cherry blossom, all checked for WCAG AA contrast · a **theme editor** (live preview, contrast checker, import/export) · accent and density options · saved views for lists · command palette that searches servers, backups, content and files (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>) · **accessibility settings** (text size up to 150%, strong focus ring, always-underlined links, wider text spacing, reduced motion and effects, following the system's high-contrast request) · keyboard first, responsive, axe-checked in CI. See [ACCESSIBILITY.md](ACCESSIBILITY.md).
 
 **Access and recovery** · roles and per-server grants enforced everywhere · personal API tokens · login throttling · optional MFA requirement · activity log · **`moss recover`** command line for locked-out owners, stuck operations and integrity checks.
 
@@ -328,7 +328,7 @@ macOS binaries are built in CI and are ad-hoc signed, not notarised; see [docs/m
 
 ## Roadmap
 
-Milestones are gates, not dates. ✅ done · 🟡 partly done.
+Milestones are gates, not dates. ✅ done · 🟡 partly done · 🔴 not started.
 
 | Milestone | Status | Done | Still to do |
 |---|---|---|---|
@@ -340,6 +340,7 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | **M6 Release 1.0** | ✅ | OpenAPI document and [freeze with compatibility tests](docs/api-policy.md), MFA policy, API tokens, [event webhooks](docs/webhooks.md), [internal security review](docs/security-review.md), dependency audit, soak tests, cosign-signed checksums, [SECURITY.md](SECURITY.md) | A 20-minute release-profile soak, first signed release |
 | **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and sixteen SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages, RCON admin, game mods, game updates, game config editors, container isolation for games, shared player lists, live maps, installable app with Web Push | Run every game end to end on hardware |
 | **M8 After First Release** | 🔴 | - | Multi-node, extensions and SDK. |
+| **M9 Other languages** | 🔴 | - | Panel text moved into translation catalogs, a language picker in Settings (following the browser's language by default), dates, numbers and sizes in the chosen locale, right-to-left layouts, the CLI and `moss doctor` messages translated, a community translation workflow, and the first languages beyond English. |
 
 ## Documentation
 
@@ -357,6 +358,7 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | [docs/architecture.md](docs/architecture.md) · [docs/adr](docs/adr) | How it works and why |
 | [docs/api.md](docs/api.md) · [docs/openapi.json](docs/openapi.json) | HTTP API reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing and releasing |
+| [ACCESSIBILITY.md](ACCESSIBILITY.md) | Accessibility target, settings, testing, known limits and how to report a problem |
 
 ## License
 

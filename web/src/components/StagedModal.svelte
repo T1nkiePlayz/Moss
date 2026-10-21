@@ -2,7 +2,8 @@
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import RestoreSummary from './RestoreSummary.svelte';
-  import { apiOps, errMsg, type StagedRestore } from '../lib/api';
+  import { errMsg, type StagedRestore } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { summarizePreview } from '../lib/backupPreview';
   import { blockingFailures, stagedAsPreview } from '../lib/remote';
   import { confirmDialog, serverById, toast, toastError, trackOp } from '../lib/stores.svelte';

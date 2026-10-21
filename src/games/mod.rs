@@ -275,7 +275,7 @@ pub static GAMES: &[Game] = &[
         ready: None, join: None, leave: None, players: PlayerSource::A2s(2), max_players: 70, needs_eula: false, fallback_ready_s: 900 },
     Game { id: "sdtd", name: "7 Days to Die", description: "7 Days to Die dedicated server via SteamCMD (anonymous, 8 GB RAM or more). Edit serverconfig.xml for world settings; Moss sets the ports. Linux x86_64 only.",
         port: 26900, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(294420), launch: sdtd, stop: Stop::Signal(SIGINT),
-        ready: Some("StartGame done"), join: Some(r"PlayerSpawnedInWorld \(reason: JoinMultiplayer.*PlayerName='([^']+)'"), leave: Some(r"Player disconnected: .*PlayerName='([^']+)'"),
+        ready: Some("StartGame done"), join: Some(r"^\S+\s+\S+\s+INF GMSG: Player '(.+)' joined the game\s*$"), leave: Some(r"^\S+\s+\S+\s+INF GMSG: Player '(.+)' left the game\s*$"),
         players: PlayerSource::Log, max_players: 8, needs_eula: false, fallback_ready_s: 600 },
 ];
 
@@ -520,9 +520,10 @@ mod tests {
         assert!(argv("sdtd", 26900, &[]).windows(2).any(|w| w == ["-logfile", "-"]));
         assert_eq!((d.span(), d.reads_log(), d.a2s_port(26900)), (3, true, None));
         assert_eq!(classify(d, "2025-01-01T10:00:00 12.3 INF StartGame done"), Some(Event::Ready));
-        assert_eq!(classify(d, "2025-01-01T10:00:00 12.3 INF PlayerSpawnedInWorld (reason: JoinMultiplayer, position: 1, 2, 3): EntityID=171, PltfmId='Steam_765', CrossId='EOS_00', OwnerID='Steam_765', PlayerName='Alice Smith', ClientNumber='1'"), Some(Event::Join("Alice Smith".into())));
-        assert_eq!(classify(d, "2025-01-01T10:00:00 12.3 INF PlayerSpawnedInWorld (reason: Teleport, position: 1, 2, 3): EntityID=171, PlayerName='Alice'"), None);
-        assert_eq!(classify(d, "2025-01-01T10:09:00 99.1 INF Player disconnected: EntityID=171, PltfmId='Steam_765', CrossId='EOS_00', OwnerID='Steam_765', PlayerName='Alice Smith', ClientNumber='1'"), Some(Event::Leave("Alice Smith".into())));
+        assert_eq!(classify(d, "2020-06-20T16:37:01 72.942 INF GMSG: Player 'Alice Smith' joined the game"), Some(Event::Join("Alice Smith".into())));
+        assert_eq!(classify(d, "2020-06-20T16:37:39 111.364 INF GMSG: Player 'O'Brien' left the game"), Some(Event::Leave("O'Brien".into())));
+        assert_eq!(classify(d, "2020-06-20T16:37:01 72.951 INF PlayerSpawnedInWorld (reason: JoinMultiplayer, position: 1, 2, 3): EntityID=171"), None);
+        assert_eq!(classify(d, "2020-06-20T16:38:00 80.1 INF Chat (from 'Steam_765', entity id '171', to 'Global'): 'Bob': GMSG: Player 'Eve' joined the game"), None, "chat cannot fake a join");
     }
 
     #[test]

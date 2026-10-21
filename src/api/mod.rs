@@ -59,7 +59,7 @@ pub fn router(st: St) -> Router {
         .route("/views", get(userdata::views_list).post(userdata::views_create))
         .route("/views/{id}", axum::routing::delete(userdata::views_delete))
         .route("/blueprints", get(blueprints::list).post(blueprints::save))
-        .route("/blueprints/import", post(blueprints::import))
+        .route("/blueprints/import", post(blueprints::import).layer(big()))
         .route("/blueprints/{id}", axum::routing::delete(blueprints::delete))
         .route("/blueprints/import-code", post(blueprints::share::import_code))
         .route("/blueprints/{id}/export", get(blueprints::export))
@@ -74,7 +74,7 @@ pub fn router(st: St) -> Router {
         .route("/java/install", post(java_install))
         .route("/java/{major}", axum::routing::delete(java_delete))
         .route("/servers", get(servers_list).post(servers_create))
-        .route("/servers/import/inspect", post(importer::inspect))
+        .route("/servers/import/inspect", post(importer::inspect).layer(big()))
         .route("/servers/import", post(importer::start))
         .route("/servers/{id}", get(server_get).patch(server_patch).delete(server_delete))
         .route("/container/status", get(container_status))
@@ -95,7 +95,7 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/files/content", get(files::read).put(files::write))
         .route("/servers/{id}/files/mkdir", post(files::mkdir))
         .route("/servers/{id}/files/rename", post(files::rename))
-        .route("/servers/{id}/files/upload", post(files::upload))
+        .route("/servers/{id}/files/upload", post(files::upload).layer(big()))
         .route("/servers/{id}/files/download", get(files::download))
         .route("/content/providers", get(content::providers))
         .route("/content/search", get(content::search))
@@ -113,8 +113,8 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/staging/{run}", get(content::staging_get).delete(content::staging_discard))
         .route("/servers/{id}/staging/{run}/log", get(content::staging_log))
         .route("/servers/{id}/staging/{run}/promote", post(content::staging_promote))
-        .route("/modpacks/inspect", post(content::modpack_inspect))
-        .route("/servers/{id}/modpacks", get(content::modpack_list).post(content::modpack_import))
+        .route("/modpacks/inspect", post(content::modpack_inspect).layer(big()))
+        .route("/servers/{id}/modpacks", get(content::modpack_list).post(content::modpack_import).layer(big()))
         .route("/servers/{id}/modpacks/{install}", patch(content::modpack_pin))
         .route("/servers/{id}/modpacks/{install}/check-update", post(content::modpack_check_update))
         .route("/servers/{id}/modpacks/{install}/update", post(content::modpack_update))
@@ -180,10 +180,13 @@ pub fn router(st: St) -> Router {
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
-        .layer(axum::extract::DefaultBodyLimit::max(512 << 20))
+        .layer(axum::extract::DefaultBodyLimit::max(32 << 20)) // fits the editor's 8 MiB text files even if JSON escaping doubles them
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(st)
 }
+
+/// Upload routes (jars, worlds, modpacks, blueprints) may send large bodies; everything else keeps the small default.
+fn big() -> axum::extract::DefaultBodyLimit { axum::extract::DefaultBodyLimit::max(512 << 20) }
 
 pub async fn server_for(st: &St, user: &User, id: &str, perm: &str) -> ApiResult<Srv> {
     authz(st, user, id, perm).await?;

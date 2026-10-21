@@ -27,7 +27,8 @@ pub(super) async fn notifications_read(State(st): State<St>, user: User, Json(r)
     if !all && r.ids.is_none() { return Err(ApiError::bad("validation", "pass ids or all:true")); }
     let wanted = r.ids.unwrap_or_default();
     let ids: Vec<String> = visible_rows(&st, &user, true, 1000).await?.into_iter().filter_map(|n| n["id"].as_str().map(String::from)).filter(|id| all || wanted.contains(id)).collect();
-    st.db.call(move |c| { let mut q = c.prepare("UPDATE notifications SET read=1 WHERE id=?")?; for id in &ids { q.execute([id])?; } Ok(()) }).await?;
+    // One commit (one fsync) for the whole batch rather than one per row under the shared DB lock.
+    st.db.call(move |c| { let tx = c.unchecked_transaction()?; { let mut q = tx.prepare("UPDATE notifications SET read=1 WHERE id=?")?; for id in &ids { q.execute([id])?; } } tx.commit() }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

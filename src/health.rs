@@ -42,7 +42,7 @@ pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
     if s.is_mc() && s.eula_at.is_none() {
         f.push(finding(format!("{}:eula", s.id), "critical", Some(&s.id), "EULA not accepted", "This server cannot start until the Minecraft EULA is accepted.".into(), vec!["eula_at is empty".into()], Some(json!({"label": "Accept EULA", "kind": "accept_eula"}))));
     }
-    if s.installed && s.is_mc() && crate::java::find(st, s.java_major as u32).is_none() {
+    if s.installed && s.is_mc() && crate::java::find_async(st, s.java_major as u32).await.is_none() {
         f.push(finding(format!("{}:java", s.id), "critical", Some(&s.id), &format!("Java {} is missing", s.java_major), "Moss can download a verified Temurin runtime for you.".into(), vec![format!("required major: {}", s.java_major)], Some(json!({"label": "Install Java", "kind": "install_java", "major": s.java_major}))));
     }
     if state == "crashed" || state == "failed" {

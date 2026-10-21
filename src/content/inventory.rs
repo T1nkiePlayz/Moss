@@ -97,20 +97,23 @@ pub async fn resync(st: &St, s: &Srv) {
     let Some(c) = compat(st, s) else { return };
     let root = s.dir(st);
     let Ok(items) = db_items(st, &s.id).await else { return };
-    for i in items {
-        let (dir, f) = (i["dir"].as_str().unwrap_or(&c.dir).to_string(), i["filename"].as_str().unwrap_or_default().to_string());
-        if !root.join(&dir).join(&f).exists() {
-            let id = i["id"].as_str().unwrap_or_default().to_string();
-            let _ = st.db.call(move |c| c.execute("DELETE FROM content_items WHERE id=?", [id])).await;
-        }
-    }
+    let gone: Vec<String> = tokio::task::spawn_blocking(move || items.iter().filter(|i| {
+        let (dir, f) = (i["dir"].as_str().unwrap_or(&c.dir), i["filename"].as_str().unwrap_or_default());
+        !root.join(dir).join(f).exists()
+    }).filter_map(|i| i["id"].as_str().map(str::to_string)).collect()).await.unwrap_or_default();
+    if gone.is_empty() { return; }
+    let _ = st.db.call(move |c| {
+        let tx = c.unchecked_transaction()?;
+        { let mut q = tx.prepare("DELETE FROM content_items WHERE id=?")?; for id in &gone { q.execute([id])?; } }
+        tx.commit()
+    }).await;
 }
 
 pub async fn remove(State(st): State<St>, user: User, Path((id, item)): Path<(String, String)>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (s, c) = compat_for(&st, &user, &id, "content.manage").await?;
     let (filename, row_id) = if let Some(f) = item.strip_prefix("manual:") { (content_filename(f, c.ext).map_err(|e| ApiError::bad("validation", e.to_string()))?, None) } else {
-        let i = item.clone();
-        let f: Option<(String, String)> = st.db.call(move |db| db.query_row("SELECT filename,dir FROM content_items WHERE id=?", [i], |r| Ok((r.get(0)?, r.get(1)?))).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await?;
+        let (i, sid) = (item.clone(), id.clone());
+        let f: Option<(String, String)> = st.db.call(move |db| db.query_row("SELECT filename,dir FROM content_items WHERE id=? AND server_id=?", [i, sid], |r| Ok((r.get(0)?, r.get(1)?))).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await?;
         (f.ok_or_else(|| ApiError::not_found("content item"))?.0, Some(item.clone()))
     };
     let actor = user.actor();
@@ -123,7 +126,7 @@ pub async fn remove(State(st): State<St>, user: User, Path((id, item)): Path<(St
         ctx.stage("Removing file (plugin data and configuration are kept)");
         let p = safe_join(&s.dir(&st), &rel).map_err(|e| anyhow!(e.message))?;
         match tokio::fs::remove_file(&p).await { Ok(()) => {}, Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}, Err(e) => return Err(e.into()) }
-        if let Some(rid) = row_id { st.db.call(move |db| db.execute("DELETE FROM content_items WHERE id=?", [rid])).await?; }
+        if let Some(rid) = row_id { let sid = s.id.clone(); st.db.call(move |db| db.execute("DELETE FROM content_items WHERE id=? AND server_id=?", [rid, sid])).await?; }
         st.audit(&actor, "content.remove", &s.name, &filename, Some(&s.id)).await;
         Ok(())
     });

@@ -47,8 +47,13 @@ pub async fn list(State(st): State<St>, user: User, Path(id): Path<String>) -> A
 
 pub async fn list_all(State(st): State<St>, user: User) -> ApiResult<Json<Value>> {
     let vis = auth::visible_servers(&st, &user).await?;
-    let v: Vec<Value> = st.db.call(|c| { let mut q = c.prepare(&format!("{SEL} ORDER BY created_at DESC LIMIT 500"))?; q.query_map([], row_json)?.collect() }).await?;
-    Ok(Json(Value::Array(v.into_iter().filter(|b| vis.as_ref().is_none_or(|v| v.iter().any(|s| b["server_id"] == s.as_str()))).collect())))
+    // Filter by visible servers before the LIMIT, so other servers' backups can't push these out of the window.
+    let v: Vec<Value> = st.db.call(move |c| {
+        let filter = vis.as_ref().map(|v| format!(" WHERE server_id IN ({})", vec!["?"; v.len()].join(","))).unwrap_or_default();
+        let mut q = c.prepare(&format!("{SEL}{filter} ORDER BY created_at DESC LIMIT 500"))?;
+        q.query_map(rusqlite::params_from_iter(vis.iter().flatten()), row_json)?.collect()
+    }).await?;
+    Ok(Json(Value::Array(v)))
 }
 
 #[derive(Deserialize, Default)] pub struct CreateReq { note: Option<String> }

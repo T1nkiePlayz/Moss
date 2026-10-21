@@ -71,7 +71,7 @@ pub async fn install(ctx: &OpCtx, st: &St, s: &Srv, r: &Resolved, dir: &Path) ->
     // Servers set to container isolation run the third-party installer in a short-lived container as well.
     let ctr = s.isolation == "container";
     let java = if ctr { None } else {
-        Some(crate::java::find(st, r.java_major).ok_or_else(|| anyhow!("Java {} is needed to run the {} installer. Install it from Settings → Java, then retry.", r.java_major, s.runtime))?)
+        Some(crate::java::find_async(st, r.java_major).await.ok_or_else(|| anyhow!("Java {} is needed to run the {} installer. Install it from Settings → Java, then retry.", r.java_major, s.runtime))?)
     };
     // In a container the jar must live inside the one mounted directory.
     let tmp = if ctr { dir.join(".moss") } else { st.cfg.tmp_dir().join(format!("installer-{}", uuid::Uuid::now_v7())) };
@@ -113,7 +113,7 @@ async fn run_in_container(ctx: &OpCtx, st: &St, s: &Srv, r: &Resolved, dir: &Pat
     let (c2, token) = (ctx.clone(), ctx.token.clone());
     let code = tokio::task::spawn_blocking(move || {
         let _ = eng.rm(&spec.name);
-        eng.run_once(&spec, &mut |l| { c2.log(l.to_string()); !token.is_cancelled() }, TIMEOUT)
+        eng.run_once(&spec, &mut |l| { if !l.is_empty() { c2.log(l.to_string()); } !token.is_cancelled() }, TIMEOUT)
     }).await?.map_err(|e| if ctx.cancelled() { anyhow!("cancelled") } else { anyhow!("the installer container could not run: {e}") })?;
     if code != 0 { bail!("the installer failed (exit code {code})"); }
     Ok(())

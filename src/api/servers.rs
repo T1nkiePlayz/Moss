@@ -271,6 +271,7 @@ pub(super) async fn server_delete(State(st): State<St>, user: User, Path(id): Pa
     st.live.lock().unwrap().remove(&id);
     st.hubs.lock().unwrap().remove(&id);
     st.stats.lock().unwrap().remove(&id);
+    if crate::container::valid_id(&id) { crate::container::forget_alive(&crate::container::container_name(&id)); }
     drop(guard);
     st.audit(&user.actor(), "server.delete", &s.name, if q.delete_data { "data deleted" } else { "data kept in data/removed" }, None).await;
     st.emit("server", json!({"id": id, "deleted": true}));

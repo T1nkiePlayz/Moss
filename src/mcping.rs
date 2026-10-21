@@ -16,10 +16,10 @@ async fn read_varint(s: &mut TcpStream) -> anyhow::Result<u32> {
     let (mut v, mut shift) = (0u32, 0);
     loop {
         let b = s.read_u8().await?;
+        if shift >= 35 { anyhow::bail!("bad varint"); }
         v |= ((b & 0x7f) as u32) << shift;
         if b & 0x80 == 0 { return Ok(v); }
         shift += 7;
-        if shift > 35 { anyhow::bail!("bad varint"); }
     }
 }
 
@@ -87,6 +87,14 @@ pub async fn serve_sim(port: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn overlong_varint_is_an_error_not_a_panic() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move { let (mut c, _) = l.accept().await.unwrap(); let _ = c.write_all(&[0xFF; 8]).await; tokio::time::sleep(Duration::from_millis(500)).await; });
+        let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        assert!(read_varint(&mut s).await.is_err());
+    }
     #[tokio::test]
     async fn ping_talks_to_the_simulated_server() {
         let port = 39517;

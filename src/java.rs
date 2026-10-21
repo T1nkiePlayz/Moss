@@ -46,6 +46,12 @@ pub fn find(st: &St, major: u32) -> Option<PathBuf> {
     all.iter().find(|i| i.major == major).or_else(|| all.iter().find(|i| i.major > major)).map(|i| i.path.clone())
 }
 
+/// `find` for async callers: the scan runs `java -version` subprocesses, so it must not run on a runtime worker.
+pub async fn find_async(st: &St, major: u32) -> Option<PathBuf> {
+    let st = st.clone();
+    tokio::task::spawn_blocking(move || find(&st, major)).await.ok().flatten()
+}
+
 pub fn json_list(st: &St, force: bool) -> Value {
     json!({"installs": installs(st, force).iter().map(|i| json!({"major": i.major, "path": i.path, "managed": i.managed, "version": i.version})).collect::<Vec<_>>()})
 }

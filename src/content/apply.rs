@@ -186,8 +186,8 @@ pub async fn check_updates(State(st): State<St>, user: User, Path(id): Path<Stri
 
 pub async fn update(State(st): State<St>, user: User, Path((id, item)): Path<(String, String)>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (s, c) = compat_for(&st, &user, &id, "content.manage").await?;
-    let i = item.clone();
-    let (pid, provider): (Option<String>, String) = st.db.call(move |db| db.query_row("SELECT project_id,provider FROM content_items WHERE id=?", [i], |r| Ok((r.get(0)?, r.get(1)?)))).await.map_err(|_| ApiError::not_found("content item"))?;
+    let (i, sid) = (item.clone(), s.id.clone());
+    let (pid, provider): (Option<String>, String) = st.db.call(move |db| db.query_row("SELECT project_id,provider FROM content_items WHERE id=? AND server_id=?", [i, sid], |r| Ok((r.get(0)?, r.get(1)?)))).await.map_err(|_| ApiError::not_found("content item"))?;
     let src = src_for(&st, &user, &c, Some(&provider))?;
     let pid = pid.ok_or_else(|| ApiError::bad("content.manual", "manually added files have no provider to update from"))?;
     let actor = user.actor();

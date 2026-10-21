@@ -13,7 +13,7 @@ pub async fn ensure(st: &St, ctx: &OpCtx, image: &str) -> Result<()> {
         ctx2.stage(&format!("Downloading {img}"));
         let mut last = Instant::now() - Duration::from_secs(1);
         eng.pull(&img, &mut |line| {
-            if last.elapsed() >= Duration::from_millis(400) { ctx2.log(line.to_string()); last = Instant::now(); }
+            if !line.is_empty() && last.elapsed() >= Duration::from_millis(400) { ctx2.log(line.to_string()); last = Instant::now(); }
             !ctx2.cancelled()
         }).map_err(|e| if ctx2.cancelled() { anyhow!("cancelled") } else { e })
     }).await?

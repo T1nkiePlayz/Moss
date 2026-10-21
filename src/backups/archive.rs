@@ -51,7 +51,7 @@ pub fn build_archive(root: PathBuf, out: PathBuf, manifest: String, token: tokio
     let mut files = 0u64;
     let mut stack = vec![(root.clone(), true)];
     while let Some((dir, top)) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let rd = match std::fs::read_dir(&dir) { Ok(rd) => rd, Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue, Err(e) => bail!("cannot read {}: {e}", dir.display()) };
         for e in rd.flatten() {
             if token.is_cancelled() { bail!("cancelled"); }
             let name = e.file_name().to_string_lossy().to_string();
@@ -62,8 +62,9 @@ pub fn build_archive(root: PathBuf, out: PathBuf, manifest: String, token: tokio
                 tar.append_dir(&rel, e.path()).ok();
                 stack.push((e.path(), false));
             } else if t.is_file() {
-                let Ok(file) = std::fs::File::open(e.path()) else { continue };
-                let Ok(m) = file.metadata() else { continue };
+                // A file deleted mid-backup is skipped; anything else unreadable fails the backup rather than recording an incomplete one as ok.
+                let file = match std::fs::File::open(e.path()) { Ok(f) => f, Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue, Err(err) => bail!("cannot read {}: {err}", rel.display()) };
+                let m = file.metadata()?;
                 let mut hd = tar::Header::new_gnu();
                 hd.set_metadata(&m);
                 hd.set_size(m.len());

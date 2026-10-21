@@ -57,10 +57,12 @@ pub(super) async fn access_put(State(st): State<St>, user: User, Path(id): Path<
     user.require_admin()?;
     if r.grants.iter().any(|g| auth::bundle_perms(&g.bundle).is_empty()) { return Err(ApiError::bad("validation", "bundle must be manager, operator or viewer")); }
     let i = id.clone();
+    // One transaction: an unknown user fails the insert and must not leave the server with its grants already deleted.
     st.db.call(move |c| {
-        c.execute("DELETE FROM grants WHERE server_id=?", [&i])?;
-        for g in r.grants { c.execute("INSERT OR REPLACE INTO grants(server_id,user_id,bundle) VALUES (?,?,?)", [&i, &g.user_id, &g.bundle])?; }
-        Ok(())
+        let tx = c.unchecked_transaction()?;
+        tx.execute("DELETE FROM grants WHERE server_id=?", [&i])?;
+        for g in r.grants { tx.execute("INSERT OR REPLACE INTO grants(server_id,user_id,bundle) VALUES (?,?,?)", [&i, &g.user_id, &g.bundle])?; }
+        tx.commit()
     }).await.map_err(|_| ApiError::bad("validation", "unknown user in grants"))?;
     auth::drop_all(&st);
     st.audit(&user.actor(), "access.update", &id, "", Some(&id)).await;

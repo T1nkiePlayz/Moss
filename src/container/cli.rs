@@ -42,7 +42,8 @@ impl CliEngine {
         if o.code != 0 { bail!("{} {} failed: {}", self.info.kind.name(), a.first().map_or("", |s| s), first_line(&o.stderr)); }
         Ok(o.stdout)
     }
-    /// Run a streaming command (pull, installer). `on_line` returns false to cancel.
+    /// Run a streaming command (pull, installer). `on_line` returns false to cancel; it is also called with "" about
+    /// once a second while the process is silent, so cancellation is noticed without output.
     fn stream(&self, a: &[String], on_line: &mut dyn FnMut(&str) -> bool, timeout: Duration, cancel_cmd: Option<Vec<String>>) -> Result<i32> {
         let mut cmd = Command::new(&self.info.cli);
         scrubbed(&mut cmd);
@@ -57,8 +58,11 @@ impl CliEngine {
         let (h1, h2) = (pump(Box::new(child.stdout.take().unwrap()), tx.clone()), pump(Box::new(child.stderr.take().unwrap()), tx));
         let end = Instant::now() + timeout;
         let mut stop = None;
+        let mut quiet = Instant::now();
         let code = loop {
-            while let Ok(l) = rx.try_recv() { if !on_line(&l) { stop = Some("cancelled"); } }
+            while let Ok(l) = rx.try_recv() { quiet = Instant::now(); if !on_line(&l) { stop = Some("cancelled"); } }
+            // A silent process must still notice cancellation: after 1 s without output, poll `on_line` with "".
+            if stop.is_none() && quiet.elapsed() >= Duration::from_secs(1) { quiet = Instant::now(); if !on_line("") { stop = Some("cancelled"); } }
             if let Some(st) = child.try_wait()? { break st.code().unwrap_or(-1); }
             if stop.is_none() && Instant::now() > end { stop = Some("timed out"); }
             if let Some(why) = stop {

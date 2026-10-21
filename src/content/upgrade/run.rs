@@ -38,6 +38,16 @@ async fn fetch_build(ctx: &OpCtx, st: &St, token: Option<&str>, ct: &Compat, e: 
         download::fetch_ext(cf::dl_client(), &u, &path, sha1, &ctx.token, |_| {}, download::Opts { headers, extra_host }).await?;
         return Ok(Some(Prepared { entry: e.clone(), filename: fname, path, label, sha512: None }));
     }
+    if e.link.provider.as_deref() == Some("hangar") {
+        let vs = hg_versions(st, pid, ct).await?;
+        let platform = hangar_platform(ct).unwrap_or("PAPER");
+        let Some(f) = vs.iter().find(|v| v["name"] == vid).and_then(|v| hg_file(v, platform)) else { ctx.log(format!("{}: the new version is not hosted on Hangar; left unchanged", e.link.title)); return Ok(None) };
+        let fname = safe_filename(f["filename"].as_str().unwrap_or_default(), ct.ext)?;
+        let sha = f["hashes"]["sha256"].as_str().ok_or_else(|| anyhow!("{} has no checksum on Hangar", e.link.title))?;
+        let path = tmp.join(&fname);
+        download::fetch(&st.http, f["url"].as_str().unwrap_or_default(), &path, Some(Hash::Sha256(sha.into())), &ctx.token, |_| {}).await?;
+        return Ok(Some(Prepared { entry: e.clone(), filename: fname, path, label, sha512: None }));
+    }
     let v = mr(st, &format!("/version/{vid}"), &[]).await?;
     let f = primary_file(&v).ok_or_else(|| anyhow!("{} has no files", e.link.title))?;
     let fname = safe_filename(f["filename"].as_str().unwrap_or_default(), ct.ext)?;

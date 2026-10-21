@@ -29,7 +29,7 @@ export function normalizeItem(it: ContentItem): ContentItem {
   return { ...it, enabled: it.enabled ?? true, identified: it.identified ?? it.provider !== 'manual', meta: it.meta ?? null, issues: it.issues ?? [] };
 }
 
-const providerName: Record<string, string> = { modrinth: 'Modrinth', curseforge: 'CurseForge', manual: 'Manual' };
+const providerName: Record<string, string> = { modrinth: 'Modrinth', curseforge: 'CurseForge', hangar: 'Hangar', manual: 'Manual' };
 export const providerLabel = (p: string) => providerName[p] ?? p;
 
 /** Badge shown in the Source column. */
@@ -44,6 +44,7 @@ export function pageUrl(it: Pick<ContentItem, 'provider' | 'project_id'>): strin
   if (!it.project_id) return null;
   if (it.provider === 'modrinth') return `https://modrinth.com/project/${encodeURIComponent(it.project_id)}`;
   if (it.provider === 'curseforge') return `https://www.curseforge.com/projects/${encodeURIComponent(it.project_id)}`;
+  if (it.provider === 'hangar') return `https://hangar.papermc.io/search?q=${encodeURIComponent(it.project_id)}`;
   return null;
 }
 

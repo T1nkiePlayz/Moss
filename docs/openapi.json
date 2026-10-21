@@ -552,6 +552,7 @@
             "enum": [
               "modrinth",
               "curseforge",
+              "hangar",
               "manual"
             ]
           },
@@ -2910,7 +2911,7 @@
         "tags": [
           "content"
         ],
-        "summary": "Search Modrinth or CurseForge for a server",
+        "summary": "Search Modrinth, CurseForge or Hangar for a server",
         "x-permission": "server.view",
         "responses": {
           "200": {

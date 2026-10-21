@@ -1,4 +1,4 @@
-//! Typed content management on top of Modrinth and CurseForge: plugins, mods, proxy plugins and datapacks are filtered
+//! Typed content management on top of Modrinth, CurseForge and Hangar: plugins, mods, proxy plugins and datapacks are filtered
 //! by the server's runtime, loader, game version and side, installed through reviewed change plans, with undo.
 //! Shared types (`Compat`, `Prov`, `Src`) and helpers live here; handlers are split by concern in the submodules.
 use crate::{
@@ -16,6 +16,7 @@ mod apply;
 mod check;
 mod identify;
 mod cfpack;
+mod hangar;
 mod inventory;
 mod modpack;
 mod modrinth;
@@ -38,7 +39,7 @@ pub use plan::plan;
 pub use search::{project, providers, search};
 pub use staged::{discard_all_for as staging_discard_all_for, discard_run as staging_discard, estimate as staging_estimate, get_run_json as staging_get, list_runs as staging_list, log as staging_log, promote as staging_promote, recover as staging_recover, spawn_background as staging_spawn_background, start as staging_start};
 pub use upgrade::{maybe_backup, upgrade_plan, upgrade_start};
-use inventory::*; use modrinth::*; use plan::*; use search::*;
+use inventory::*; use hangar::*; use modrinth::*; use plan::*; use search::*;
 
 #[derive(Clone)]
 pub struct Compat { pub kind: &'static str, pub project_type: &'static str, pub loaders: Vec<&'static str>, pub game_version: Option<String>, pub dir: String, pub ext: &'static str, pub cf_class: Option<u32>, pub cf_loader: u32 }
@@ -74,12 +75,12 @@ pub fn compat(st: &St, s: &Srv) -> Option<Compat> {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum Prov { Modrinth, Curseforge }
+pub enum Prov { Modrinth, Curseforge, Hangar }
 impl Prov {
     pub fn parse(v: Option<&str>) -> ApiResult<Self> {
-        match v { None | Some("") | Some("modrinth") => Ok(Self::Modrinth), Some("curseforge") => Ok(Self::Curseforge), _ => Err(ApiError::bad("validation", "provider must be modrinth or curseforge").field("provider", "modrinth | curseforge")) }
+        match v { None | Some("") | Some("modrinth") => Ok(Self::Modrinth), Some("curseforge") => Ok(Self::Curseforge), Some("hangar") => Ok(Self::Hangar), _ => Err(ApiError::bad("validation", "provider must be modrinth, curseforge or hangar").field("provider", "modrinth | curseforge | hangar")) }
     }
-    pub fn as_str(self) -> &'static str { if self == Self::Curseforge { "curseforge" } else { "modrinth" } }
+    pub fn as_str(self) -> &'static str { match self { Self::Curseforge => "curseforge", Self::Hangar => "hangar", Self::Modrinth => "modrinth" } }
 }
 
 /// Which catalogue a request targets, plus the caller's token (forwarded to the CurseForge edge function).
@@ -117,6 +118,7 @@ fn lifecycle_running(st: &St, s: &Srv) -> bool { st.live.lock().unwrap().get(&s.
 fn src_for(st: &St, user: &User, c: &Compat, provider: Option<&str>) -> ApiResult<Src> {
     let prov = Prov::parse(provider)?;
     if prov == Prov::Curseforge { require_cf(st, c, user.token.as_deref())?; }
+    if prov == Prov::Hangar && hangar_platform(c).is_none() { return Err(ApiError::bad("capability.unsupported", "Hangar has no content for this runtime")); }
     Ok(Src { prov, token: user.token.clone() })
 }
 
@@ -135,6 +137,7 @@ mod tests {
     fn provider_parsing_defaults_to_modrinth() {
         assert!(Prov::parse(None).unwrap() == Prov::Modrinth && Prov::parse(Some("")).unwrap() == Prov::Modrinth);
         assert!(Prov::parse(Some("curseforge")).unwrap() == Prov::Curseforge);
+        assert!(Prov::parse(Some("hangar")).unwrap() == Prov::Hangar && Prov::Hangar.as_str() == "hangar");
         assert!(Prov::parse(Some("steam")).is_err());
     }
 }

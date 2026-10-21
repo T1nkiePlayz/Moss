@@ -68,9 +68,10 @@ fn strict_check(bp: &Value) -> ApiResult<()> {
         let ok = match prov {
             "modrinth" => id.len() == 8 && id.chars().all(|c| c.is_ascii_alphanumeric()),
             "curseforge" => (1..=10).contains(&id.len()) && id.chars().all(|c| c.is_ascii_digit()),
+            "hangar" => (1..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')),
             _ => false,
         };
-        if !ok { return Err(bad("content items must be Modrinth or CurseForge project ids")); }
+        if !ok { return Err(bad("content items must be Modrinth, CurseForge or Hangar project ids")); }
     }
     match walk(bp) { Some(m) => Err(bad(m)), None => Ok(()) }
 }

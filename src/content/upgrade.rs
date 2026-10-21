@@ -70,6 +70,14 @@ async fn lookup_all(st: &St, token: Option<&str>, ct: &Compat, items: &[Linked])
     let mr_items: Vec<Linked> = items.iter().filter(|l| l.provider.as_deref() == Some("modrinth") && l.project_id.is_some()).cloned().collect();
     let results: Vec<(String, Lookup)> = futures_util::stream::iter(mr_items.into_iter().map(|l| modrinth_lookup(st, ct, l))).buffer_unordered(6).collect().await;
     found.extend(results);
+    for l in items.iter().filter(|l| l.provider.as_deref() == Some("hangar") && l.project_id.is_some()) {
+        let r = match hg_latest(st, l.project_id.as_deref().unwrap_or_default(), ct).await {
+            Ok(Some(v)) => Lookup::Build { version_id: v["name"].as_str().unwrap_or_default().into(), label: v["name"].as_str().unwrap_or_default().into() },
+            Ok(None) => Lookup::NoBuild,
+            Err(e) => Lookup::Failed(format!("Hangar: {e:#}")),
+        };
+        found.insert(l.item.clone(), r);
+    }
     let cf_items: Vec<&Linked> = items.iter().filter(|l| l.provider.as_deref() == Some("curseforge") && l.project_id.is_some()).collect();
     if !cf_items.is_empty() {
         if !cf::availability(st, token).0 {

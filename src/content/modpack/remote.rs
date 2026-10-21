@@ -34,12 +34,13 @@ fn too_big(size: Option<u64>) -> bool { size.is_some_and(|s| s > MAX_PACK) }
 /// `{provider, project_id, version_id?}` -> download that pack version into `tmp/`.
 pub(super) async fn fetch_remote(st: &St, user: &User, body: &Value) -> ApiResult<(std::path::PathBuf, u64, store::Identity)> {
     let prov = Prov::parse(body["provider"].as_str())?;
+    if prov == Prov::Hangar { return Err(ApiError::bad("validation", "Hangar has no modpacks").field("provider", "modrinth | curseforge")); }
     let pid = body["project_id"].as_str().map(String::from).or_else(|| body["project_id"].as_u64().map(|n| n.to_string())).unwrap_or_default();
     let vid = body["version_id"].as_str().map(String::from).or_else(|| body["version_id"].as_u64().map(|n| n.to_string())).filter(|v| !v.is_empty());
     if !valid_id(&pid) || vid.as_deref().is_some_and(|v| !valid_id(v)) { return Err(ApiError::bad("validation", "invalid project or version id").field("project_id", "letters, digits, - and _")); }
     tokio::fs::create_dir_all(st.cfg.tmp_dir()).await?;
     let path = tmp_pack(st);
-    let r = match prov { Prov::Modrinth => modrinth_pack(st, &pid, vid.as_deref(), &path).await, Prov::Curseforge => curseforge_pack(st, user, &pid, vid.as_deref(), &path).await };
+    let r = match prov { Prov::Modrinth => modrinth_pack(st, &pid, vid.as_deref(), &path).await, Prov::Curseforge => curseforge_pack(st, user, &pid, vid.as_deref(), &path).await, Prov::Hangar => unreachable!("rejected above") };
     match r {
         Ok((size, version_id)) => Ok((path, size, store::Identity { provider: prov.as_str().into(), project_id: pid, version_id })),
         Err(e) => { let _ = tokio::fs::remove_file(&path).await; Err(match e.downcast_ref::<cf::CfError>() { Some(_) => upstream(e), None => ApiError::bad("modpack.fetch_failed", format!("{e:#}")) }) }

@@ -1,10 +1,14 @@
-//! Catalogue browsing handlers: search, project details and the provider list (Modrinth and CurseForge).
+//! Catalogue browsing handlers: search, project details and the provider list (Modrinth, CurseForge and Hangar).
 use super::*;
 
 pub async fn search(State(st): State<St>, user: User, Query(q): Query<HashMap<String, String>>) -> ApiResult<Json<Value>> {
     let sid = q.get("server_id").ok_or_else(|| ApiError::bad("validation", "server_id is required"))?;
     let (s, c) = compat_for(&st, &user, sid, "server.view").await?;
-    if Prov::parse(q.get("provider").map(|p| p.as_str()))? == Prov::Curseforge { return search_cf(&st, &user, &s, &c, &q).await; }
+    match Prov::parse(q.get("provider").map(|p| p.as_str()))? {
+        Prov::Curseforge => return search_cf(&st, &user, &s, &c, &q).await,
+        Prov::Hangar => return search_hangar(&st, &s, &c, &q).await,
+        Prov::Modrinth => {}
+    }
     let mut facets = vec![vec![format!("project_type:{}", c.project_type)], c.loaders.iter().map(|l| format!("categories:{l}")).collect()];
     if let Some(gv) = &c.game_version { facets.push(vec![format!("versions:{gv}")]); }
     if c.project_type == "mod" { facets.push(vec!["server_side:required".into(), "server_side:optional".into()]); }
@@ -38,7 +42,11 @@ pub async fn project(State(st): State<St>, user: User, Path(pid): Path<String>, 
     if !valid_id(&pid) { return Err(ApiError::bad("validation", "invalid project id")); }
     let sid = q.get("server_id").ok_or_else(|| ApiError::bad("validation", "server_id is required"))?;
     let (_s, c) = compat_for(&st, &user, sid, "server.view").await?;
-    if Prov::parse(q.get("provider").map(|p| p.as_str()))? == Prov::Curseforge { return project_cf(&st, &user, &pid, &c).await; }
+    match Prov::parse(q.get("provider").map(|p| p.as_str()))? {
+        Prov::Curseforge => return project_cf(&st, &user, &pid, &c).await,
+        Prov::Hangar => return project_hangar(&st, &pid, &c).await,
+        Prov::Modrinth => {}
+    }
     let p = mr(&st, &format!("/project/{pid}"), &[]).await.map_err(upstream)?;
     let vs = compatible_versions(&st, &pid, &c).await.map_err(upstream)?;
     Ok(Json(json!({
@@ -81,8 +89,10 @@ pub async fn providers(State(st): State<St>, user: User, Query(q): Query<ProvQ>)
     let mr_supported = compat.as_ref().is_none_or(|c| c.is_some());
     let cf_supported = compat.as_ref().is_none_or(|c| c.as_ref().is_some_and(|c| c.cf_class.is_some()));
     let reason = |ok: bool, supported: bool, why: Option<&str>, none: &str| if !ok { why.map(String::from) } else if !supported { Some(none.to_string()) } else { None };
+    let hg_supported = compat.as_ref().is_none_or(|c| c.as_ref().is_some_and(|c| hangar_platform(c).is_some()));
     Ok(Json(json!({"providers": [
         {"id": "modrinth", "name": "Modrinth", "available": true, "supported": mr_supported, "reason": reason(true, mr_supported, None, "Modrinth has no content for this runtime.")},
         {"id": "curseforge", "name": "CurseForge", "available": cf_ok, "supported": cf_supported, "reason": reason(cf_ok, cf_supported, cf_why, "CurseForge has no content for this runtime.")},
+        {"id": "hangar", "name": "Hangar", "available": true, "supported": hg_supported, "reason": reason(true, hg_supported, None, "Hangar only has plugins for Paper, Purpur, Folia and Velocity.")},
     ]})))
 }

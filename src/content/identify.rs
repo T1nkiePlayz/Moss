@@ -1,4 +1,4 @@
-//! Identify unmanaged files: SHA-512 each one against Modrinth (batch) and, when available, CurseForge fingerprints,
+//! Identify unmanaged files: SHA-512 each one against Modrinth (batch) and, when available, CurseForge fingerprints and Hangar (SHA-256),
 //! then record matches as provider items (`source = "identified"`) so they can be updated like installed ones.
 //! Only ids, title, version label and file name are stored; no CurseForge API data is cached.
 use super::*;
@@ -82,13 +82,38 @@ async fn run(ctx: OpCtx, s: Srv, c: Compat, token: Option<String>, actor: String
         ctx.stage("Asking CurseForge");
         match cf_lookup(&st, token.as_deref(), &rest, &ctx).await { Ok(v) => found.extend(v), Err(e) => ctx.log(format!("CurseForge lookup skipped: {e:#}")) }
     }
+    let before_hg = found.len();
+    let rest: Vec<&Hashed> = hashed.iter().filter(|h| !found.iter().any(|f| f.filename == h.filename)).collect();
+    if !rest.is_empty() && hangar_platform(&c).is_some() {
+        ctx.stage("Asking Hangar");
+        match hangar_lookup(&st, &c, &rest, &ctx).await { Ok(v) => found.extend(v), Err(e) => ctx.log(format!("Hangar lookup skipped: {e:#}")) }
+    }
     ctx.check()?;
     ctx.stage("Recording matches");
-    let (n, cfn) = (found.len(), found.len() - by_modrinth);
+    let (n, cfn, hgn) = (found.len(), before_hg - by_modrinth, found.len() - before_hg);
     record(&st, &s, &c, found).await?;
-    ctx.log(format!("Identified {n} of {total} files ({by_modrinth} on Modrinth, {cfn} on CurseForge); {} could not be identified and stay manual.", total - n));
+    ctx.log(format!("Identified {n} of {total} files ({by_modrinth} on Modrinth, {cfn} on CurseForge, {hgn} on Hangar); {} could not be identified and stay manual.", total - n));
     st.audit(&actor, "content.identify", &s.name, &format!("{n} of {total} files"), Some(&s.id)).await;
     Ok(())
+}
+
+/// SHA-256 of each remaining file, then one Hangar hash lookup per file (Hangar has no batch endpoint).
+async fn hangar_lookup(st: &St, c: &Compat, rest: &[&Hashed], ctx: &OpCtx) -> Result<Vec<Found>> {
+    let jobs: Vec<(String, String, PathBuf)> = rest.iter().take(100).map(|h| (h.filename.clone(), h.sha512.clone(), h.path.clone())).collect();
+    let sums: Vec<(String, String, String)> = tokio::task::spawn_blocking(move || jobs.into_iter().filter_map(|(f, s512, p)| {
+        let mut file = std::fs::File::open(p).ok()?;
+        let mut h = sha2::Sha256::new();
+        let mut buf = vec![0u8; 64 << 10];
+        loop { let n = file.read(&mut buf).ok()?; if n == 0 { break; } h.update(&buf[..n]); }
+        Some((f, s512, hex::encode(h.finalize())))
+    }).collect()).await?;
+    let mut out = vec![];
+    for (filename, sha512, sha256) in sums {
+        ctx.check()?;
+        let Some((project_id, title, version)) = hg_identify(st, c, &sha256).await? else { continue };
+        out.push(Found { filename, sha512, provider: "hangar", project_id, version_id: version.clone(), title, version_number: version });
+    }
+    Ok(out)
 }
 
 async fn cf_lookup(st: &St, token: Option<&str>, rest: &[&Hashed], ctx: &OpCtx) -> Result<Vec<Found>> {
@@ -125,6 +150,27 @@ async fn record(st: &St, s: &Srv, c: &Compat, found: Vec<Found>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn hangar_identifies_by_sha256_and_ignores_unknown_files() {
+        use crate::testutil::{Reply, state, stub};
+        let known = "ab".repeat(32);
+        let k = known.clone();
+        let s = stub(move |_, p| {
+            if p.contains(&format!("/versions/hash/{k}")) { Reply::json(200, json!({"name": "ViaVersion", "namespace": {"owner": "o", "slug": "ViaVersion"}})) }
+            else if p.starts_with("/api/v1/projects/ViaVersion/versions") { Reply::json(200, json!({"result": [{"name": "5.0", "downloads": {"PAPER": {"fileInfo": {"sha256Hash": k}}}}]})) }
+            else { Reply::status(404) }
+        }).await;
+        let b = format!("{}/api/v1", s.base);
+        let st = state(move |c| c.hangar_api_url = b).await;
+        let c = Compat { kind: "plugins", project_type: "plugin", loaders: vec!["paper"], game_version: Some("1.21.4".into()), dir: "plugins".into(), ext: "jar", cf_class: None, cf_loader: 0 };
+        assert_eq!(hg_identify(&st, &c, &known).await.unwrap(), Some(("ViaVersion".into(), "ViaVersion".into(), "5.0".into())));
+        assert_eq!(hg_identify(&st, &c, &"cd".repeat(32)).await.unwrap(), None, "404 means unknown, not an error");
+        assert_eq!(hg_identify(&st, &c, "../x").await.unwrap(), None);
+        let down = stub(|_, _| Reply::status(503)).await;
+        let b = format!("{}/api/v1", down.base);
+        assert!(hg_identify(&state(move |c| c.hangar_api_url = b).await, &c, &known).await.is_err(), "outages are errors");
+    }
 
     #[test]
     fn hash_and_fingerprint_agree_with_in_memory_versions() {

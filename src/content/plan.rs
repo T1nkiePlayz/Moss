@@ -19,6 +19,7 @@ pub(super) async fn build_plan(st: &St, src: &Src, s: &Srv, c: &Compat, project_
     match src.prov {
         Prov::Modrinth => build_plan_mr(st, s, c, project_id, version_id).await,
         Prov::Curseforge => build_plan_cf(st, src.token.as_deref(), s, c, project_id, version_id).await,
+        Prov::Hangar => build_plan_hg(st, s, c, project_id, version_id).await,
     }
 }
 

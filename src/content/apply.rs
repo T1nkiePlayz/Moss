@@ -45,7 +45,7 @@ async fn download_and_apply(ctx: &OpCtx, s: &Srv, c: &Compat, steps: &[Step], to
         ctx.stage(&format!("Downloading {} ({}/{})", step.title, i + 1, steps.len()));
         let fname = safe_filename(step.file["filename"].as_str().unwrap_or_default(), c.ext)?;
         let url = step.file["url"].as_str().ok_or_else(|| anyhow!("no download url"))?;
-        let hash = step.file["hashes"]["sha512"].as_str().map(|h| Hash::Sha512(h.into())).or_else(|| step.file["hashes"]["sha1"].as_str().map(|h| Hash::Sha1(h.into())));
+        let hash = step.file["hashes"]["sha512"].as_str().map(|h| Hash::Sha512(h.into())).or_else(|| step.file["hashes"]["sha256"].as_str().map(|h| Hash::Sha256(h.into()))).or_else(|| step.file["hashes"]["sha1"].as_str().map(|h| Hash::Sha1(h.into())));
         let dest = tmp.join(&fname);
         let c2 = ctx.clone();
         let base = i as f64 / n;
@@ -153,6 +153,17 @@ pub(super) async fn collect_updates(st: &St, token: Option<&str>, c: &Compat, it
         match r { Ok(Some(u)) => updates.push(u), Ok(None) => {}, Err(e) => { failed += 1; if !problems.contains(&e) { problems.push(e); } } }
     }
     if failed > 0 { problems.push(format!("{failed} Modrinth item(s) could not be checked, so the list may be incomplete.")); }
+    // Hangar: one versions call per project, cached briefly like Modrinth
+    let mut hg_failed = 0;
+    for item in watched("hangar") {
+        let (Some(pid), cur) = (item["project_id"].as_str(), item["version_id"].as_str()) else { continue };
+        match hg_latest(st, pid, c).await {
+            Ok(Some(l)) if l["name"].as_str() != cur => updates.push(json!({"item_id": item["id"], "title": item["title"], "current": item["version_number"], "latest": l["name"], "version_id": l["name"], "project_id": pid, "provider": "hangar"})),
+            Ok(_) => {}
+            Err(e) => { hg_failed += 1; let m = format!("{e:#}"); if !problems.contains(&m) { problems.push(m); } }
+        }
+    }
+    if hg_failed > 0 { problems.push(format!("{hg_failed} Hangar item(s) could not be checked, so the list may be incomplete.")); }
     // CurseForge: one batch call for every installed CurseForge item instead of one per item
     let cfi = watched("curseforge");
     if !cfi.is_empty() && cf::availability(st, token).0 {

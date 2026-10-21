@@ -5,5 +5,5 @@ pub mod launch;
 pub mod nav;
 pub mod state;
 
-pub use launch::{Handle, Paths, attach_or_start, stop};
+pub use launch::{Handle, Paths, attach_or_start, attach_or_start_with, log_tail, stop, stop_pid};
 pub use state::Controller;

@@ -3,3 +3,10 @@ main { min-height: 100%; display: grid; place-content: center; justify-items: ce
 h1 { margin: 0; font-size: 22px; }
 p { margin: 0; color: #9db3a6; max-width: 420px; }
 p.error { color: #ffb4a8; }
+pre { margin: 0; max-width: 560px; max-height: 40vh; overflow: auto; text-align: left; white-space: pre-wrap; word-break: break-word; font: 12px/1.4 ui-monospace, monospace; color: #9db3a6; background: #0f1512; padding: 10px 12px; border-radius: 6px; }
+button { margin-top: 8px; padding: 8px 18px; font: inherit; color: #090d0b; background: #7fd1a0; border: 0; border-radius: 6px; cursor: pointer; }
+button:focus-visible { outline: 2px solid #e6efe9; outline-offset: 2px; }
+[hidden] { display: none; }
+[aria-busy="true"] .dots { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { [aria-busy="true"] .dots { animation: none; } }

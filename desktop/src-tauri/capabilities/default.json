@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The window needs no Tauri commands: the starting page is static and the panel is plain web. No remote origin is granted anything.",
+  "description": "The local starting page may call only `retry` (re-run the controller start). No remote origin is granted anything.",
   "windows": ["main"],
-  "permissions": []
+  "permissions": ["allow-retry"]
 }

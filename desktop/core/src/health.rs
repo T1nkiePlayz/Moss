@@ -24,10 +24,12 @@ pub fn healthy(port: u16) -> bool {
 /// Poll until the controller is healthy, `alive` turns false (it exited) or `total` passes.
 pub fn wait_ready(port: u16, total: Duration, mut alive: impl FnMut() -> bool) -> Result<(), String> {
     let end = Instant::now() + total;
+    let mut pause = Duration::from_millis(25); // quick first polls, backing off to 150 ms
     while Instant::now() < end {
         if healthy(port) { return Ok(()); }
         if !alive() { return Err("The Moss controller stopped while starting. See moss.log in the Moss data folder.".into()); }
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(pause);
+        pause = (pause * 2).min(Duration::from_millis(150));
     }
     Err("The Moss controller did not become ready in time. See moss.log in the Moss data folder.".into())
 }

@@ -11,7 +11,9 @@
 <main>
   <img src="logo.png" alt="" width="72" height="72">
   <h1>Moss</h1>
-  <p id="msg" role="status">Starting Moss…</p>
+  <p id="msg" role="status" aria-busy="true"><span class="dots">Starting Moss…</span></p>
+  <pre id="detail" hidden></pre>
+  <button id="retry" type="button" hidden>Retry</button>
 </main>
 </body>
 </html>

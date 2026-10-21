@@ -26,7 +26,7 @@ function mk(p: Partial<A.Server> & { name: string; runtime: string }): A.Server 
   };
 }
 const servers: A.Server[] = [
-  mk({ name: 'Survival SMP', runtime: 'paper', desired: 'running', state: 'running', state_since: ago(26 * HOUR), uptime_s: 26 * 3600 + 421, pid: 4211, players: { online: 3, max: 20, sample: ['Alex_Builds', 'creeper_hug', 'Notch2'] }, motd: 'Welcome to the Survival SMP', cpu_pct: 18, mem_bytes: 2.4e9, tags: ['friends', 'main'], notes: 'Weekly restart Sunday 04:00.' }),
+  mk({ name: 'Survival SMP', runtime: 'paper', desired: 'running', state: 'running', state_since: ago(26 * HOUR), uptime_s: 26 * 3600 + 421, pid: 4211, players: { online: 3, max: 20, sample: ['Alex_Builds', 'creeper_hug', 'Notch2'] }, motd: 'Welcome to the Survival SMP', cpu_pct: 18, mem_bytes: 2.4e9, tags: ['friends', 'main'], notes: 'Weekly restart Sunday 04:00.', capabilities: [...caps, 'map'] }),
   mk({ name: 'Creative Plots', runtime: 'purpur', port: 25566, memory_mb: 2048, tags: ['creative'], created_at: ago(12 * DAY) }),
   mk({ name: 'Modded Fabric', runtime: 'fabric', loader_version: '0.16.9', port: 25567, memory_mb: 6144, content_kind: 'mods', desired: 'running', state: 'crashed', state_detail: 'Exited with code 1 (OutOfMemoryError)', state_since: ago(14 * MIN), tags: ['mods'], created_at: ago(5 * DAY), capabilities: caps.filter((c) => c !== 'players') }),
   mk({ name: 'Terraria', runtime: 'terraria', game_version: '1.4.4.9', java_major: 0, port: 7777, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(9 * HOUR), uptime_s: 9 * 3600 + 80, pid: 5120, players: { online: 2, max: 8, sample: ['Guide', 'Dryad_fan'] }, cpu_pct: 4, mem_bytes: 6.2e8, tags: ['game'], created_at: ago(9 * DAY), capabilities: gameCaps('players') }),
@@ -582,7 +582,7 @@ function metricsFor(range: A.MetricRange, base: { cpu: number; mem: number; play
 }
 const err500 = () => new ApiError(500, 'internal', 'The backend returned an unexpected error (mock).', [], 'req_mock123');
 
-const statusPages: A.StatusPage[] = [{ id: 'sp-main', slug: 'k3x9f2m7qa4tz8', path: '/status/k3x9f2m7qa4tz8', title: 'Our servers', description: 'Live status of the community servers.', enabled: true, show_players: true, show_address: 'play.example.com', server_ids: servers.slice(0, 2).map((s) => s.id), created_at: '2026-01-10T12:00:00Z' }];
+const statusPages: A.StatusPage[] = [{ id: 'sp-main', slug: 'k3x9f2m7qa4tz8', path: '/status/k3x9f2m7qa4tz8', title: 'Our servers', description: 'Live status of the community servers.', enabled: true, show_players: true, show_map: false, show_address: 'play.example.com', server_ids: servers.slice(0, 2).map((s) => s.id), created_at: '2026-01-10T12:00:00Z' }];
 function handleStatusPages(method: string, p: string, b: Record<string, any>): unknown {
   const bad = (field: string, message: string) => new ApiError(422, 'validation', message, [{ path: field, message }]);
   const check = (x: Record<string, any>, partial: boolean) => {
@@ -596,7 +596,7 @@ function handleStatusPages(method: string, p: string, b: Record<string, any>): u
   if (p === '/status-pages' && method === 'POST') {
     check(b, false);
     const slug = b.slug || Array.from({ length: 14 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
-    const page: A.StatusPage = { id: uid(), slug, path: `/status/${slug}`, title: String(b.title).trim(), description: String(b.description ?? '').trim(), enabled: b.enabled ?? true, show_players: !!b.show_players, show_address: String(b.show_address ?? '').trim() || null, server_ids: b.server_ids ?? [], created_at: now() };
+    const page: A.StatusPage = { id: uid(), slug, path: `/status/${slug}`, title: String(b.title).trim(), description: String(b.description ?? '').trim(), enabled: b.enabled ?? true, show_players: !!b.show_players, show_map: !!b.show_map, show_address: String(b.show_address ?? '').trim() || null, server_ids: b.server_ids ?? [], created_at: now() };
     statusPages.push(page);
     return page;
   }
@@ -693,6 +693,13 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
     if (!s.capabilities.includes('players')) throw new ApiError(404, 'not_found', 'No player analytics for this server');
     const d = Number(qs.get('days') ?? 7);
     return analyticsFor(s, (d === 30 || d === 90 ? d : 7) as A.AnalyticsDays);
+  }
+  if (M(/^\/servers\/([^/]+)\/map$/)) {
+    if (failing) throw err500();
+    const s = sv(m![1]);
+    if (!s.capabilities.includes('map')) return { available: false };
+    const up = s.state === 'running';
+    return { available: true, kind: 'bluemap', running: up, reachable: up, url: 'about:blank', expires_at: Math.floor(Date.now() / 1000) + 43200 };
   }
   if (M(/^\/servers\/([^/]+)\/metrics$/)) {
     if (failing) throw err500();

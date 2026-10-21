@@ -76,14 +76,14 @@ async fn server_ids(st: &St, l: &Value) -> ApiResult<Vec<String>> {
 // ---- storage ----------------------------------------------------------------------------------------------------
 
 #[derive(Clone)]
-struct Page { id: String, slug: String, title: String, description: String, enabled: bool, show_players: bool, address: Option<String>, created_at: String, servers: Vec<String> }
+struct Page { id: String, slug: String, title: String, description: String, enabled: bool, show_players: bool, show_map: bool, address: Option<String>, created_at: String, servers: Vec<String> }
 
-const COLS: &str = "id,slug,title,description,enabled,show_players,show_address,created_at";
+const COLS: &str = "id,slug,title,description,enabled,show_players,show_address,created_at,show_map";
 
 fn read_page(c: &Connection, r: &rusqlite::Row) -> rusqlite::Result<Page> {
     let id: String = r.get(0)?;
     let servers = c.prepare("SELECT server_id FROM status_page_servers WHERE page_id=? ORDER BY position, server_id")?.query_map([&id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
-    Ok(Page { id, slug: r.get(1)?, title: r.get(2)?, description: r.get(3)?, enabled: r.get(4)?, show_players: r.get(5)?, address: r.get(6)?, created_at: r.get(7)?, servers })
+    Ok(Page { id, slug: r.get(1)?, title: r.get(2)?, description: r.get(3)?, enabled: r.get(4)?, show_players: r.get(5)?, address: r.get(6)?, created_at: r.get(7)?, show_map: r.get(8)?, servers })
 }
 fn page_by(c: &Connection, col: &str, val: &str) -> rusqlite::Result<Option<Page>> {
     c.query_row(&format!("SELECT {COLS} FROM status_pages WHERE {col}=?"), [val], |r| read_page(c, r)).optional()
@@ -95,7 +95,7 @@ fn set_servers(c: &Connection, id: &str, ids: &[String]) -> rusqlite::Result<()>
 }
 fn admin_json(p: &Page) -> Value {
     json!({"id": p.id, "slug": p.slug, "path": format!("/status/{}", p.slug), "title": p.title, "description": p.description, "enabled": p.enabled,
-        "show_players": p.show_players, "show_address": p.address, "server_ids": p.servers, "created_at": p.created_at})
+        "show_players": p.show_players, "show_map": p.show_map, "show_address": p.address, "server_ids": p.servers, "created_at": p.created_at})
 }
 fn drop_cache(st: &St) { st.cache.lock().unwrap().retain(|k, _| !k.starts_with(CACHE_PREFIX)); }
 
@@ -114,7 +114,7 @@ pub(super) async fn status_pages_create(State(st): State<St>, user: User, Json(b
     let custom = b["slug"].as_str().filter(|s| !s.trim().is_empty()).map(slug).transpose()?;
     let p = Page {
         id: uuid::Uuid::now_v7().to_string(), slug: custom.unwrap_or_else(random_slug), title: title(b["title"].as_str().unwrap_or(""))?,
-        description: description(b["description"].as_str().unwrap_or(""))?, enabled: b["enabled"].as_bool().unwrap_or(true), show_players: b["show_players"].as_bool().unwrap_or(false),
+        description: description(b["description"].as_str().unwrap_or(""))?, enabled: b["enabled"].as_bool().unwrap_or(true), show_players: b["show_players"].as_bool().unwrap_or(false), show_map: b["show_map"].as_bool().unwrap_or(false),
         address: address(b["show_address"].as_str().unwrap_or(""))?, created_at: crate::db::now(),
         servers: if b["server_ids"].is_null() { vec![] } else { server_ids(&st, &b["server_ids"]).await? },
     };
@@ -122,8 +122,8 @@ pub(super) async fn status_pages_create(State(st): State<St>, user: User, Json(b
     let inserted = st.db.call(move |c| {
         let tx = c.unchecked_transaction()?;
         if page_by(&tx, "slug", &p2.slug)?.is_some() { return Ok(false); }
-        tx.execute("INSERT INTO status_pages(id,slug,title,description,enabled,show_players,show_address,created_at) VALUES (?,?,?,?,?,?,?,?)",
-            params![p2.id, p2.slug, p2.title, p2.description, p2.enabled, p2.show_players, p2.address, p2.created_at])?;
+        tx.execute("INSERT INTO status_pages(id,slug,title,description,enabled,show_players,show_address,created_at,show_map) VALUES (?,?,?,?,?,?,?,?,?)",
+            params![p2.id, p2.slug, p2.title, p2.description, p2.enabled, p2.show_players, p2.address, p2.created_at, p2.show_map])?;
         set_servers(&tx, &p2.id, &p2.servers)?;
         tx.commit()?;
         Ok(true)
@@ -142,13 +142,14 @@ pub(super) async fn status_pages_patch(State(st): State<St>, user: User, Path(id
     if let Some(s) = b["description"].as_str() { p.description = description(s)?; }
     if let Some(x) = b["enabled"].as_bool() { p.enabled = x; }
     if let Some(x) = b["show_players"].as_bool() { p.show_players = x; }
+    if let Some(x) = b["show_map"].as_bool() { p.show_map = x; }
     if b.get("show_address").is_some_and(Value::is_null) { p.address = None; } else if let Some(s) = b["show_address"].as_str() { p.address = address(s)?; }
     if !b["server_ids"].is_null() { p.servers = server_ids(&st, &b["server_ids"]).await?; }
     let p2 = p.clone();
     let ok = st.db.call(move |c| {
         let tx = c.unchecked_transaction()?;
         if tx.query_row("SELECT COUNT(*) FROM status_pages WHERE slug=? AND id!=?", params![p2.slug, p2.id], |r| r.get::<_, i64>(0))? > 0 { return Ok(false); }
-        tx.execute("UPDATE status_pages SET slug=?,title=?,description=?,enabled=?,show_players=?,show_address=? WHERE id=?", params![p2.slug, p2.title, p2.description, p2.enabled, p2.show_players, p2.address, p2.id])?;
+        tx.execute("UPDATE status_pages SET slug=?,title=?,description=?,enabled=?,show_players=?,show_address=?,show_map=? WHERE id=?", params![p2.slug, p2.title, p2.description, p2.enabled, p2.show_players, p2.address, p2.show_map, p2.id])?;
         set_servers(&tx, &p2.id, &p2.servers)?;
         tx.commit()?;
         Ok(true)
@@ -243,6 +244,26 @@ async fn build(st: &St, p: &Page) -> ApiResult<Public> {
     Ok(Public { title: p.title.clone(), description: p.description.clone(), address: p.address.clone(), servers, updated_at: crate::db::now() })
 }
 
+/// Is a map link for this server still allowed: some enabled page lists it with the map switched on.
+pub(super) async fn map_is_public(st: &St, server_id: &str) -> bool {
+    let id = server_id.to_string();
+    st.db.call(move |c| c.query_row("SELECT EXISTS(SELECT 1 FROM status_pages p JOIN status_page_servers s ON s.page_id=p.id WHERE p.enabled=1 AND p.show_map=1 AND s.server_id=?)", [id], |r| r.get::<_, bool>(0))).await.unwrap_or(false)
+}
+
+/// Map frames for a page with `show_map`: (server name, signed link) for each running server with a detected map.
+async fn map_frames(st: &St, slug: &str) -> Vec<(String, String)> {
+    let s = slug.to_string();
+    let Ok(Some(page)) = st.db.call(move |c| page_by(c, "slug", &s)).await else { return vec![] };
+    if !page.enabled || !page.show_map { return vec![]; }
+    let mut out = vec![];
+    for id in &page.servers {
+        let Ok(srv) = server::get(st, id).await else { continue };
+        if crate::maps::detect(st, &srv).is_none() || server::view(&srv, st)["state"] != "running" { continue; }
+        out.push((srv.name.clone(), crate::maps::link(st, &srv.id, crate::maps::Scope::Public, crate::maps::PUBLIC_TOKEN_TTL_SECS).0));
+    }
+    out
+}
+
 /// The public view of an enabled page, cached briefly. `None` for missing and disabled pages alike.
 async fn public_data(st: &St, slug: &str) -> ApiResult<Option<Public>> {
     if !valid_slug(slug) { return Ok(None); }
@@ -282,13 +303,17 @@ fn client_key(req: &Request, st: &St) -> String {
     req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip().to_string()).unwrap_or_else(|| "unknown".into())
 }
 
-fn limited(st: &St, req: &Request) -> bool {
+fn limited(st: &St, req: &Request) -> bool { limited_for(st, req, "", RATE_LIMIT) }
+
+/// The shared per-client counter table; `bucket` keeps another route's traffic (the public map proxy) from eating
+/// the status page's own budget.
+pub(super) fn limited_for(st: &St, req: &Request, bucket: &str, limit: u32) -> bool {
     static HITS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (Instant, u32)>>> = std::sync::OnceLock::new();
-    let key = client_key(req, st);
-    !allow(&mut HITS.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner()), &key, Instant::now(), RATE_LIMIT)
+    let key = format!("{bucket}{}", client_key(req, st));
+    !allow(&mut HITS.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner()), &key, Instant::now(), limit)
 }
 
-fn too_many() -> Response {
+pub(super) fn too_many() -> Response {
     let mut r = (StatusCode::TOO_MANY_REQUESTS, "Too many requests. Try again in a minute.").into_response();
     r.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("60"));
     r
@@ -311,15 +336,17 @@ pub(super) async fn public_status_json(State(st): State<St>, Path(slug): Path<St
 
 async fn public_status_html(State(st): State<St>, Path(slug): Path<String>, req: Request) -> Response {
     if limited(&st, &req) { return too_many(); }
+    let mut frames = vec![];
     let (status, body) = match public_data(&st, &slug).await {
-        Ok(Some(p)) => (StatusCode::OK, render(&p)),
+        Ok(Some(p)) => { frames = map_frames(&st, &slug).await; (StatusCode::OK, render(&p, &frames)) }
         Ok(None) => (StatusCode::NOT_FOUND, not_found_html()),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, shell("Status unavailable", "<h1>Status unavailable</h1><p class=\"desc\">Please try again in a moment.</p>")),
     };
     let mut r = (status, body).into_response();
     let h = r.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
-    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"));
+    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(if frames.is_empty() { "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" }
+        else { "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" }));
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static(if status == StatusCode::OK { "public, max-age=15" } else { "no-store" }));
     h.insert("x-robots-tag", HeaderValue::from_static("noindex, nofollow"));
     r
@@ -343,7 +370,7 @@ ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}li{background:var(--
 .top{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}.name{font-weight:600;overflow-wrap:anywhere}\
 .st{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:.9rem}.st:before{content:'';width:10px;height:10px;border-radius:50%;background:currentColor}\
 .online{color:var(--ok)}.starting{color:var(--warn)}.offline{color:var(--bad)}\
-.meta{display:flex;gap:6px 18px;flex-wrap:wrap;margin-top:6px;color:var(--mut);font-size:.9rem}footer{margin-top:20px;color:var(--mut);font-size:.8rem}";
+iframe.map{width:100%;height:60vh;min-height:320px;border:1px solid var(--line);border-radius:12px;background:var(--card)}h2{font-size:1.1rem;margin:22px 0 8px}.meta{display:flex;gap:6px 18px;flex-wrap:wrap;margin-top:6px;color:var(--mut);font-size:.9rem}footer{margin-top:20px;color:var(--mut);font-size:.8rem}";
 
 fn shell(title: &str, body: &str) -> String {
     format!("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"refresh\" content=\"30\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>{}</title><style>{CSS}</style></head><body><main>{body}</main></body></html>\n", esc(title))
@@ -351,7 +378,7 @@ fn shell(title: &str, body: &str) -> String {
 
 fn not_found_html() -> String { shell("Status page not found", "<h1>Status page not found</h1><p class=\"desc\">This page does not exist or is not public.</p>") }
 
-fn render(p: &Public) -> String {
+fn render(p: &Public, maps: &[(String, String)]) -> String {
     let mut b = format!("<h1>{}</h1>", esc(&p.title));
     if !p.description.is_empty() { b += &format!("<p class=\"desc\">{}</p>", esc(&p.description)); }
     if let Some(a) = &p.address { b += &format!("<div class=\"addr\">{}</div>", esc(a)); }
@@ -365,9 +392,13 @@ fn render(p: &Public) -> String {
         if let Some(u) = s.uptime_7d_pct { b += &format!("<span>{u:.1}% uptime (7 d)</span>"); }
         b += "</div></li>";
     }
+    for (name, url) in maps {
+        b += &format!("<h2>{} map</h2><iframe class=\"map\" src=\"{}\" title=\"{} live map\" sandbox=\"allow-scripts allow-popups\" loading=\"lazy\" referrerpolicy=\"no-referrer\"></iframe>", esc(name), esc(url), esc(name));
+    }
     let when = p.updated_at.get(..19).unwrap_or(&p.updated_at).replace('T', " ");
     b += &format!("</ul><footer>Updated {} UTC. This page refreshes every 30 seconds.</footer>", esc(&when));
-    shell(&p.title, &b)
+    // a map in the page must not be reloaded every 30 seconds; its links last two hours, so refresh well before that
+    if maps.is_empty() { shell(&p.title, &b) } else { shell(&p.title, &b).replacen("content=\"30\"", "content=\"1500\"", 1).replace("refreshes every 30 seconds", "refreshes every 25 minutes") }
 }
 
 #[cfg(test)]
@@ -396,11 +427,20 @@ mod tests {
             title: evil.into(), description: evil.into(), address: Some(evil.into()), updated_at: "2026-01-01T00:00:00.000Z".into(),
             servers: vec![PubServer { name: evil.into(), game: evil.into(), version: evil.into(), state: "online".into(), players: Some(Players { online: 1, max: 2 }), uptime_24h_pct: Some(99.5), uptime_7d_pct: None }],
         };
-        let h = render(&p);
+        let h = render(&p, &[]);
         assert!(!h.contains("<script"), "{h}");
         assert!(h.contains("&lt;script&gt;alert(1)&lt;/script&gt;&quot;&#39;&amp;"));
         assert!(h.contains("1 / 2 players") && h.contains("99.5% uptime (24 h)") && !h.contains("(7 d)"));
         assert!(h.contains("http-equiv=\"refresh\" content=\"30\"") && h.contains("prefers-color-scheme:dark"));
+    }
+
+    #[test]
+    fn a_map_is_framed_in_a_sandbox_and_the_page_stops_reloading_every_30_seconds() {
+        let p = Public { title: "T".into(), description: String::new(), address: None, updated_at: "2026-01-01T00:00:00.000Z".into(), servers: vec![] };
+        let h = render(&p, &[("Survival <b>".into(), "/map/s1/123.p.abc/".into())]);
+        assert!(h.contains("<iframe class=\"map\" src=\"/map/s1/123.p.abc/\"") && h.contains("sandbox=\"allow-scripts allow-popups\"") && !h.contains("allow-same-origin"));
+        assert!(h.contains("Survival &lt;b&gt; map") && h.contains("content=\"1500\"") && !h.contains("content=\"30\""));
+        assert!(!render(&p, &[]).contains("<iframe"));
     }
 
     #[test]

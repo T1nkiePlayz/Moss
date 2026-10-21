@@ -518,8 +518,10 @@ export interface WebhookList { items: Webhook[]; event_types: WebhookEventType[]
 export interface WebhookDelivery { id: string; event_id: string; type: string; test: boolean; state: 'pending' | 'delivered' | 'dead'; attempts: number; max_attempts: number; created_at: string; finished_at: string | null; next_attempt_at: string | null; status_code: number | null; latency_ms: number | null; response: string | null; error: string | null }
 export interface WebhookInput { name?: string; url?: string; events?: string[]; server_ids?: string[]; enabled?: boolean }
 
-export interface StatusPage { id: string; slug: string; path: string; title: string; description: string; enabled: boolean; show_players: boolean; show_address: string | null; server_ids: string[]; created_at: string }
-export interface StatusPageInput { title?: string; slug?: string; description?: string; enabled?: boolean; show_players?: boolean; show_address?: string | null; server_ids?: string[] }
+/** `url` is a signed, expiring path to the proxied map (`/map/{id}/{token}/`); `expires_at` is unix seconds. */
+export interface ServerMap { available: boolean; kind?: 'bluemap' | 'squaremap' | 'pl3xmap' | 'dynmap'; running?: boolean; reachable?: boolean; url?: string; expires_at?: number }
+export interface StatusPage { id: string; slug: string; path: string; title: string; description: string; enabled: boolean; show_players: boolean; show_map: boolean; show_address: string | null; server_ids: string[]; created_at: string }
+export interface StatusPageInput { title?: string; slug?: string; description?: string; enabled?: boolean; show_players?: boolean; show_map?: boolean; show_address?: string | null; server_ids?: string[] }
 export type WorkflowAction =
   | { type: 'start' | 'stop' | 'restart' | 'backup'; server: string }
   | { type: 'command'; server: string; command: string }
@@ -580,6 +582,7 @@ export const apiOps = {
   serverDestination: (sid: string) => get<ServerDestination>(`/servers/${e(sid)}/backup-destination`, { ttl: 0 }),
   setServerDestination: (sid: string, destination_id: string) => send<ServerDestination>('PUT', `/servers/${e(sid)}/backup-destination`, { destination_id }),
   metrics: (id: string, range: MetricRange) => get<MetricSeries>(`/servers/${e(id)}/metrics${q({ range })}`),
+  map: (id: string) => get<ServerMap>(`/servers/${e(id)}/map`, { ttl: 0 }),
   analytics: (id: string, days: AnalyticsDays) => get<PlayerAnalytics>(`/servers/${e(id)}/analytics${q({ days })}`),
   hostMetrics: (range: MetricRange) => get<MetricSeries>(`/metrics/host${q({ range })}`),
   supportPreview: () => get<SupportPreview>('/support-bundle?preview=1'),

@@ -1209,6 +1209,9 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "show_map": {
+            "type": "boolean"
           }
         },
         "additionalProperties": true
@@ -8179,6 +8182,77 @@
             }
           }
         ]
+      }
+    },
+    "/servers/{id}/map": {
+      "get": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Live map (BlueMap, squaremap, Pl3xMap, dynmap): whether a map plugin is present and answering, plus a signed 12 h link /map/{id}/{token}/ to the proxied map. The proxy itself lives outside /api/v1 (see docs/maps.md)",
+        "x-permission": "server.view",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "bluemap",
+                        "squaremap",
+                        "pl3xmap",
+                        "dynmap"
+                      ]
+                    },
+                    "running": {
+                      "type": "boolean"
+                    },
+                    "reachable": {
+                      "type": "boolean"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "available"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -26,6 +26,7 @@ mod backup_destinations;
 mod container;
 mod java;
 mod limits;
+mod map_proxy;
 mod metrics;
 mod notifications;
 pub mod origin;
@@ -171,6 +172,7 @@ pub fn router(st: St) -> Router {
         .route("/workflows/{id}", get(workflows_get).patch(workflows_patch).delete(workflows_delete))
         .route("/workflows/{id}/test", post(workflows_test))
         .route("/workflows/{id}/runs", get(workflows_runs))
+        .route("/servers/{id}/map", get(map_proxy::map_info))
         .route("/servers/{id}/metrics", get(server_metrics))
         .route("/servers/{id}/analytics", get(server_analytics))
         .route("/metrics/host", get(host_metrics))
@@ -195,6 +197,8 @@ pub fn router(st: St) -> Router {
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
         .layer(axum::extract::DefaultBodyLimit::max(32 << 20)) // fits the editor's 8 MiB text files even if JSON escaping doubles them
         .layer(tower_http::trace::TraceLayer::new_for_http())
+        // added after the layers above: the map proxy sets its own headers (it must stay frameable by the UI)
+        .merge(map_proxy::public_routes())
         .with_state(st)
 }
 

@@ -166,6 +166,8 @@ pub fn view(s: &Srv, st: &Inner) -> Value {
     let l = live.get(&s.id);
     let uptime = l.filter(|l| l.alive).and_then(|l| l.started).map(|t| t.elapsed().as_secs());
     let players = l.and_then(|l| l.players.as_ref()).filter(|_| state == "running").map(|p| json!({"online": p.online, "max": p.max, "sample": p.sample}));
+    let mut capabilities = s.capabilities();
+    if crate::maps::detect(st, s).is_some() { capabilities.push("map"); }
     json!({
         "id": s.id, "name": s.name, "runtime": s.runtime, "game_version": s.game_version, "loader_version": s.loader_version,
         "java_major": s.java_major, "port": s.port, "memory_mb": s.memory_mb, "flags_profile": s.flags_profile, "autostart": s.autostart,
@@ -173,7 +175,7 @@ pub fn view(s: &Srv, st: &Inner) -> Value {
         "desired": s.desired, "state": state, "state_detail": detail, "state_since": l.and_then(|l| l.state_since.clone()),
         "uptime_s": uptime, "pid": s.pid.filter(|_| l.is_some_and(|l| l.alive)), "players": players,
         "motd": l.and_then(|l| l.motd.clone()), "cpu_pct": l.filter(|l| l.alive).and_then(|l| l.cpu), "mem_bytes": l.filter(|l| l.alive).and_then(|l| l.mem),
-        "content_kind": s.content_kind(), "tags": s.tags, "notes": s.notes, "created_at": s.created_at, "capabilities": s.capabilities(),
+        "content_kind": s.content_kind(), "tags": s.tags, "notes": s.notes, "created_at": s.created_at, "capabilities": capabilities,
         "limits": crate::platform::cgroup::limits_json(&s.requested_limits()),
         "isolation": s.isolation, "container": crate::container::view(s),
     })

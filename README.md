@@ -36,7 +36,7 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 - **Fast and small.** One binary, a Svelte UI with no UI framework (about 34 KB of JavaScript on first load, gzipped), live state over Server-Sent Events and WebSockets, no polling storms. Idle cost is a few tens of MB.
 - **Local first.** Server files, worlds, console logs and backups never leave your machine. The controller works offline except for downloads and the content catalogues.
-- **More than Minecraft.** Bedrock, Terraria, Factorio, Valheim, Counter-Strike 2, Garry's Mod, Team Fortress 2, Left 4 Dead 2, Rust, Palworld, Project Zomboid and Satisfactory install from their official sources (SteamCMD for Steam games), with player counts, console, backups and schedules.
+- **More than Minecraft.** Bedrock, Terraria, Factorio, Valheim, Counter-Strike 2, Counter-Strike: Source, Garry's Mod, Team Fortress 2, Left 4 Dead and Left 4 Dead 2, Day of Defeat: Source, Half-Life 2: Deathmatch, No More Room in Hell, Rust, ARK: Survival Evolved, 7 Days to Die, Palworld, Project Zomboid and Satisfactory install from their official sources (SteamCMD for Steam games), with player counts, console, backups and schedules.
 - **Honest about compatibility.** Plugins for Paper-family servers from Modrinth, CurseForge or Hangar, mods for Fabric, Quilt, Forge and NeoForge, proxy plugins for Velocity, datapacks for Vanilla. Moss reads every jar, checks dependencies, versions and loaders, and tells you what is wrong before the server does.
 - **Recoverable.** Every change Moss makes can be undone, risky changes take a safety backup first, backups are checksummed and verifiable, and restores never delete what they replace.
 
@@ -246,6 +246,9 @@ Data layout: `moss.sqlite`, `servers/<id>/` (game files; Moss metadata in `.moss
 | Factorio | factorio.com (headless) | Linux | From the log | Stable or experimental; creates a save on install |
 | Valheim | SteamCMD | Linux x86-64 | Steam query | Generated password in `moss-game.cfg` |
 | Counter-Strike 2, Garry's Mod, Team Fortress 2, Left 4 Dead 2 | SteamCMD | Linux x86-64 | Steam query | CS2 is a 30 GB+ download |
+| Counter-Strike: Source, Day of Defeat: Source, Half-Life 2: Deathmatch, Left 4 Dead, No More Room in Hell | SteamCMD | Linux x86-64 | Steam query | RCON admin and `server.cfg` editor like the other Source games |
+| ARK: Survival Evolved | SteamCMD | Linux x86-64 | Steam query | About 20 GB; `map`, `password` and `admin_password` in `moss-game.cfg`; stopped with SIGINT |
+| 7 Days to Die | SteamCMD | Linux x86-64 | From the log | Moss sets `ServerPort` and `TelnetPort` in `serverconfig.xml` before each start; stopped with SIGINT |
 | Rust | SteamCMD | Linux x86-64 | Steam query | |
 | Palworld, Satisfactory | SteamCMD | Linux x86-64 | – | Stopped with SIGINT so the world is saved |
 | Project Zomboid | SteamCMD | Linux x86-64 | – | Generated admin password in `moss-game.cfg` |

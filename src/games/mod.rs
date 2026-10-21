@@ -140,6 +140,11 @@ fn gmod(l: &Launch) -> Result<Vec<String>, String> {
 }
 fn tf2(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("tf", "ctf_2fort", l)) }
 fn l4d2(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("left4dead2", "c1m1_hotel", l)) }
+fn l4d(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("left4dead", "l4d_hospital01_apartment", l)) }
+fn css(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("cstrike", "de_dust2", l)) }
+fn dods(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("dod", "dod_anzio", l)) }
+fn hl2dm(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("hl2mp", "dm_lockdown", l)) }
+fn nmrih(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("nmrih", "nmo_broadway", l)) }
 
 fn cs2(l: &Launch) -> Result<Vec<String>, String> {
     let mut v = strs(["./game/bin/linuxsteamrt64/cs2", "-dedicated", "-console", "-usercon", "-port"]);
@@ -166,6 +171,42 @@ fn palworld(l: &Launch) -> Result<Vec<String>, String> {
 fn zomboid(l: &Launch) -> Result<Vec<String>, String> {
     let pw = l.get("password").ok_or_else(|| format!("{SETTINGS_FILE} needs an admin password (Project Zomboid asks for one on first start)"))?;
     Ok(vec!["./start-server.sh".into(), "-servername".into(), l.get("servername").unwrap_or("moss").into(), "-adminpassword".into(), pw.into(), "-port".into(), l.port.to_string()])
+}
+
+/// ARK takes its settings as one `Map?key=value?...` URL: game port `port` (plus the raw socket on `port + 1`), query `port + 2`.
+/// `map`, `password` and `admin_password` come from moss-game.cfg; `?` and quotes are dropped from every value so none can add a key.
+fn ark(l: &Launch) -> Result<Vec<String>, String> {
+    let clean = |v: &str| v.chars().filter(|c| !matches!(c, '?' | '"') && !c.is_control()).collect::<String>();
+    let map = l.get("map").filter(|m| m.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')).unwrap_or("TheIsland");
+    let mut url = format!("{map}?listen?SessionName={}?Port={}?QueryPort={}?MaxPlayers={}", clean(l.get("name").unwrap_or(l.name)), l.port, u32::from(l.port) + 2, l.max_players);
+    if let Some(pw) = l.get("password") { url.push_str(&format!("?ServerPassword={}", clean(pw))); }
+    if let Some(pw) = l.get("admin_password") { url.push_str(&format!("?ServerAdminPassword={}", clean(pw))); }
+    Ok(vec!["./ShooterGame/Binaries/Linux/ShooterGameServer".into(), url, "-server".into(), "-log".into()])
+}
+
+/// 7 Days to Die reads its port from serverconfig.xml (patched by `patch_sdtd_config` before launch); `-logfile -` keeps the
+/// Unity log on stdout so the console and player tracking see it.
+fn sdtd(_: &Launch) -> Result<Vec<String>, String> {
+    Ok(strs(["env", "LD_LIBRARY_PATH=.", "./7DaysToDieServer.x86_64", "-logfile", "-", "-quit", "-batchmode", "-nographics", "-dedicated", "-configfile=serverconfig.xml"]))
+}
+
+/// Sets uncommented `<property name="..." value="..."/>` lines in a 7 Days to Die serverconfig.xml (commented-out ones are left alone).
+pub fn set_xml_properties(text: &str, props: &[(&str, String)]) -> String {
+    props.iter().fold(text.to_string(), |t, (k, v)| {
+        let r = Regex::new(&format!(r#"(?m)^(\s*<property\s+name="{}"\s+value=")[^"]*(")"#, regex::escape(k))).expect("valid property regex");
+        r.replace(&t, |c: &regex::Captures| format!("{}{v}{}", &c[1], &c[2])).into_owned()
+    })
+}
+
+/// Before a 7 Days to Die start: game port `port` (the game also uses up to `port + 2`), telnet on `port + 3`, and the player
+/// limit when moss-game.cfg sets `max_players`.
+fn patch_sdtd_config(dir: &Path, port: u16, cfg: &HashMap<String, String>) {
+    let path = dir.join("serverconfig.xml");
+    let Ok(old) = std::fs::read_to_string(&path) else { return };
+    let mut props = vec![("ServerPort", port.to_string()), ("TelnetPort", (u32::from(port) + 3).to_string())];
+    if let Some(m) = cfg.get("max_players").and_then(|v| v.parse::<u32>().ok()) { props.push(("ServerMaxPlayerCount", m.to_string())); }
+    let new = set_xml_properties(&old, &props);
+    if new != old { let _ = std::fs::write(&path, new); }
 }
 
 fn satisfactory(l: &Launch) -> Result<Vec<String>, String> { Ok(vec!["./FactoryServer.sh".into(), format!("-Port={}", l.port)]) }
@@ -214,6 +255,28 @@ pub static GAMES: &[Game] = &[
     Game { id: "satisfactory", name: "Satisfactory", description: "Satisfactory dedicated server via SteamCMD (anonymous, 12 GB RAM recommended). Claim the server from the in-game server manager. Linux x86_64 only.",
         port: 7777, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(1690800), launch: satisfactory, stop: Stop::Signal(SIGINT),
         ready: None, join: None, leave: None, players: PlayerSource::Api, max_players: 4, needs_eula: false, fallback_ready_s: 120 },
+    Game { id: "l4d", name: "Left 4 Dead", description: "Left 4 Dead dedicated server via SteamCMD (anonymous). Linux x86_64 only.",
+        port: 27015, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(222840), launch: l4d, stop: Stop::Command("quit"),
+        ready: None, join: None, leave: None, players: PlayerSource::A2s(0), max_players: 8, needs_eula: false, fallback_ready_s: 300 },
+    Game { id: "css", name: "Counter-Strike: Source", description: "Counter-Strike: Source dedicated server via SteamCMD (anonymous). Starts on de_dust2. Linux x86_64 only.",
+        port: 27015, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(232330), launch: css, stop: Stop::Command("quit"),
+        ready: None, join: None, leave: None, players: PlayerSource::A2s(0), max_players: 24, needs_eula: false, fallback_ready_s: 300 },
+    Game { id: "dods", name: "Day of Defeat: Source", description: "Day of Defeat: Source dedicated server via SteamCMD (anonymous). Starts on dod_anzio. Linux x86_64 only.",
+        port: 27015, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(232290), launch: dods, stop: Stop::Command("quit"),
+        ready: None, join: None, leave: None, players: PlayerSource::A2s(0), max_players: 24, needs_eula: false, fallback_ready_s: 300 },
+    Game { id: "hl2dm", name: "Half-Life 2: Deathmatch", description: "Half-Life 2: Deathmatch dedicated server via SteamCMD (anonymous). Starts on dm_lockdown. Linux x86_64 only.",
+        port: 27015, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(232370), launch: hl2dm, stop: Stop::Command("quit"),
+        ready: None, join: None, leave: None, players: PlayerSource::A2s(0), max_players: 16, needs_eula: false, fallback_ready_s: 300 },
+    Game { id: "nmrih", name: "No More Room in Hell", description: "No More Room in Hell dedicated server via SteamCMD (anonymous). Starts on nmo_broadway. Linux x86_64 only.",
+        port: 27015, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(317670), launch: nmrih, stop: Stop::Command("quit"),
+        ready: None, join: None, leave: None, players: PlayerSource::A2s(0), max_players: 8, needs_eula: false, fallback_ready_s: 300 },
+    Game { id: "ark", name: "ARK: Survival Evolved", description: "ARK: Survival Evolved dedicated server via SteamCMD (anonymous, about 20 GB, 8 GB RAM or more). Map and passwords go in moss-game.cfg. Linux x86_64 only.",
+        port: 7777, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(376030), launch: ark, stop: Stop::Signal(SIGINT),
+        ready: None, join: None, leave: None, players: PlayerSource::A2s(2), max_players: 70, needs_eula: false, fallback_ready_s: 900 },
+    Game { id: "sdtd", name: "7 Days to Die", description: "7 Days to Die dedicated server via SteamCMD (anonymous, 8 GB RAM or more). Edit serverconfig.xml for world settings; Moss sets the ports. Linux x86_64 only.",
+        port: 26900, proto: Proto::Udp, platforms: LINUX, install: Install::Steam(294420), launch: sdtd, stop: Stop::Signal(SIGINT),
+        ready: Some("StartGame done"), join: Some(r"PlayerSpawnedInWorld \(reason: JoinMultiplayer.*PlayerName='([^']+)'"), leave: Some(r"Player disconnected: .*PlayerName='([^']+)'"),
+        players: PlayerSource::Log, max_players: 8, needs_eula: false, fallback_ready_s: 600 },
 ];
 
 pub fn get(runtime: &str) -> Option<&'static Game> { GAMES.iter().find(|g| g.id == runtime) }
@@ -226,7 +289,7 @@ impl Game {
         self.platforms.contains(&OS) && (!matches!(self.install, Install::Steam(_)) || cfg!(target_arch = "x86_64"))
     }
     /// Extra ports above `port` the game also occupies (A2S query, IPv6 twin, ...).
-    pub fn span(&self) -> u16 { match self.id { "valheim" => 2, "bedrock" | "rust" | "zomboid" => 1, _ => 0 } }
+    pub fn span(&self) -> u16 { match self.id { "sdtd" => 3, "valheim" | "ark" => 2, "bedrock" | "rust" | "zomboid" => 1, _ => 0 } }
     /// The server-relative executable a restored copy cannot start without.
     pub fn main_binary(&self) -> &'static str {
         match self.id {
@@ -234,7 +297,9 @@ impl Game {
             "terraria" => if cfg!(target_os = "macos") { "TerrariaServer.bin.osx" } else { "TerrariaServer.bin.x86_64" },
             "factorio" => "bin/x64/factorio",
             "valheim" => "valheim_server.x86_64",
-            "gmod" | "tf2" | "l4d2" => "srcds_run",
+            "gmod" | "tf2" | "l4d2" | "l4d" | "css" | "dods" | "hl2dm" | "nmrih" => "srcds_run",
+            "ark" => "ShooterGame/Binaries/Linux/ShooterGameServer",
+            "sdtd" => "7DaysToDieServer.x86_64",
             "cs2" => "game/bin/linuxsteamrt64/cs2",
             "rust" => "RustDedicated",
             "palworld" => "PalServer.sh",
@@ -279,6 +344,7 @@ pub fn command(dir: &Path, s: &Srv) -> ApiResult<Vec<String>> {
     let mut cfg = read_settings(dir);
     let port16 = u16::try_from(s.port).map_err(|_| ApiError::bad("validation", "invalid port"))?;
     rcon_setup::prepare(dir, g, port16, &mut cfg); // remote admin: generated password, Palworld and Zomboid settings files
+    if g.id == "sdtd" { patch_sdtd_config(dir, port16, &cfg); }
     if dir.join("BepInEx/core/BepInEx.Preloader.dll").exists() { cfg.insert(mods::BEPINEX_KEY.into(), "1".into()); }
     let max = cfg.get("max_players").and_then(|v| v.parse().ok()).unwrap_or(g.max_players);
     let port = port16;
@@ -359,7 +425,7 @@ mod tests {
             if g.players == PlayerSource::Log { assert!(g.join.is_some() && g.leave.is_some(), "{}", g.id); }
             if let Install::Steam(_) = g.install { assert_eq!(g.platforms, LINUX); }
         }
-        assert_eq!(GAMES.len(), 12);
+        assert_eq!(GAMES.len(), 19);
         let b = get("bedrock").unwrap();
         assert_eq!((b.port, b.proto, b.needs_eula), (19132, Proto::Udp, true));
         assert_eq!((get("terraria").unwrap().port, get("terraria").unwrap().proto), (7777, Proto::Tcp));
@@ -430,6 +496,48 @@ mod tests {
         assert_eq!(argv("palworld", 8211, &[]), ["./PalServer.sh", "-port=8211"]);
         assert_eq!(argv("zomboid", 16261, &[("password", "pw12345")]), ["./start-server.sh", "-servername", "moss", "-adminpassword", "pw12345", "-port", "16261"]);
         assert_eq!(argv("satisfactory", 7777, &[]), ["./FactoryServer.sh", "-Port=7777"]);
+    }
+
+    #[test]
+    fn added_games_argv_ports_and_logs() {
+        for (id, game, map) in [("css", "cstrike", "de_dust2"), ("dods", "dod", "dod_anzio"), ("hl2dm", "hl2mp", "dm_lockdown"), ("l4d", "left4dead", "l4d_hospital01_apartment"), ("nmrih", "nmrih", "nmo_broadway")] {
+            let v = argv(id, 27016, &[("rcon_password", "pw")]);
+            assert_eq!(&v[..3], ["./srcds_run", "-game", game], "{id}");
+            assert!(v.windows(2).any(|w| w == ["+map", map]) && v.windows(2).any(|w| w == ["-port", "27016"]) && v.ends_with(&["+rcon_password".to_string(), "pw".to_string()]), "{id}");
+            assert_eq!(admin::flavor(get(id).unwrap()), Some(admin::Flavor::Source));
+            assert_eq!(get(id).unwrap().main_binary(), "srcds_run");
+        }
+        let a = argv("ark", 7777, &[]);
+        assert_eq!(a, ["./ShooterGame/Binaries/Linux/ShooterGameServer", "TheIsland?listen?SessionName=My Server?Port=7777?QueryPort=7779?MaxPlayers=70", "-server", "-log"]);
+        let a = argv("ark", 7777, &[("map", "Ragnarok"), ("name", "Evil?RCONEnabled=True"), ("password", "p?w\"x"), ("admin_password", "adm")]);
+        assert_eq!(a[1], "Ragnarok?listen?SessionName=EvilRCONEnabled=True?Port=7777?QueryPort=7779?MaxPlayers=70?ServerPassword=pwx?ServerAdminPassword=adm");
+        assert!(argv("ark", 7777, &[("map", "The?Island")])[1].starts_with("TheIsland?"), "a bad map name falls back");
+        let ark = get("ark").unwrap();
+        assert_eq!((ark.span(), ark.a2s_port(7777)), (2, Some(7779)));
+        assert_eq!(executables(&a), ["ShooterGame/Binaries/Linux/ShooterGameServer"]);
+        let d = get("sdtd").unwrap();
+        assert_eq!(executables(&argv("sdtd", 26900, &[])), ["7DaysToDieServer.x86_64"]);
+        assert!(argv("sdtd", 26900, &[]).windows(2).any(|w| w == ["-logfile", "-"]));
+        assert_eq!((d.span(), d.reads_log(), d.a2s_port(26900)), (3, true, None));
+        assert_eq!(classify(d, "2025-01-01T10:00:00 12.3 INF StartGame done"), Some(Event::Ready));
+        assert_eq!(classify(d, "2025-01-01T10:00:00 12.3 INF PlayerSpawnedInWorld (reason: JoinMultiplayer, position: 1, 2, 3): EntityID=171, PltfmId='Steam_765', CrossId='EOS_00', OwnerID='Steam_765', PlayerName='Alice Smith', ClientNumber='1'"), Some(Event::Join("Alice Smith".into())));
+        assert_eq!(classify(d, "2025-01-01T10:00:00 12.3 INF PlayerSpawnedInWorld (reason: Teleport, position: 1, 2, 3): EntityID=171, PlayerName='Alice'"), None);
+        assert_eq!(classify(d, "2025-01-01T10:09:00 99.1 INF Player disconnected: EntityID=171, PltfmId='Steam_765', CrossId='EOS_00', OwnerID='Steam_765', PlayerName='Alice Smith', ClientNumber='1'"), Some(Event::Leave("Alice Smith".into())));
+    }
+
+    #[test]
+    fn sdtd_config_gets_moss_ports() {
+        let xml = "<ServerSettings>\n\t<property name=\"ServerPort\"\t\t\tvalue=\"26900\"\t/>\n\t<!-- <property name=\"TelnetPort\" value=\"1\" /> -->\n\t<property name=\"TelnetPort\" value=\"8081\" />\n\t<property name=\"ServerMaxPlayerCount\" value=\"8\" />\n</ServerSettings>\n";
+        let out = set_xml_properties(xml, &[("ServerPort", "27000".into()), ("TelnetPort", "27003".into())]);
+        assert!(out.contains("name=\"ServerPort\"\t\t\tvalue=\"27000\"\t/>") && out.contains("<property name=\"TelnetPort\" value=\"27003\" />"));
+        assert!(out.contains("<!-- <property name=\"TelnetPort\" value=\"1\" /> -->") && out.contains("value=\"8\""), "comments and other keys untouched");
+        let dir = std::env::temp_dir().join(format!("moss-sdtd-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("serverconfig.xml"), xml).unwrap();
+        patch_sdtd_config(&dir, 26910, &[("max_players".to_string(), "12".to_string())].into());
+        let got = std::fs::read_to_string(dir.join("serverconfig.xml")).unwrap();
+        assert!(got.contains("value=\"26910\"") && got.contains("value=\"26913\"") && got.contains("value=\"12\""));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

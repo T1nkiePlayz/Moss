@@ -5,6 +5,7 @@ import type { IconName } from './icons';
 const GAME_ICONS: Record<string, IconName> = {
   bedrock: 'layers', terraria: 'tree', factorio: 'settings', valheim: 'axe', gmod: 'wrench', cs2: 'crosshair', tf2: 'crosshair', l4d2: 'skull',
   rust: 'flame', palworld: 'paw', zomboid: 'skull', satisfactory: 'package',
+  l4d: 'skull', css: 'crosshair', dods: 'crosshair', hl2dm: 'crosshair', nmrih: 'skull', ark: 'paw', sdtd: 'skull',
 };
 export function runtimeIcon(r: { id: string; category: string }): IconName {
   if (r.category === 'game') return GAME_ICONS[r.id] ?? 'gamepad';

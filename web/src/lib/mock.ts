@@ -73,6 +73,13 @@ function gameRuntimes(): A.Runtime[] {
     g('palworld', 'Palworld', `Palworld dedicated server ${steam} 16 GB RAM recommended.`, 8211, 'udp', ['linux'], 'rcon', 32),
     g('zomboid', 'Project Zomboid', `Project Zomboid dedicated server ${steam} Admin password is generated into moss-game.cfg.`, 16261, 'udp', ['linux'], 'rcon', 16),
     g('satisfactory', 'Satisfactory', `Satisfactory dedicated server ${steam} 12 GB RAM recommended.`, 7777, 'udp', ['linux'], 'api', 4),
+    g('l4d', 'Left 4 Dead', `Left 4 Dead dedicated server ${steam}`, 27015, 'udp', ['linux'], 'a2s', 8),
+    g('css', 'Counter-Strike: Source', `Counter-Strike: Source dedicated server ${steam} Starts on de_dust2.`, 27015, 'udp', ['linux'], 'a2s', 24),
+    g('dods', 'Day of Defeat: Source', `Day of Defeat: Source dedicated server ${steam} Starts on dod_anzio.`, 27015, 'udp', ['linux'], 'a2s', 24),
+    g('hl2dm', 'Half-Life 2: Deathmatch', `Half-Life 2: Deathmatch dedicated server ${steam} Starts on dm_lockdown.`, 27015, 'udp', ['linux'], 'a2s', 16),
+    g('nmrih', 'No More Room in Hell', `No More Room in Hell dedicated server ${steam} Starts on nmo_broadway.`, 27015, 'udp', ['linux'], 'a2s', 8),
+    g('ark', 'ARK: Survival Evolved', `ARK: Survival Evolved dedicated server ${steam} About 20 GB, 8 GB RAM or more.`, 7777, 'udp', ['linux'], 'a2s', 70),
+    g('sdtd', '7 Days to Die', `7 Days to Die dedicated server ${steam} 8 GB RAM or more.`, 26900, 'udp', ['linux'], 'log', 8),
   ];
 }
 const gameVersions: Record<string, A.Versions> = {
@@ -80,7 +87,7 @@ const gameVersions: Record<string, A.Versions> = {
   terraria: { versions: [{ id: '1.4.5.0', stable: true }, { id: '1.4.4.9', stable: true }], recommended: '1.4.5.0' },
   factorio: { versions: [{ id: '2.0.55', stable: true }, { id: '2.1.1', stable: false }], recommended: '2.0.55' },
 };
-for (const id of ['valheim', 'gmod', 'cs2', 'tf2', 'l4d2', 'rust', 'palworld', 'zomboid', 'satisfactory']) gameVersions[id] = { versions: [{ id: 'latest', stable: true }], recommended: 'latest' };
+for (const id of ['valheim', 'gmod', 'cs2', 'tf2', 'l4d2', 'rust', 'palworld', 'zomboid', 'satisfactory', 'l4d', 'css', 'dods', 'hl2dm', 'nmrih', 'ark', 'sdtd']) gameVersions[id] = { versions: [{ id: 'latest', stable: true }], recommended: 'latest' };
 
 // ---- operations & events ----
 const ops: A.Operation[] = [];

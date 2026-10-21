@@ -91,3 +91,77 @@ async fn a_new_data_directory_and_the_scratch_directory_are_private() {
     assert_eq!(mode(&dir), 0o700);
     assert_eq!(mode(&dir.join("tmp")), 0o700);
 }
+
+/// Public status pages are the one unauthenticated data surface: they work without credentials, expose only what the
+/// owner opted in, answer missing and disabled pages identically, and nothing else became public.
+#[tokio::test(flavor = "multi_thread")]
+async fn public_status_pages_are_open_but_everything_else_stays_protected() {
+    let dir = tmp("statuspages");
+    let (page_id, off_id, server_id);
+    let c = reqwest::Client::new();
+    {
+        // phase 1: configure as the signed-in owner (dev mode)
+        let m = Moss::start(&dir, &[]);
+        m.ready(&c).await;
+        server_id = make_sim(&c, &m.base, "Survival <img src=x>").await;
+        let sp = format!("{}/status-pages", m.base);
+        let bad = c.post(&sp).json(&json!({"title": "T", "slug": "Bad Slug!"})).send().await.unwrap();
+        assert_eq!(bad.status(), 400, "invalid slugs are refused");
+        assert_eq!(c.post(&sp).json(&json!({"title": "", "server_ids": []})).send().await.unwrap().status(), 400);
+        assert_eq!(c.post(&sp).json(&json!({"title": "T", "server_ids": ["nope"]})).send().await.unwrap().status(), 400, "unknown servers are refused");
+        let made: Value = c.post(&sp).json(&json!({"title": "Our <b>servers</b>", "description": "Join us", "show_address": "play.example.com", "server_ids": [server_id]})).send().await.unwrap().json().await.unwrap();
+        page_id = made["id"].as_str().unwrap().to_string();
+        let slug = made["slug"].as_str().unwrap().to_string();
+        assert!(slug.len() >= 10, "default slugs are unguessable: {slug}");
+        assert_eq!(c.post(&sp).json(&json!({"title": "Dup", "slug": slug})).send().await.unwrap().status(), 409);
+        let off: Value = c.post(&sp).json(&json!({"title": "Hidden", "slug": "hidden-page", "enabled": false})).send().await.unwrap().json().await.unwrap();
+        off_id = off["id"].as_str().unwrap().to_string();
+        let patched: Value = c.patch(format!("{sp}/{page_id}")).json(&json!({"slug": "our-servers", "show_players": true})).send().await.unwrap().json().await.unwrap();
+        assert_eq!((patched["slug"].as_str(), patched["show_players"].as_bool()), (Some("our-servers"), Some(true)));
+        assert_eq!(c.get(&sp).send().await.unwrap().json::<Value>().await.unwrap()["items"].as_array().unwrap().len(), 2);
+        // the activity log records the change
+        let act = c.get(format!("{}/activity", m.base)).send().await.unwrap().text().await.unwrap();
+        assert!(act.contains("status_page.add") && act.contains("status_page.update"), "audited");
+    }
+    // phase 2: the same data directory with real authentication, and no credentials at all
+    let m = Moss::start(&dir, &[("MOSS_AUTH", "supabase"), ("SUPABASE_URL", "http://127.0.0.1:1")]);
+    m.ready(&c).await;
+    let root = format!("http://127.0.0.1:{}", m.port);
+    let json_r = c.get(format!("{}/public/status/our-servers", m.base)).send().await.unwrap();
+    assert_eq!(json_r.status(), 200);
+    assert_eq!(json_r.headers()["cache-control"], "public, max-age=15");
+    let body = json_r.text().await.unwrap();
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((v["title"].as_str(), v["address"].as_str()), (Some("Our <b>servers</b>"), Some("play.example.com")));
+    assert_eq!(v["servers"][0]["name"], "Survival <img src=x>");
+    assert_eq!(v["servers"][0]["state"], "offline");
+    for hidden in [server_id.as_str(), page_id.as_str(), "\"pid\"", "\"port\"", "data_dir", "\"path\"", "memory"] { assert!(!body.contains(hidden), "{hidden} leaked: {body}"); }
+    let html_r = c.get(format!("{root}/status/our-servers")).send().await.unwrap();
+    assert_eq!(html_r.status(), 200);
+    let csp = html_r.headers()["content-security-policy"].to_str().unwrap().to_string();
+    assert!(csp.starts_with("default-src 'none'; style-src 'unsafe-inline'; img-src data:"), "{csp}");
+    let html = html_r.text().await.unwrap();
+    assert!(html.contains("Our &lt;b&gt;servers&lt;/b&gt;") && html.contains("Survival &lt;img src=x&gt;") && !html.contains("<img") && !html.contains("<b>"), "{html}");
+    assert!(html.contains("http-equiv=\"refresh\""));
+    // missing and disabled pages are indistinguishable
+    let missing = c.get(format!("{root}/status/does-not-exist")).send().await.unwrap();
+    let disabled = c.get(format!("{root}/status/hidden-page")).send().await.unwrap();
+    assert_eq!((missing.status().as_u16(), disabled.status().as_u16()), (404, 404));
+    assert_eq!(missing.text().await.unwrap(), disabled.text().await.unwrap());
+    let missing = c.get(format!("{}/public/status/does-not-exist", m.base)).send().await.unwrap();
+    let disabled = c.get(format!("{}/public/status/hidden-page", m.base)).send().await.unwrap();
+    assert_eq!((missing.status().as_u16(), disabled.status().as_u16()), (404, 404));
+    // identical apart from the per-request id
+    let strip = |t: String| t.split("\"request_id\":\"").enumerate().map(|(i, s)| if i == 0 { s.to_string() } else { s.split_once('"').unwrap().1.to_string() }).collect::<String>();
+    assert_eq!(strip(missing.text().await.unwrap()), strip(disabled.text().await.unwrap()));
+    // the admin API and every other data route still need credentials
+    let sp = format!("{}/status-pages", m.base);
+    assert_eq!(c.get(&sp).send().await.unwrap().status(), 401);
+    assert_eq!(c.post(&sp).json(&json!({"title": "x"})).send().await.unwrap().status(), 401);
+    assert_eq!(c.patch(format!("{sp}/{page_id}")).json(&json!({"enabled": false})).send().await.unwrap().status(), 401);
+    assert_eq!(c.delete(format!("{sp}/{off_id}")).send().await.unwrap().status(), 401);
+    for p in ["/status", "/servers", "/settings", "/users", "/activity", "/webhooks", "/backups", "/health", "/tokens"] {
+        assert_eq!(c.get(format!("{}{p}", m.base)).send().await.unwrap().status(), 401, "GET {p} must stay protected");
+    }
+    assert_eq!(c.get(format!("{}/servers/{server_id}", m.base)).send().await.unwrap().status(), 401);
+}

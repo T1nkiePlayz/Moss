@@ -1165,6 +1165,121 @@
           }
         },
         "additionalProperties": true
+      },
+      "StatusPage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "3 to 40 characters of a-z, 0-9 and dashes"
+          },
+          "path": {
+            "type": "string",
+            "description": "Public address on this controller, /status/{slug}"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "show_players": {
+            "type": "boolean"
+          },
+          "show_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Owner-entered public address shown on the page"
+          },
+          "server_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Shown servers, in display order"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "PublicStatus": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "game": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "online",
+                    "starting",
+                    "offline"
+                  ]
+                },
+                "players": {
+                  "type": "object",
+                  "properties": {
+                    "online": {
+                      "type": "integer"
+                    },
+                    "max": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "Only when the page shows players"
+                },
+                "uptime_24h_pct": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "uptime_7d_pct": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
       }
     }
   },
@@ -7435,6 +7550,207 @@
             }
           }
         }
+      }
+    },
+    "/status-pages": {
+      "get": {
+        "tags": [
+          "status-pages"
+        ],
+        "summary": "List public status pages",
+        "x-permission": "admin",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StatusPage"
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "status-pages"
+        ],
+        "summary": "Create a public status page (title, optional slug, description, enabled, show_players, show_address, server_ids); the slug is random unless given",
+        "x-permission": "admin",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Any"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status-pages/{id}": {
+      "patch": {
+        "tags": [
+          "status-pages"
+        ],
+        "summary": "Edit a status page; send server_ids to replace the shown servers",
+        "x-permission": "admin",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Any"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "status-pages"
+        ],
+        "summary": "Delete a status page",
+        "x-permission": "admin",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/public/status/{slug}": {
+      "get": {
+        "tags": [
+          "status-pages"
+        ],
+        "summary": "Public status of an enabled page, no sign-in needed (404 when missing or disabled; rate limited; the HTML twin is GET /status/{slug} outside /api/v1)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     }
   }

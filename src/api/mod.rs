@@ -32,13 +32,14 @@ mod reinstall;
 mod servers;
 mod session;
 mod settings;
+mod status_pages;
 mod setup;
 mod support;
 mod tokens;
 mod webhooks;
 
 use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
-use {metrics::*, notifications::*, support::*, webhooks::*};
+use {metrics::*, notifications::*, status_pages::*, support::*, webhooks::*};
 pub use servers::{create_server_from_value, free_port_for};
 
 type Q = Query<HashMap<String, String>>;
@@ -170,12 +171,16 @@ pub fn router(st: St) -> Router {
         .route("/setup/claim", post(setup_claim))
         .route("/tokens", get(tokens_list).post(tokens_create))
         .route("/tokens/{id}", axum::routing::delete(tokens_delete))
+        .route("/status-pages", get(status_pages_list).post(status_pages_create))
+        .route("/status-pages/{id}", patch(status_pages_patch).delete(status_pages_delete))
+        .route("/public/status/{slug}", get(public_status_json))
         .route("/settings", get(settings_get).put(settings_put))
         .route("/events", get(events))
         .fallback(|| async { ApiError::not_found("endpoint") });
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .nest("/api/v1", api)
+        .merge(status_pages::public_html_routes())
         .fallback(static_files)
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))

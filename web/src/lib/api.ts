@@ -509,7 +509,14 @@ export interface WebhookList { items: Webhook[]; event_types: WebhookEventType[]
 export interface WebhookDelivery { id: string; event_id: string; type: string; test: boolean; state: 'pending' | 'delivered' | 'dead'; attempts: number; max_attempts: number; created_at: string; finished_at: string | null; next_attempt_at: string | null; status_code: number | null; latency_ms: number | null; response: string | null; error: string | null }
 export interface WebhookInput { name?: string; url?: string; events?: string[]; server_ids?: string[]; enabled?: boolean }
 
+export interface StatusPage { id: string; slug: string; path: string; title: string; description: string; enabled: boolean; show_players: boolean; show_address: string | null; server_ids: string[]; created_at: string }
+export interface StatusPageInput { title?: string; slug?: string; description?: string; enabled?: boolean; show_players?: boolean; show_address?: string | null; server_ids?: string[] }
+
 export const apiOps = {
+  statusPages: () => get<{ items: StatusPage[] }>('/status-pages', { ttl: 0 }),
+  addStatusPage: (b: StatusPageInput) => send<StatusPage>('POST', '/status-pages', b),
+  patchStatusPage: (id: string, b: StatusPageInput) => send<StatusPage>('PATCH', `/status-pages/${e(id)}`, b),
+  removeStatusPage: (id: string) => send('DELETE', `/status-pages/${e(id)}`),
   webhooks: () => get<WebhookList>('/webhooks', { ttl: 0 }),
   addWebhook: (b: WebhookInput) => send<Webhook>('POST', '/webhooks', b),
   patchWebhook: (id: string, b: WebhookInput) => send<Webhook>('PATCH', `/webhooks/${e(id)}`, b),

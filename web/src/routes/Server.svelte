@@ -36,6 +36,7 @@
     if (c.includes('content') && s.content_kind !== 'none') t.push({ id: 'content', label: kindName[s.content_kind] ?? 'Content', icon: 'puzzle' });
     if (s.runtime !== 'custom' || s.content_kind !== 'none') t.push({ id: 'upgrade', label: 'Upgrade', icon: 'arrow-up' });
     if (c.includes('backups')) t.push({ id: 'backups', label: 'Backups', icon: 'archive' });
+    if (c.includes('players')) t.push({ id: 'players', label: 'Players', icon: 'users' });
     if (isAdmin()) t.push({ id: 'access', label: 'Access', icon: 'shield' });
     t.push({ id: 'settings', label: 'Settings', icon: 'settings' });
     return t;
@@ -47,6 +48,7 @@
     content: () => import('./server/Content.svelte'),
     upgrade: () => import('./server/Upgrade.svelte'),
     backups: () => import('./server/Backups.svelte'),
+    players: () => import('./server/Players.svelte'),
     access: () => import('./server/Access.svelte'),
     settings: () => import('./server/Settings.svelte'),
   } as const;

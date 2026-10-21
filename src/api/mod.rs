@@ -19,6 +19,7 @@ use std::{collections::HashMap, time::{Duration, Instant}};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 mod access;
+mod analytics;
 mod activity;
 mod assets;
 mod backup_destinations;
@@ -38,7 +39,7 @@ mod tokens;
 mod webhooks;
 
 use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
-use {metrics::*, notifications::*, support::*, webhooks::*};
+use {analytics::*, metrics::*, notifications::*, support::*, webhooks::*};
 pub use servers::{create_server_from_value, free_port_for};
 
 type Q = Query<HashMap<String, String>>;
@@ -165,6 +166,7 @@ pub fn router(st: St) -> Router {
         .route("/webhooks/{id}/deliveries", get(webhooks_deliveries))
         .route("/webhooks/{id}/deliveries/{did}/retry", post(webhooks_retry))
         .route("/servers/{id}/metrics", get(server_metrics))
+        .route("/servers/{id}/analytics", get(server_analytics))
         .route("/metrics/host", get(host_metrics))
         .route("/support-bundle", get(support_bundle))
         .route("/setup/claim", post(setup_claim))

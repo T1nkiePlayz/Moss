@@ -463,6 +463,39 @@ function preview(k: A.Backup, mode: string, only?: string[]): A.RestorePreview {
   };
 }
 
+// ---- player analytics: a week-plus of plausible data (evening peaks, busier weekends, a Sunday-night restart gap) ----
+const playerNames = ['Alex_Builds', 'creeper_hug', 'Notch2', 'PixelPenny', 'RedstoneRay', 'luna_mc', 'Gh0stMiner', 'BlockBard', 'TNT_Tina', 'ender_eli', 'Mossy', 'farmer_fi', 'SkyDiver88', 'quartz_quinn', 'Zombie_Zed'];
+function analyticsFor(s: A.Server, days: A.AnalyticsDays): A.PlayerAnalytics {
+  const seed = [...s.id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const rnd = (i: number) => { const x = Math.sin(seed + i * 12.9898) * 43758.5453; return x - Math.floor(x); };
+  const cap = s.players?.max ?? 20, iso = (t: number) => new Date(t).toISOString().replace(/\.\d+Z$/, 'Z');
+  const top = Math.floor(Date.now() / HOUR) * HOUR;
+  const hourly: A.PlayerAnalytics['hourly'] = [];
+  for (let i = days * 24 - 1; i >= 0; i--) {
+    const d = new Date(top - i * HOUR), h = d.getHours(), dow = d.getDay();
+    if (dow === 0 && h === 4) continue; // weekly restart
+    const avg = Math.max(0, (0.4 + Math.exp(-((h - 21) ** 2) / 12) * 5.5) * (dow === 0 || dow === 6 ? 1.5 : 1) * (0.7 + rnd(i) * 0.6));
+    hourly.push({ hour: iso(d.getTime()), peak: Math.min(cap, Math.max(Math.ceil(avg), Math.round(avg + 1 + rnd(i + 999) * 2))), avg: Math.round(avg * 100) / 100 });
+  }
+  const unique = days === 7 ? 12 : days === 30 ? 14 : 15;
+  const online = new Set(s.players?.sample ?? []);
+  const now = Date.now();
+  const topPlayers = playerNames.slice(0, unique).map((name, k) => {
+    const sessions = Math.max(1, Math.round(days * 1.6 / (k + 1)));
+    const isOn = online.has(name);
+    return { name, play_seconds: Math.round(sessions * (1500 + rnd(k + 50) * 5400)), sessions, last_seen: iso(isOn ? now : now - (k * 5 + 1) * HOUR), online: isOn };
+  }).sort((a, b) => b.play_seconds - a.play_seconds);
+  const recent: A.PlayerAnalytics['recent_sessions'] = [];
+  [...online].forEach((name, i) => recent.push({ name, joined_at: iso(now - (25 + i * 40) * MIN), left_at: null, seconds: (25 + i * 40) * 60 }));
+  for (let i = 0; recent.length < 20; i++) {
+    const len = Math.round((20 + rnd(i + 200) * 100) * 60), left = now - (i * 95 + 70) * MIN;
+    recent.push({ name: playerNames[(i * 7 + 3) % unique], joined_at: iso(left - len * 1000), left_at: iso(left), seconds: len });
+  }
+  const sessions = topPlayers.reduce((n, p) => n + p.sessions, 0), total = topPlayers.reduce((n, p) => n + p.play_seconds, 0);
+  const pk = hourly.reduce((b, h) => (h.peak >= b.peak ? h : b), hourly[0]);
+  return { days, hourly, unique_players: unique, sessions, total_play_seconds: total, avg_session_seconds: Math.round(total / sessions), peak: { count: pk.peak, at: pk.hour }, top_players: topPlayers, recent_sessions: recent };
+}
+
 function metricsFor(range: A.MetricRange, base: { cpu: number; mem: number; players?: boolean; disk?: boolean }, sparse = false): A.MetricSeries {
   const step = { '1h': 5, '24h': 3600, '7d': 3600, '30d': 3600 }[range];
   const n = sparse ? 2 : { '1h': 720, '24h': 24, '7d': 168, '30d': 720 }[range];
@@ -550,6 +583,13 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
     await sleep(450);
     if (failing) throw new ApiError(500, 'backup.preview_failed', 'The archive could not be read (mock).');
     return preview(k, b.mode, b.only);
+  }
+  if (M(/^\/servers\/([^/]+)\/analytics$/)) {
+    if (failing) throw err500();
+    const s = sv(m![1]);
+    if (!s.capabilities.includes('players')) throw new ApiError(404, 'not_found', 'No player analytics for this server');
+    const d = Number(qs.get('days') ?? 7);
+    return analyticsFor(s, (d === 30 || d === 90 ? d : 7) as A.AnalyticsDays);
   }
   if (M(/^\/servers\/([^/]+)\/metrics$/)) {
     if (failing) throw err500();

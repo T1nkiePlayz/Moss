@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { createRequire } from 'node:module';
 
 const axeSource = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
-const SERVER_TABS = ['', 'console', 'files', 'config', 'content', 'upgrade', 'backups', 'settings', 'access'];
+const SERVER_TABS = ['', 'console', 'files', 'config', 'content', 'upgrade', 'backups', 'players', 'settings', 'access'];
 const PAGES = ['', 'servers', 'servers/new', 'servers/import', 'backups', 'activity', 'users', 'settings'];
 
 async function audit(page: Page, label: string, scope?: string) {
@@ -38,6 +38,18 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   });
 }
+
+test('the players tab shows populated analytics and switches range', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('a[href^="#/servers/"]:not([href$="/new"])').first().waitFor();
+  const first = (await page.locator('a[href^="#/servers/"]:not([href$="/new"])').first().getAttribute('href'))!.replace('#/', '');
+  await page.goto(`/#/${first}/players`);
+  await expect(page.getByText('Unique players')).toBeVisible();
+  await expect(page.getByText('Alex_Builds').first()).toBeVisible();
+  await page.getByRole('button', { name: '30 days' }).click();
+  await expect(page.getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Unique players')).toBeVisible();
+});
 
 test('server settings show the isolation section, and a clear message when no engine exists', async ({ page }) => {
   await page.goto('/');

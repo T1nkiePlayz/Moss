@@ -18,6 +18,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0011_container_network", include_str!("migrations/0011_container_network.sql")),
     ("0012_event_webhooks", include_str!("migrations/0012_event_webhooks.sql")),
     ("0013_indexes", include_str!("migrations/0013_indexes.sql")),
+    ("0014_player_analytics", include_str!("migrations/0014_player_analytics.sql")),
 ];
 
 /// Number of migrations this build knows (the `user_version` of an up-to-date database).

@@ -26,8 +26,8 @@ export function mockDecode(code: string, opts: { slugs?: boolean } = {}): Record
   if (!d || d.format !== 'moss-blueprint' || d.version !== 1) throw new Error('This share code is not valid: it does not contain a blueprint');
   for (const i of d.content ?? []) {
     // `slugs` lets mock mode round-trip its own demo content, whose ids are slugs rather than real project ids.
-    const ok = opts.slugs && /^[a-z0-9-]{2,40}$/.test(i.project_id ?? '') ? true : i.provider === 'modrinth' ? /^[A-Za-z0-9]{8}$/.test(i.project_id ?? '') : i.provider === 'curseforge' ? /^\d{1,10}$/.test(i.project_id ?? '') : false;
-    if (!ok) throw new Error('This share code is not safe to import: content items must be Modrinth or CurseForge project ids');
+    const ok = opts.slugs && /^[a-z0-9-]{2,40}$/.test(i.project_id ?? '') ? true : i.provider === 'modrinth' ? /^[A-Za-z0-9]{8}$/.test(i.project_id ?? '') : i.provider === 'curseforge' ? /^\d{1,10}$/.test(i.project_id ?? '') : i.provider === 'hangar' ? /^[A-Za-z0-9_-]{1,64}$/.test(i.project_id ?? '') : false;
+    if (!ok) throw new Error('This share code is not safe to import: content items must be Modrinth, CurseForge or Hangar project ids');
   }
   if (/(^|")\s*(\/|~|[A-Za-z]:[\\/])|\.\.[\\/]|<script|javascript:/i.test(JSON.stringify(d.properties ?? {}) + JSON.stringify(d.schedules ?? []))) throw new Error('This share code is not safe to import: absolute paths and scripts are not allowed');
   return d;

@@ -47,7 +47,7 @@ pub fn sanitize(v: &Value) -> ApiResult<Value> {
     let mut content = vec![];
     for it in o.get("content").and_then(Value::as_array).map(|a| a.as_slice()).unwrap_or_default() {
         let (prov, pid) = (it["provider"].as_str().unwrap_or("modrinth"), it["project_id"].as_str().unwrap_or_default());
-        if !matches!(prov, "modrinth" | "curseforge") || !plain(pid, 40) { return Err(bad("content", "invalid content entry")); }
+        if !matches!(prov, "modrinth" | "curseforge" | "hangar") || !plain(pid, 40) { return Err(bad("content", "invalid content entry")); }
         content.push(json!({"provider": prov, "project_id": pid, "title": it["title"].as_str().unwrap_or(pid).chars().take(80).filter(|c| !c.is_control()).collect::<String>(), "kind": it["kind"].as_str().unwrap_or("").chars().take(24).collect::<String>()}));
         if content.len() > 200 { return Err(bad("content", "at most 200 content items")); }
     }
@@ -86,7 +86,7 @@ async fn capture(st: &St, s: &Srv, name: &str) -> ApiResult<Value> {
     let props = tokio::fs::read_to_string(s.dir(st).join("server.properties")).await.map(|r| parse_props(&r)).unwrap_or_default();
     let sid = s.id.clone();
     let (content, scheds): (Vec<Value>, Vec<Value>) = st.db.call(move |c| {
-        let mut q = c.prepare("SELECT provider, project_id, title, kind FROM content_items WHERE server_id=? AND project_id IS NOT NULL AND provider IN ('modrinth','curseforge') ORDER BY title")?;
+        let mut q = c.prepare("SELECT provider, project_id, title, kind FROM content_items WHERE server_id=? AND project_id IS NOT NULL AND provider IN ('modrinth','curseforge','hangar') ORDER BY title")?;
         let content = q.query_map([&sid], |r| Ok(json!({"provider": r.get::<_, String>(0)?, "project_id": r.get::<_, String>(1)?, "title": r.get::<_, String>(2)?, "kind": r.get::<_, String>(3)?})))?.collect::<Result<Vec<_>, _>>()?;
         let mut q = c.prepare("SELECT kind, command, every_minutes, daily_at, tz, keep, enabled FROM schedules WHERE server_id=? ORDER BY kind, id")?;
         let scheds = q.query_map([&sid], |r| Ok(json!({"kind": r.get::<_, String>(0)?, "command": r.get::<_, Option<String>>(1)?, "every_minutes": r.get::<_, Option<i64>>(2)?, "daily_at": r.get::<_, Option<String>>(3)?, "tz": r.get::<_, String>(4)?, "keep": r.get::<_, Option<i64>>(5)?, "enabled": r.get::<_, bool>(6)?})))?.collect::<Result<Vec<_>, _>>()?;

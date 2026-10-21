@@ -40,6 +40,9 @@ pub struct Config {
     /// API base for Modrinth (https, or loopback http for tests).
     #[arg(long, env = "MOSS_MODRINTH_API_URL", default_value = "https://api.modrinth.com/v2")]
     pub modrinth_api_url: String,
+    /// API base for Hangar (PaperMC's plugin repository; https, or loopback http for tests).
+    #[arg(long, env = "MOSS_HANGAR_API_URL", default_value = "https://hangar.papermc.io/api/v1")]
+    pub hangar_api_url: String,
     /// Ports staged update copies may listen on, `first-last`.
     #[arg(long, env = "MOSS_STAGING_PORT_RANGE", default_value = "30000-30999")]
     pub staging_port_range: String,
@@ -94,6 +97,10 @@ impl Config {
         let m = &self.modrinth_api_url;
         if !(m.starts_with("https://") || m.starts_with("http://127.0.0.1") || m.starts_with("http://localhost")) {
             anyhow::bail!("MOSS_MODRINTH_API_URL must be https (or loopback http for tests)");
+        }
+        let h = &self.hangar_api_url;
+        if !(h.starts_with("https://") || h.starts_with("http://127.0.0.1") || h.starts_with("http://localhost")) {
+            anyhow::bail!("MOSS_HANGAR_API_URL must be https (or loopback http for tests)");
         }
         if parse_port_range(&self.staging_port_range).is_none() { anyhow::bail!("MOSS_STAGING_PORT_RANGE must look like 30000-30999 (1024 or higher, first <= last)"); }
         Ok(())

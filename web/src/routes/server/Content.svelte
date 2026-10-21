@@ -275,6 +275,7 @@
     <SavedViews scope="content" filters={{ q }} {sort} onapply={(f, so) => { q = typeof f.q === 'string' ? f.q : ''; sort = ['relevance', 'downloads', 'updated', 'follows'].includes(so) ? so : 'relevance'; }} />
     {#if res}<span class="xs muted">Showing {res.compat.kind.replace('_', ' ')} for <b>{res.compat.loader}</b> · {res.compat.game_version}</span>{/if}
   </div>
+  {#if provider === 'hangar'}<p class="xs muted" style="margin:-4px 0 12px">Results from Hangar, PaperMC's plugin repository. Versions hosted outside Hangar are shown with a link and cannot be installed by Moss.</p>{/if}
   {#if provider === 'curseforge' && s.content_kind !== 'datapacks'}<p class="xs muted" style="margin:-4px 0 12px">Results from CurseForge. CurseForge does not say whether a mod runs on servers, so check the project page.</p>{/if}
   {#if sErr && !hits.length}<States kind="error" text={sErr} retry={() => search(0)} />
   {:else if searching && !hits.length}<div class="grid cols-auto">{#each [1, 2, 3, 4, 5, 6] as _}<div class="skel" style="height:150px"></div>{/each}</div>

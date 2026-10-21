@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+// Hangar provider labelling lives at the bottom of this file.
 import type { ContentFinding, PackDiff, StagingRun } from './api';
 import {
   compareRelease, contentCounts, countFindings, criticalConflicts, findBackupId, groupFindings, isDowngrade, modpackFileProblem,
@@ -155,5 +156,12 @@ describe('staged copies and pack diffs', () => {
     expect(packChangeText(ch('b', '1', '2'))).toBe('1 → 2');
     expect(packChangeText(ch('a', null, '1'))).toBe('1');
     expect(packChangeText(ch('r', '9', null))).toBe('9');
+  });
+});
+
+describe('hangar provider', () => {
+  it('is labelled and linked', () => {
+    expect(sourceBadge({ source: 'moss', provider: 'hangar' }).label).toBe('Hangar');
+    expect(pageUrl({ provider: 'hangar', project_id: 'ViaVersion' })).toContain('hangar.papermc.io');
   });
 });

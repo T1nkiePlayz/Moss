@@ -34,7 +34,7 @@ export interface TimelineEvent { time: string; kind: 'start' | 'ready' | 'stop' 
 export interface FileEntry { name: string; kind: 'dir' | 'file' | 'symlink'; size: number; modified: string }
 export interface FileList { path: string; entries: FileEntry[] }
 export interface FileContent { content: string; size: number; truncated: boolean; binary: boolean }
-export type ProviderId = 'modrinth' | 'curseforge';
+export type ProviderId = 'modrinth' | 'curseforge' | 'hangar';
 export interface ProviderInfo { id: ProviderId; name: string; available: boolean; supported: boolean; reason: string | null }
 export interface Hit {
   project_id: string; slug: string; title: string; description: string; author: string; icon_url: string | null;
@@ -44,7 +44,7 @@ export interface SearchResult { hits: Hit[]; total: number; compat: { kind: Cont
 export interface ProjectVersion {
   id: string; name: string; version_number: string; channel: 'release' | 'beta' | 'alpha'; date: string; downloads: number;
   files: { filename: string; size: number; primary: boolean }[]; game_versions: string[]; loaders: string[];
-  dependencies: { project_id: string; kind: 'required' | 'optional' | 'incompatible' }[]; downloadable?: boolean; warning?: string | null;
+  dependencies: { project_id: string; kind: 'required' | 'optional' | 'incompatible' }[]; downloadable?: boolean; warning?: string | null; external_url?: string | null;
 }
 export interface Project {
   project_id: string; title: string; description: string; body: string; icon_url: string | null;

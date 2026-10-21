@@ -11,7 +11,7 @@ pub(super) async fn build_all(st: &St, s: &Srv, c: &Compat, token: Option<&str>)
     let mut warnings: Vec<String> = found.problems;
     for u in updates {
         let (Some(pid), Some(prov)) = (u["project_id"].as_str(), u["provider"].as_str()) else { continue };
-        let src = Src { prov: if prov == "curseforge" { Prov::Curseforge } else { Prov::Modrinth }, token: token.map(String::from) };
+        let src = Src { prov: Prov::parse(Some(prov)).unwrap_or(Prov::Modrinth), token: token.map(String::from) };
         match build_plan(st, &src, s, c, pid, None).await {
             Ok((new_steps, w)) => {
                 merge_steps(&mut steps, new_steps);

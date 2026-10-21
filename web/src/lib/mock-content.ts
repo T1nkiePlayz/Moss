@@ -10,6 +10,10 @@ export interface Ctx {
   backups: A.Backup[]; content: Record<string, A.ContentItem[]>; emitServer: (s: A.Server) => void;
 }
 const DAY = 86400000;
+
+/** Mock Hangar search results (slugs are the project ids, like the real API). */
+export const hangarHits: A.Hit[] = [['ViaVersion', 'ViaVersion', 'ViaVersion', 'Allow newer clients to join older servers.', 4200000, ['misc']], ['Chunky', 'Chunky', 'pop4959', 'Pre-generates chunks, quickly and efficiently.', 900000, ['world_management']], ['Geyser', 'Geyser', 'GeyserMC', 'Let Bedrock players join Java servers.', 700000, ['misc']]]
+  .map(([project_id, title, author, description, downloads, categories]) => ({ project_id: project_id as string, slug: project_id as string, title: title as string, description: description as string, author: author as string, icon_url: null, downloads: downloads as number, follows: 0, categories: categories as string[], updated: new Date(Date.now() - 4 * DAY).toISOString(), client_side: null, server_side: null }));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Dep = { id: string; required: boolean; range: string | null };
 

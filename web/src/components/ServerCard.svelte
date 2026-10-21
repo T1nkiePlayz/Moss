@@ -3,7 +3,7 @@
   import StatusBadge from './StatusBadge.svelte';
   import PulseStrip from './PulseStrip.svelte';
   import { api, type Server, type TimelineEvent } from '../lib/api';
-  import { duration, pct, bytes } from '../lib/format';
+  import { duration, pct, bytes, runtimeLabel } from '../lib/format';
   import { power } from '../lib/actions';
   import { serverHref } from '../lib/route';
   let { server: s }: { server: Server } = $props();
@@ -26,12 +26,12 @@
   <div class="row between" style="align-items:flex-start">
     <div class="grow">
       <h3 class="ellipsis">{s.name}</h3>
-      <div class="xs muted ellipsis">{s.runtime} {s.game_version} · :{s.port}</div>
+      <div class="xs muted ellipsis">{runtimeLabel(s)} · :{s.port}</div>
     </div>
     <StatusBadge state={s.state} detail={s.state_detail} />
   </div>
   <div class="stats tnum sm">
-    <div title="Players"><Icon name="users" size={14} /><span>{s.players ? `${s.players.online}/${s.players.max}` : '—'}</span></div>
+    <div title="Players"><Icon name="users" size={14} /><span>{s.players ? (s.players.max ? `${s.players.online}/${s.players.max}` : `${s.players.online}`) : '—'}</span></div>
     <div title="Uptime"><Icon name="clock" size={14} /><span>{duration(s.uptime_s)}</span></div>
     <div title="CPU"><Icon name="cpu" size={14} /><span>{pct(s.cpu_pct)}</span></div>
     <div title="Memory"><Icon name="ram" size={14} /><span>{bytes(s.mem_bytes, 1)}</span></div>

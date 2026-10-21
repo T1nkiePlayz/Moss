@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { runtimeLabel } from '../lib/format';
   import Icon from '../components/Icon.svelte';
   import StatusBadge from '../components/StatusBadge.svelte';
   import States from '../components/States.svelte';
@@ -34,7 +35,7 @@
     if (c.includes('files')) t.push({ id: 'files', label: 'Files', icon: 'folder' });
     if (c.includes('properties')) t.push({ id: 'config', label: 'Config', icon: 'sliders' });
     if (c.includes('content') && s.content_kind !== 'none') t.push({ id: 'content', label: kindName[s.content_kind] ?? 'Content', icon: 'puzzle' });
-    if (s.runtime !== 'custom' || s.content_kind !== 'none') t.push({ id: 'upgrade', label: 'Upgrade', icon: 'arrow-up' });
+    if (c.includes('java')) t.push({ id: 'upgrade', label: 'Upgrade', icon: 'arrow-up' });
     if (c.includes('backups')) t.push({ id: 'backups', label: 'Backups', icon: 'archive' });
     if (c.includes('players')) t.push({ id: 'players', label: 'Players', icon: 'users' });
     if (isAdmin()) t.push({ id: 'access', label: 'Access', icon: 'shield' });
@@ -65,7 +66,7 @@
     <div class="row g16" style="min-width:0">
       <div style="min-width:0">
         <div class="row wrap g6"><h1 class="ellipsis">{s.name}</h1><StatusBadge state={s.state} detail={s.state_detail} /></div>
-        <p class="ellipsis">{s.runtime} {s.game_version}{s.loader_version ? ` · loader ${s.loader_version}` : ''} {#if s.capabilities.includes('java')} · Java {s.java_major} · {s.memory_mb} MB{/if}</p>
+        <p class="ellipsis">{runtimeLabel(s)}{s.loader_version ? ` · loader ${s.loader_version}` : ''} {#if s.capabilities.includes('java')} · Java {s.java_major} · {s.memory_mb} MB{/if}</p>
       </div>
     </div>
     <div class="row g6 wrap">

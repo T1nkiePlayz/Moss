@@ -167,12 +167,19 @@ function seedContentFor(s: A.Server) { content[s.id] = seedContent(s); }
 servers.forEach(seedContentFor);
 
 const backups: A.Backup[] = [];
-function seedBackups(s: A.Server, n: number) {
+const gameWorlds: Record<string, string[]> = { valheim: ['Dedicated'], terraria: ['moss'], factorio: ['moss'], cs2: [], bedrock: ['Bedrock level'] };
+const srvNamed = (n: string) => servers.find((x) => x.name === n)!;
+function seedBackups(s: A.Server, n: number, o: { note?: string; size?: number; offset?: number } = {}) {
+  const size = o.size ?? 1.2e9, off = o.offset ?? 3;
   for (let i = 0; i < n; i++)
-    backups.push({ id: uid(), server_id: s.id, created_at: ago((i * 20 + 3) * HOUR), size: (1.2 + Math.sin(i) * 0.1) * 1e9, sha256: [...Array(64)].map(() => '0123456789abcdef'[(Math.random() * 16) | 0]).join(''), status: 'ok', verified_at: i % 2 ? ago(i * 10 * HOUR) : null, note: i === 0 ? 'Before updating plugins' : '', kind: i % 3 === 0 ? 'manual' : i % 3 === 1 ? 'scheduled' : 'pre-change', consistent: i !== 2, files: 1800 + i * 40 });
+    backups.push({ id: uid(), server_id: s.id, created_at: ago((i * 20 + off) * HOUR), size: size * (1 + Math.sin(i) * 0.08), sha256: [...Array(64)].map(() => '0123456789abcdef'[(Math.random() * 16) | 0]).join(''), status: 'ok', verified_at: i % 2 ? ago(i * 10 * HOUR) : null, note: i === 0 ? (o.note ?? 'Before updating plugins') : '', kind: i % 3 === 0 ? 'manual' : i % 3 === 1 ? 'scheduled' : 'pre-change', consistent: i !== 2, files: Math.round(size / 6e5) + i * 40 });
 }
 seedBackups(servers[0], 5);
 seedBackups(servers[2], 2);
+seedBackups(srvNamed('Valheim'), 3, { note: 'Before the Ashlands trip', size: 2.1e8, offset: 1 });
+seedBackups(srvNamed('Terraria'), 2, { note: 'Pre-hardmode', size: 4.4e7, offset: 2 });
+seedBackups(srvNamed('Factorio'), 2, { note: 'Before rocket launch', size: 9.6e7, offset: 4 });
+seedBackups(srvNamed('CS2 Wingman'), 1, { note: 'Server configs', size: 3.1e6, offset: 6 });
 const schedules: A.Schedule[] = [
   { id: uid(), server_id: servers[0].id, kind: 'backup', command: null, every_minutes: null, daily_at: '04:00', tz_offset_min: 0, enabled: true, keep: 7, last_run: ago(20 * HOUR), next_run: new Date(Date.now() + 4 * HOUR).toISOString(), last_status: 'ok' },
   { id: uid(), server_id: servers[0].id, kind: 'command', command: 'say Saving soon', every_minutes: 180, daily_at: null, tz_offset_min: 0, enabled: false, keep: null, last_run: null, next_run: null, last_status: null },
@@ -267,13 +274,39 @@ const chatter = [
   '[%T] [Server thread/ERROR]: Could not pass event PlayerMoveEvent to Essentials\n',
   '[%T] [Server thread/DEBUG]: Saving chunk 12,-4',
 ];
+const gameChatter: Record<string, string[]> = {
+  cs2: [
+    'L %D - %T: "s1mple_fan<3><[U:1:1001]><CT>" killed "rush_b<5><[U:1:1003]><TERRORIST>" with "awp" (headshot)',
+    'L %D - %T: World triggered "Round_Start"',
+    'L %D - %T: "AWPer<4><[U:1:1002]><CT>" say "nice shot"',
+    'L %D - %T: Team "CT" scored "7" with "3" players',
+    'L %D - %T: "eco_king<6><[U:1:1004]><TERRORIST>" purchased "deagle"',
+    'L %D - %T: World triggered "Round_End"',
+    'L %D - %T: "smoke_me<7><[U:1:1005]><TERRORIST>" threw smokegrenade [-512 1120 64]',
+    'L %D - %T: Started map "de_dust2" (CRC "-1846721")',
+  ],
+  terraria: ['Guide has joined.', '<Dryad_fan> anyone seen the Eye of Cthulhu?', 'Saving world data: 100%', 'Validating world save: 100%', 'Backing up world file', 'Eye of Cthulhu has awoken!', 'Eye of Cthulhu has been defeated!'],
+  valheim: [
+    '%D %T: Got connection SteamID 76561198000000001',
+    '%D %T: Got character ZDOID from Ragnar : -2147384112:1',
+    '%D %T: World saved ( 412.218ms )',
+    '%D %T: Connections 4 ZDOS:184211  sent:42 recv:388',
+    '%D %T: Random event set:army_eikthyr',
+    '%D %T: Player connection lost server "Bjorn" that has join code 0',
+  ],
+  factorio: ['%T [JOIN] engineer42 joined the game', '%T [CHAT] engineer42: the iron belt is starved again', '%T Saving to _autosave3 (non-blocking).', '%T Saving finished', '%T [CHAT] engineer42: launching the first rocket'],
+  bedrock: ['[%D %T:000 INFO] Player connected: Steve_BE, xuid: 2535400000000001', '[%D %T:000 INFO] Running AutoCompaction...', '[%D %T:000 INFO] Player disconnected: Steve_BE, xuid: 2535400000000001'],
+};
 const T = () => new Date().toLocaleTimeString('en-GB');
-const bl = (_s: A.Server) => [...Array(60)].map((_, i) => chatter[i % chatter.length].replace('%T', T()).trimEnd());
+const D = () => new Date().toISOString().slice(0, 10);
+const linesFor = (s: A.Server) => gameChatter[s.runtime] ?? chatter;
+const fill = (l: string) => l.replace('%D', D()).replace('%T', T()).trimEnd();
+const bl = (s: A.Server) => { const c = linesFor(s); return [...Array(60)].map((_, i) => fill(c[i % c.length])); };
 export function openConsole(id: string, h: { onOpen(): void; onClose(): void; onMsg(m: A.ConsoleMsg): void }): A.ConsoleSocket {
   const s = sv(id);
   setTimeout(h.onOpen, 150);
   const iv = setInterval(() => {
-    if (s.state === 'running' && Math.random() < 0.7) h.onMsg({ t: 'line', d: chatter[(Math.random() * chatter.length) | 0].replace('%T', T()).trimEnd() });
+    if (s.state === 'running' && Math.random() < 0.7) { const c = linesFor(s); h.onMsg({ t: 'line', d: fill(c[(Math.random() * c.length) | 0]) }); }
   }, 1200);
   let last = s.state;
   const off = { op: () => {}, activity: () => {}, onOpen() {}, onError() {}, server: (x: A.Server) => { if (x.id === id && x.state !== last) { last = x.state; h.onMsg({ t: 'state', d: x.state }); } } };
@@ -451,7 +484,7 @@ const normalize = () => {
   servers.forEach(ensureIsolation);
   seedRemote(backups);
   backups.forEach((b, i) => {
-    b.worlds ??= worldSets[b.server_id] ??= b.server_id !== servers[3].id ? ['world', 'world_nether', 'world_the_end'] : ['world'];
+    b.worlds ??= worldSets[b.server_id] ??= gameWorlds[sv(b.server_id).runtime] ?? ['world', 'world_nether', 'world_the_end'];
     b.locked ??= i === 1;
   });
   schedules.forEach((x) => { x.tz ??= offsetName(x.tz_offset_min); });

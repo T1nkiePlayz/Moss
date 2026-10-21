@@ -81,7 +81,7 @@
     </div>
     <div class="facts">
       <div><span class="muted xs">Address</span><button class="btn ghost sm copy mono" onclick={copy} aria-label="Copy address {addr}">{addr}<Icon name="copy" size={13} /></button></div>
-      <div><span class="muted xs">Players</span><b class="tnum">{s.players ? `${s.players.online} / ${s.players.max}` : '—'}</b></div>
+      <div><span class="muted xs">Players</span><b class="tnum">{s.players ? (s.players.max ? `${s.players.online} / ${s.players.max}` : `${s.players.online}`) : '—'}</b></div>
       <div><span class="muted xs">CPU</span><b class="tnum">{pct(s.cpu_pct)}</b></div>
       <div><span class="muted xs">Memory</span><b class="tnum">{bytes(s.mem_bytes)}{#if s.capabilities.includes('java')} <span class="faint">/ {s.memory_mb} MB</span>{/if}</b></div>
     </div>

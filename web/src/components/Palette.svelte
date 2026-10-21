@@ -7,7 +7,7 @@
   import { power, backupNow, consequence } from '../lib/actions';
   import { can } from '../lib/auth.svelte';
   import { api } from '../lib/api';
-  import { relTime } from '../lib/format';
+  import { relTime, runtimeLabel } from '../lib/format';
 
   interface Item { id: string; title: string; hint: string; icon: string; group: string; run: () => void | Promise<void>; kw?: string }
   let q = $state('');
@@ -30,7 +30,7 @@
     ];
     for (const s of servers.list) {
       const g = s.name;
-      out.push({ id: `s-${s.id}`, title: s.name, hint: `${s.runtime} ${s.game_version} · ${s.state}`, icon: 'cube', group: 'Servers', run: () => navigate(serverHref(s.id)) });
+      out.push({ id: `s-${s.id}`, title: s.name, hint: `${runtimeLabel(s)} · ${s.state}`, icon: 'cube', group: 'Servers', run: () => navigate(serverHref(s.id)) });
       const on = s.state === 'running' || s.state === 'starting';
       if (can('server.power')) {
         if (!on) out.push({ id: `a-start-${s.id}`, title: `Start ${g}`, hint: consequence.start, icon: 'play', group: 'Actions', kw: 'start run boot', run: () => void power(s, 'start') });

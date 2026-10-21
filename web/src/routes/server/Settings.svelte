@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { runtimeLabel } from '../../lib/format';
   import Icon from '../../components/Icon.svelte';
   import LimitsForm from '../../components/LimitsForm.svelte';
   import IsolationForm from '../../components/IsolationForm.svelte';
@@ -79,7 +80,7 @@
   <section class="card" style="grid-column:1/-1">
     <div class="card-title">Runtime</div>
     <dl class="rt">
-      <div><dt>Runtime</dt><dd>{s.runtime} {s.game_version}{s.loader_version ? ` (loader ${s.loader_version})` : ''}</dd></div>
+      <div><dt>Runtime</dt><dd>{runtimeLabel(s)}{s.loader_version ? ` (loader ${s.loader_version})` : ''}</dd></div>
       {#if s.capabilities.includes('java')}<div><dt>Java</dt><dd>Java {s.java_major}</dd></div>{/if}
       <div><dt>Process</dt><dd class="tnum">{s.pid ? `PID ${s.pid}` : 'not running'}</dd></div>
       {#if s.capabilities.includes('eula')}<div><dt>EULA</dt><dd>{s.eula_accepted ? 'Accepted' : 'Not accepted'}</dd></div>{/if}

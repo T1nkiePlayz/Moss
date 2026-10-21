@@ -6,7 +6,7 @@
   import SavedViews from '../components/SavedViews.svelte';
   import { servers, prefs, setPref, refreshServers } from '../lib/stores.svelte';
   import { power } from '../lib/actions';
-  import { duration, pct, bytes } from '../lib/format';
+  import { duration, pct, bytes, runtimeLabel } from '../lib/format';
   import { serverHref } from '../lib/route';
   import type { Server, ServerState } from '../lib/api';
 
@@ -65,8 +65,8 @@
           <tr>
             <td><a href={serverHref(s.id)} onclick={(e) => e.stopPropagation()}><b>{s.name}</b></a></td>
             <td><StatusBadge state={s.state} detail={s.state_detail} /></td>
-            <td class="muted">{s.runtime} {s.game_version}</td>
-            <td class="num">{s.players ? `${s.players.online}/${s.players.max}` : '—'}</td>
+            <td class="muted">{runtimeLabel(s)}</td>
+            <td class="num">{s.players ? (s.players.max ? `${s.players.online}/${s.players.max}` : `${s.players.online}`) : '—'}</td>
             <td class="num">{pct(s.cpu_pct)}</td>
             <td class="num">{bytes(s.mem_bytes)}</td>
             <td class="num">{duration(s.uptime_s)}</td>

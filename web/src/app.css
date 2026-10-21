@@ -151,6 +151,7 @@ input[type='range'] { width: 100%; accent-color: var(--a2); height: 22px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 99px; background: transparent; border: 1px solid var(--line2); color: var(--muted); font-size: var(--fs-sm); cursor: pointer; transition: all var(--t); }
 .chip:hover { color: var(--text); border-color: var(--faint); }
 .chip[aria-pressed='true'] { background: var(--a-soft); color: var(--a-text); border-color: color-mix(in srgb, var(--a2), transparent 55%); }
+.chip[aria-pressed='true'] .faint { color: inherit; }
 .tag { font-size: var(--fs-xs); color: var(--muted); background: var(--s3); padding: 1px 8px; border-radius: 6px; }
 kbd { background: var(--s3); border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 6px; padding: 0 6px; font-size: 11px; color: var(--muted); }
 

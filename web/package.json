@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:ui": "playwright test",
     "test:visual": "playwright test -c playwright.visual.config.ts",
-    "test:visual:update": "playwright test -c playwright.visual.config.ts --update-snapshots"
+    "test:visual:update": "playwright test -c playwright.visual.config.ts --update-snapshots",
+    "screenshots": "playwright test -c playwright.readme.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

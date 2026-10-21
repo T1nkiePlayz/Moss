@@ -45,8 +45,9 @@ async fn modrinth_malformed_json_is_not_a_crash() {
 #[tokio::test]
 async fn modrinth_timeouts_and_unreachable_hosts_fail_fast_with_a_message() {
     let s = stub(|_, _| Reply::Hang).await;
+    let st = mr_state(&s.base).await; // set up outside the timed part: opening the database can be slow under load
     let t = Instant::now();
-    let e = mr(&mr_state(&s.base).await, "/project/abc", &[]).await.unwrap_err();
+    let e = mr(&st, "/project/abc", &[]).await.unwrap_err();
     assert!(err_text(&e).contains("did not answer in time") && t.elapsed() < Duration::from_secs(5), "{}", err_text(&e));
     // nothing listens on this port any more
     let dead = { let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); format!("http://{}", l.local_addr().unwrap()) };

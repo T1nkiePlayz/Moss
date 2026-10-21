@@ -155,7 +155,12 @@ fn rust(l: &Launch) -> Result<Vec<String>, String> {
     Ok(v)
 }
 
-fn palworld(l: &Launch) -> Result<Vec<String>, String> { Ok(vec!["./PalServer.sh".into(), format!("-port={}", l.port), format!("-players={}", l.max_players)]) }
+/// `-players` only when moss-game.cfg sets `max_players`; otherwise ServerPlayerMaxNum in PalWorldSettings.ini (Config tab) applies.
+fn palworld(l: &Launch) -> Result<Vec<String>, String> {
+    let mut v = vec!["./PalServer.sh".into(), format!("-port={}", l.port)];
+    if l.get("max_players").is_some() { v.push(format!("-players={}", l.max_players)); }
+    Ok(v)
+}
 
 fn zomboid(l: &Launch) -> Result<Vec<String>, String> {
     let pw = l.get("password").ok_or_else(|| format!("{SETTINGS_FILE} needs an admin password (Project Zomboid asks for one on first start)"))?;
@@ -421,7 +426,7 @@ mod tests {
         assert_eq!(argv("cs2", 27015, &[])[0], "./game/bin/linuxsteamrt64/cs2");
         let r = argv("rust", 28015, &[]);
         assert!(r.windows(2).any(|w| w == ["+server.port", "28015"]) && r.windows(2).any(|w| w == ["+server.queryport", "28016"]));
-        assert_eq!(argv("palworld", 8211, &[]), ["./PalServer.sh", "-port=8211", "-players=32"]);
+        assert_eq!(argv("palworld", 8211, &[]), ["./PalServer.sh", "-port=8211"]);
         assert_eq!(argv("zomboid", 16261, &[("password", "pw12345")]), ["./start-server.sh", "-servername", "moss", "-adminpassword", "pw12345", "-port", "16261"]);
         assert_eq!(argv("satisfactory", 7777, &[]), ["./FactoryServer.sh", "-Port=7777"]);
     }

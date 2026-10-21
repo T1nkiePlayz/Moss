@@ -116,3 +116,16 @@ describe('container isolation text', () => {
     expect(imageHint('ghcr.io/me/java:21 --privileged')).toContain('spaces');
   });
 });
+
+import { gravatarUrl, sha256Hex } from './gravatar';
+describe('gravatar', () => {
+  it('hashes with SHA-256', () => {
+    expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(sha256Hex('a'.repeat(1000))).toBe('41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3');
+  });
+  it('normalises the email and asks for the default image', () => {
+    expect(gravatarUrl('  MyEmailAddress@example.com ')).toBe(gravatarUrl('myemailaddress@example.com'));
+    expect(gravatarUrl('a@b.c')).toMatch(/^https:\/\/gravatar\.com\/avatar\/[0-9a-f]{64}\?s=64&d=mp$/);
+  });
+});

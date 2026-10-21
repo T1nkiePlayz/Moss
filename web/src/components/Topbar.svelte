@@ -6,6 +6,10 @@
   import { serverById, ui, activeOps, prefs, setPref, cycleTheme } from '../lib/stores.svelte';
   import { auth, signOut } from '../lib/auth.svelte';
   import { initials } from '../lib/format';
+  import { gravatarUrl } from '../lib/gravatar';
+
+  // Falls back to initials when Gravatar cannot be reached (offline, blocked).
+  let avatarFailed = $state(false);
 
   const crumbs = $derived.by(() => {
     const r = router.route;
@@ -58,7 +62,7 @@
     <Icon name={dark ? 'sun' : 'moon'} />
   </button>
   <div class="um" bind:this={menu}>
-    <button class="av" onclick={() => (ui.userMenu = !ui.userMenu)} aria-haspopup="menu" aria-expanded={ui.userMenu} aria-label="User menu">{initials(auth.email || 'dev')}</button>
+    <button class="av" onclick={() => (ui.userMenu = !ui.userMenu)} aria-haspopup="menu" aria-expanded={ui.userMenu} aria-label="User menu">{#if auth.email && !avatarFailed}<img src={gravatarUrl(auth.email)} alt="" width="32" height="32" referrerpolicy="no-referrer" onerror={() => (avatarFailed = true)} />{:else}{initials(auth.email || 'dev')}{/if}</button>
     {#if ui.userMenu}
       <div class="pop" role="menu">
         <div class="who"><div class="ellipsis"><b>{auth.email || 'Local session'}</b></div><div class="xs muted">{auth.me?.role ?? 'owner'}{auth.config?.mode === 'dev' ? ' · dev mode' : ''}</div></div>
@@ -84,7 +88,8 @@
   .ops { position: relative; }
   .badge-n { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--a1); color: var(--a-ink); font-size: 10px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); animation: pulse 2.2s infinite; }
   .um { position: relative; }
-  .av { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line2); background: linear-gradient(135deg, var(--s3), var(--s2)); color: var(--a-text); font-weight: 700; font-size: 12px; cursor: pointer; }
+  .av { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line2); background: linear-gradient(135deg, var(--s3), var(--s2)); color: var(--a-text); font-weight: 700; font-size: 12px; cursor: pointer; padding: 0; overflow: hidden; }
+  .av img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .pop { position: absolute; right: 0; top: 40px; width: 240px; padding: 6px; background: var(--s2); border: 1px solid var(--line2); border-radius: var(--r); box-shadow: 0 16px 40px rgb(0 0 0 / .45); animation: rise .14s var(--ease); z-index: 5; }
   .who { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
   .mi { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border: 0; background: none; border-radius: 8px; color: var(--text); cursor: pointer; font-size: var(--fs-sm); }

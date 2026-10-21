@@ -116,14 +116,25 @@ impl Limiter {
     }
 }
 
-/// Remembers when a workflow last acted on a server, so the events those actions cause cannot trigger workflows again.
+/// A run that never reports back (a crashed task) stops suppressing after this long.
+const STUCK: Duration = Duration::from_secs(6 * 3600);
+
+/// Remembers, per (workflow, server), when that workflow is acting or last acted on the server, so the events its own
+/// actions cause cannot trigger it again. Other workflows still receive those events.
 #[derive(Default)]
-pub struct LoopGuard { acted: HashMap<String, Instant> }
+pub struct LoopGuard { acted: HashMap<(String, String), (Instant, Option<Instant>)> }
 
 impl LoopGuard {
-    pub fn mark(&mut self, server_id: &str, now: Instant) {
-        if self.acted.len() > 1000 { self.acted.retain(|_, t| now.duration_since(*t) < LOOP_WINDOW); }
-        self.acted.insert(server_id.to_string(), now);
+    /// The workflow starts acting on the server: suppressed until it finishes plus `LOOP_WINDOW`.
+    pub fn begin(&mut self, workflow_id: &str, server_id: &str, now: Instant) {
+        if self.acted.len() > 1000 { self.acted.retain(|_, (b, e)| match e { Some(e) => now.duration_since(*e) < LOOP_WINDOW, None => now.duration_since(*b) < STUCK }); }
+        self.acted.insert((workflow_id.to_string(), server_id.to_string()), (now, None));
     }
-    pub fn suppressed(&self, server_id: &str, now: Instant) -> bool { self.acted.get(server_id).is_some_and(|t| now.duration_since(*t) < LOOP_WINDOW) }
+    /// The workflow's run is over; the window counts from now.
+    pub fn finish(&mut self, workflow_id: &str, server_id: &str, now: Instant) {
+        if let Some(e) = self.acted.get_mut(&(workflow_id.to_string(), server_id.to_string())) { e.1 = Some(now); }
+    }
+    pub fn suppressed(&self, workflow_id: &str, server_id: &str, now: Instant) -> bool {
+        self.acted.get(&(workflow_id.to_string(), server_id.to_string())).is_some_and(|(b, e)| match e { Some(e) => now.duration_since(*e) < LOOP_WINDOW, None => now.duration_since(*b) < STUCK })
+    }
 }

@@ -226,3 +226,15 @@ async fn hangar_failures_are_not_cached() {
     assert!(hg(&st, "/projects/a", &[]).await.is_err());
     assert_eq!(hg(&st, "/projects/a", &[]).await.unwrap()["name"], "ok");
 }
+
+#[test]
+fn only_hangars_own_hosts_are_downloadable() {
+    let v = |url: &str| json!({"downloads": {"PAPER": {"fileInfo": {"name": "P.jar", "sizeBytes": 1, "sha256Hash": "ab".repeat(32)}, "downloadUrl": url}}});
+    assert!(hg_file(&v("https://hangarcdn.papermc.io/plugins/a.jar"), "PAPER").is_some());
+    assert!(hg_file(&v("https://hangar.papermc.io/api/v1/projects/a/versions/1/PAPER/download"), "PAPER").is_some());
+    for bad in ["https://evil.example.com/a.jar", "https://hangarcdn.papermc.io.evil.io/a.jar", "https://evil.io/@hangarcdn.papermc.io/a.jar", "https://hangarcdn.papermc.io@evil.io/a.jar",
+        "https://cdn.papermc.io/a.jar", "http://hangarcdn.papermc.io/a.jar", "https://hangarcdn.papermc.io:8443/a.jar"] {
+        assert!(hg_file(&v(bad), "PAPER").is_none(), "{bad}");
+    }
+    assert_eq!(hg_map_version(&v("https://evil.example.com/a.jar"), "PAPER")["downloadable"], json!(false));
+}

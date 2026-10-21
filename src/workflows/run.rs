@@ -1,6 +1,6 @@
 //! Running workflows: matching events to workflows, the safety checks (loop guard, rate limit, creator permissions),
 //! sequential execution of actions, run records, and the dry run that reports what would happen.
-use super::{Action, KEEP_RUNS, MAX_WAIT_S, Workflow, eval::{self, LoopGuard, Limiter}};
+use super::{Action, KEEP_RUNS, MAX_TOTAL_WAIT_S, MAX_WAIT_S, Workflow, eval::{self, LoopGuard, Limiter}};
 use crate::{auth::{User, authz}, lifecycle, ops, server, state::St, webhooks::{self, Ev, EVENT_TYPES}};
 use serde_json::{Value, json};
 use std::{sync::{LazyLock, Mutex}, time::Instant};
@@ -10,7 +10,14 @@ struct Engine { limiter: Limiter, guard: LoopGuard }
 static ENGINE: LazyLock<Mutex<Engine>> = LazyLock::new(Default::default);
 
 fn engine<T>(f: impl FnOnce(&mut Engine) -> T) -> T { f(&mut ENGINE.lock().unwrap_or_else(|p| p.into_inner())) }
-fn mark(server_id: &str) { engine(|e| e.guard.mark(server_id, Instant::now())); }
+/// What one run has done so far: total time waited and the servers it acted on (for the loop guard).
+#[derive(Default)]
+struct RunState { waited: u64, touched: Vec<String> }
+
+fn begin(wf: &Workflow, rs: &mut RunState, server_id: &str) {
+    engine(|e| e.guard.begin(&wf.id, server_id, Instant::now()));
+    if !rs.touched.iter().any(|s| s == server_id) { rs.touched.push(server_id.to_string()); }
+}
 
 /// The account a workflow runs as, as it is now (`None` when deleted).
 pub async fn load_user(st: &St, id: &str) -> Option<User> {
@@ -67,7 +74,8 @@ pub async fn handle(st: &St, ev: &Ev) {
     let wfs = match super::list(st).await { Ok(l) => l, Err(e) => { tracing::warn!("workflows: could not read workflows: {e:#}"); return; } };
     let sid = ev.server.as_ref().map(|s| s.0.as_str());
     for wf in wfs.into_iter().filter(|w| w.enabled && w.trigger == ev.kind && w.covers(sid)) {
-        if let Some(s) = sid && engine(|e| e.guard.suppressed(s, Instant::now())) { tracing::debug!("workflows: {} skipped, {} was just changed by a workflow", wf.name, s); continue; }
+        if let Some(s) = sid && engine(|e| e.guard.suppressed(&wf.id, s, Instant::now())) { tracing::debug!("workflows: {} skipped, it just changed {}", wf.name, s); continue; }
+        if !creator_can_see(st, &wf, sid).await { continue; }
         if !eval::condition_holds(wf.condition.as_ref(), ev) { continue; }
         if !engine(|e| e.limiter.allow(&wf.id, Instant::now())) {
             let msg = format!("skipped: rate limit ({} runs per {} minutes)", eval::RATE_MAX, eval::RATE_WINDOW.as_secs() / 60);
@@ -79,10 +87,20 @@ pub async fn handle(st: &St, ev: &Ev) {
     }
 }
 
+/// "All servers" means the servers the creator can currently view: events about others are skipped without a trace.
+/// (A deleted creator still passes, so the run can disable the workflow with a reason that names no server.)
+async fn creator_can_see(st: &St, wf: &Workflow, sid: Option<&str>) -> bool {
+    let Some(s) = sid.filter(|_| wf.server_ids.is_empty()) else { return true };
+    match load_user(st, &wf.created_by).await { Some(u) => authz(st, &u, s, "server.view").await.is_ok(), None => true }
+}
+
 /// Run one workflow for one event and record the result.
 pub async fn run_one(st: St, wf: Workflow, ev: Ev) {
-    let mut log = vec![];
-    let res = execute(&st, &wf, &ev, &mut log).await;
+    if !creator_can_see(&st, &wf, ev.server.as_ref().map(|s| s.0.as_str())).await { return; }
+    let (mut log, mut rs) = (vec![], RunState::default());
+    let res = execute(&st, &wf, &ev, &mut log, &mut rs).await;
+    let now = Instant::now();
+    engine(|e| for s in &rs.touched { e.guard.finish(&wf.id, s, now); });
     if let Err(e) = &res { log.push(format!("failed: {e}")); }
     record(&st, &wf, &ev, res.is_ok(), &log, false).await;
 }
@@ -105,7 +123,7 @@ async fn record(st: &St, wf: &Workflow, ev: &Ev, ok: bool, log: &[String], skipp
     }).await;
 }
 
-async fn execute(st: &St, wf: &Workflow, ev: &Ev, log: &mut Vec<String>) -> Result<(), String> {
+async fn execute(st: &St, wf: &Workflow, ev: &Ev, log: &mut Vec<String>, rs: &mut RunState) -> Result<(), String> {
     let trigger_servers: Vec<String> = ev.server.iter().map(|s| s.0.clone()).collect();
     let Some(user) = load_user(st, &wf.created_by).await else {
         disable(st, wf, "The account that created this workflow no longer exists.").await;
@@ -116,8 +134,21 @@ async fn execute(st: &St, wf: &Workflow, ev: &Ev, log: &mut Vec<String>) -> Resu
         return Err(format!("creator lost access ({p}); workflow disabled"));
     }
     for (i, a) in wf.actions.iter().enumerate() {
-        if i > 0 && !super::get(st, &wf.id).await.ok().flatten().is_some_and(|w| w.enabled) { return Err("stopped: the workflow was disabled or deleted".into()); }
-        let line = exec_one(st, wf, ev, &user, a).await.map_err(|e| format!("step {} ({}): {e}", i + 1, a.label()))?;
+        let mut user = user.clone();
+        if i > 0 {
+            if !super::get(st, &wf.id).await.ok().flatten().is_some_and(|w| w.enabled) { return Err("stopped: the workflow was disabled or deleted".into()); }
+            // rights can change during a wait or a long step: look at them again before every step
+            let Some(now_user) = load_user(st, &wf.created_by).await else {
+                disable(st, wf, "The account that created this workflow no longer exists.").await;
+                return Err("creator no longer exists; workflow disabled".into());
+            };
+            if let Some(p) = permission_problem(st, &now_user, std::slice::from_ref(a), &trigger_servers).await {
+                disable(st, wf, &format!("The creator no longer has the access this workflow needs: {p}")).await;
+                return Err(format!("creator lost access ({p}); workflow disabled"));
+            }
+            user = now_user;
+        }
+        let line = exec_one(st, wf, ev, &user, a, rs).await.map_err(|e| format!("step {} ({}): {e}", i + 1, a.label()))?;
         log.push(format!("step {} ok: {line}", i + 1));
     }
     Ok(())
@@ -128,43 +159,50 @@ async fn target(st: &St, ev: &Ev, t: &str) -> Result<server::Srv, String> {
     server::get(st, &id).await.map_err(|_| "server not found".to_string())
 }
 
-async fn exec_one(st: &St, wf: &Workflow, ev: &Ev, user: &User, a: &Action) -> Result<String, String> {
+async fn exec_one(st: &St, wf: &Workflow, ev: &Ev, user: &User, a: &Action, rs: &mut RunState) -> Result<String, String> {
     let actor = format!("workflow:{}", wf.id);
     match a {
         Action::Start { server } | Action::Stop { server } | Action::Restart { server } => {
             let s = target(st, ev, server).await?;
-            mark(&s.id);
+            begin(wf, rs, &s.id);
             let (r, word) = match a { Action::Start { .. } => (lifecycle::start(st, &s, &actor).await, "started"), Action::Stop { .. } => (lifecycle::stop(st, &s, &actor).await, "stopping"), _ => (lifecycle::restart(st, &s, &actor).await, "restarting") };
-            mark(&s.id);
             r.map(|_| format!("{word} {}", s.name)).map_err(|e| e.message)
         }
         Action::Command { server, command } => {
             let s = target(st, ev, server).await?;
             let cmd = eval::substitute(command, ev);
-            mark(&s.id);
+            begin(wf, rs, &s.id);
             lifecycle::send_command(st, &s, &cmd).await.map_err(|e| e.message)?;
             st.audit_command(&actor, &s.name, &cmd, &s.id).await;
             Ok(format!("sent a command to {}", s.name))
         }
         Action::Backup { server } => {
             let s = target(st, ev, server).await?;
-            mark(&s.id);
+            begin(wf, rs, &s.id);
             let (s2, note) = (s.clone(), format!("Workflow: {}", wf.name));
             let op = ops::spawn_op(st, "backup.create", format!("Workflow backup of {}", s.name), Some(&s.id), true, move |ctx| async move { let st = ctx.st.clone(); crate::backups::do_backup(&ctx, &st, &s2, "scheduled", &note, None).await.map(|_| ()) });
             let end = Instant::now() + std::time::Duration::from_secs(4 * 3600);
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 let Some(o) = ops::get(st, &op.id) else { break };
-                match o.state.as_str() { "completed" => break, "failed" | "cancelled" => { mark(&s.id); return Err(o.error.unwrap_or_else(|| format!("backup {}", o.state))); } _ => {} }
+                match o.state.as_str() { "completed" => break, "failed" | "cancelled" => { return Err(o.error.unwrap_or_else(|| format!("backup {}", o.state))); } _ => {} }
                 if Instant::now() > end { return Err("the backup is taking too long".into()); }
             }
-            mark(&s.id);
             Ok(format!("backed up {}", s.name))
         }
-        Action::Wait { seconds } => { tokio::time::sleep(std::time::Duration::from_secs((*seconds).min(MAX_WAIT_S))).await; Ok(format!("waited {seconds}s")) }
+        Action::Wait { seconds } => {
+            let secs = (*seconds).min(MAX_WAIT_S);
+            if rs.waited + secs > MAX_TOTAL_WAIT_S { return Err(format!("this run would wait more than {} minutes in total", MAX_TOTAL_WAIT_S / 60)); }
+            rs.waited += secs;
+            tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+            Ok(format!("waited {seconds}s"))
+        }
         Action::Notify { title, body } => {
+            // Anyone with the right permissions can write a workflow, so say whose it is: no spoofed system notices.
+            let who = if user.email.is_empty() { user.id.clone() } else { user.email.clone() };
+            let title = format!("Workflow \u{201c}{}\u{201d} ({who}): {}", wf.name, eval::substitute(title, ev));
             let n = json!({"id": uuid::Uuid::now_v7().to_string(), "time": crate::db::now(), "kind": "workflow", "severity": "info",
-                "title": eval::substitute(title, ev).chars().take(200).collect::<String>(), "body": eval::substitute(body, ev).chars().take(1000).collect::<String>(),
+                "title": title.chars().take(120).collect::<String>(), "body": eval::substitute(body, ev).chars().take(1000).collect::<String>(),
                 "server_id": ev.server.as_ref().map(|s| s.0.clone()), "read": false});
             let n2 = n.clone();
             st.db.call(move |c| c.execute("INSERT INTO notifications(id,time,kind,severity,title,body,server_id) VALUES (?,?,?,?,?,?,?)",
@@ -208,6 +246,7 @@ async fn post_json(st: &St, url: &str, payload: &Value) -> Result<(), String> {
 pub async fn plan(st: &St, wf: &Workflow, ev: &Ev) -> Value {
     let sid = ev.server.as_ref().map(|s| s.0.as_str());
     let user = load_user(st, &wf.created_by).await;
+    let viewable = |id: String| { let user = user.clone(); async move { match &user { Some(u) => authz(st, u, &id, "server.view").await.is_ok(), None => false } } };
     let trigger_ok = wf.trigger == ev.kind && wf.covers(sid);
     let cond_ok = eval::condition_holds(wf.condition.as_ref(), ev);
     let mut steps = vec![];
@@ -218,8 +257,9 @@ pub async fn plan(st: &St, wf: &Workflow, ev: &Ev) -> Value {
                 match id {
                     None => (None, Some("the event has no server".to_string())),
                     Some(id) => {
-                        let name = server::get(st, &id).await.ok().map(|s| s.name);
-                        let p = match (&user, &name) {
+                        let exists = server::get(st, &id).await.ok();
+                        let name = match &exists { Some(s) if viewable(id.clone()).await => Some(s.name.clone()), _ => None };
+                        let p = match (&user, &exists) {
                             (_, None) => Some("server not found".to_string()),
                             (None, _) => Some("the workflow's creator no longer exists".to_string()),
                             (Some(u), _) => authz(st, u, &id, perm).await.err().map(|e| e.message),
@@ -247,4 +287,4 @@ pub async fn plan(st: &St, wf: &Workflow, ev: &Ev) -> Value {
 }
 
 #[cfg(test)]
-pub fn mark_for_test(server_id: &str) { mark(server_id); }
+pub fn mark_for_test(workflow_id: &str, server_id: &str) { engine(|e| { let now = Instant::now(); e.guard.begin(workflow_id, server_id, now); e.guard.finish(workflow_id, server_id, now); }); }

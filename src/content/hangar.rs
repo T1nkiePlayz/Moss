@@ -49,10 +49,19 @@ pub(super) fn channel(v: &Value) -> &'static str {
     match v["channel"]["name"].as_str().unwrap_or_default().to_ascii_lowercase().as_str() { "release" => "release", "snapshot" | "beta" => "beta", _ => "alpha" }
 }
 
+/// Hangar's own download hosts. The checksum comes from the same API answer as the address, so it cannot vouch for a
+/// file served by anyone else.
+const DOWNLOAD_HOSTS: &[&str] = &["hangarcdn.papermc.io", "hangar.papermc.io"];
+
+/// An https address on exactly one of Hangar's download hosts (no credentials, default port).
+pub(super) fn hangar_host(u: &str) -> bool {
+    reqwest::Url::parse(u).is_ok_and(|u| u.scheme() == "https" && u.username().is_empty() && u.password().is_none() && u.port().is_none() && u.host_str().is_some_and(|h| DOWNLOAD_HOSTS.contains(&h)))
+}
+
 /// The hosted file of a version for a platform, ready for the plan: `None` when the version only links elsewhere.
 pub(super) fn hg_file(v: &Value, platform: &str) -> Option<Value> {
     let d = &v["downloads"][platform];
-    let (url, info) = (d["downloadUrl"].as_str().filter(|u| u.starts_with("https://"))?, d["fileInfo"].as_object()?);
+    let (url, info) = (d["downloadUrl"].as_str().filter(|u| hangar_host(u))?, d["fileInfo"].as_object()?);
     let name = info.get("name")?.as_str()?;
     Some(json!({"filename": name, "size": info.get("sizeBytes"), "url": url, "hashes": {"sha256": info.get("sha256Hash").and_then(Value::as_str)}}))
 }

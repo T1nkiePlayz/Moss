@@ -63,11 +63,17 @@ fn rate_limit_allows_ten_runs_per_ten_minutes() {
 #[test]
 fn events_right_after_a_workflow_acted_are_suppressed() {
     let (mut g, t0) = (LoopGuard::default(), Instant::now());
-    assert!(!g.suppressed("s1", t0));
-    g.mark("s1", t0);
-    assert!(g.suppressed("s1", t0 + Duration::from_secs(5)));
-    assert!(!g.suppressed("s2", t0 + Duration::from_secs(5)), "only the server acted on");
-    assert!(!g.suppressed("s1", t0 + LOOP_WINDOW + Duration::from_secs(1)));
+    assert!(!g.suppressed("w1", "s1", t0));
+    g.begin("w1", "s1", t0);
+    assert!(g.suppressed("w1", "s1", t0 + Duration::from_secs(5)));
+    assert!(!g.suppressed("w1", "s2", t0 + Duration::from_secs(5)), "only the server acted on");
+    assert!(!g.suppressed("w2", "s1", t0 + Duration::from_secs(5)), "only the acting workflow is suppressed");
+    // a long run keeps suppressing while it is running; the window starts when it finishes
+    let late = t0 + Duration::from_secs(1000);
+    assert!(g.suppressed("w1", "s1", late), "still running");
+    g.finish("w1", "s1", late);
+    assert!(g.suppressed("w1", "s1", late + Duration::from_secs(100)));
+    assert!(!g.suppressed("w1", "s1", late + LOOP_WINDOW + Duration::from_secs(1)));
 }
 
 #[test]
@@ -172,7 +178,7 @@ async fn matching_events_run_actions_and_loops_and_floods_are_stopped() {
     assert_eq!(workflows::runs(&st, &w.id).await.unwrap().len(), 1, "only the matching event ran");
     assert_eq!(r[0]["ok"], json!(true));
     let n: String = st.db.call(|c| c.query_row("SELECT title FROM notifications WHERE kind='workflow'", [], |r| r.get(0))).await.unwrap();
-    assert_eq!(n, "hello Steve");
+    assert_eq!(n, "Workflow \u{201c}t\u{201d} (adm@x.test): hello Steve", "attributed to the workflow and its creator");
 
     // loop protection: a workflow just acted on L2, so events about L2 trigger nothing
     let w2 = wf("adm", "player.joined", &["L2"], note("loop"));
@@ -180,8 +186,12 @@ async fn matching_events_run_actions_and_loops_and_floods_are_stopped() {
     run::handle(&st, &on("L2", "srv-L2", 1)).await;
     assert_eq!(wait_runs(&st, &w2.id, 1).await.len(), 1);
     // simulate the workflow's own action on L2 (what exec_one does), then the event it causes
-    run::mark_for_test("L2");
+    run::mark_for_test(&w2.id, "L2");
+    // another workflow on the same server still gets the event (e.g. a crash alert)
+    let w2b = wf("adm", "player.joined", &["L2"], note("other"));
+    workflows::insert(&st, &w2b).await.unwrap();
     run::handle(&st, &on("L2", "srv-L2", 1)).await;
+    assert_eq!(wait_runs(&st, &w2b.id, 1).await.len(), 1, "other workflows are not suppressed");
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(workflows::runs(&st, &w2.id).await.unwrap().len(), 1, "the event caused by a workflow did not retrigger");
 
@@ -218,4 +228,70 @@ async fn only_the_last_fifty_runs_are_kept() {
     workflows::insert(&st, &w).await.unwrap();
     for _ in 0..55 { run::run_one(st.clone(), w.clone(), ev("server.started", json!({}))).await; }
     assert_eq!(workflows::runs(&st, &w.id).await.unwrap().len(), 50);
+}
+
+#[tokio::test]
+async fn all_servers_means_servers_the_creator_can_view() {
+    let st = testutil::state(|_| {}).await;
+    add_user(&st, "u1", "user").await;
+    add_server(&st, "mine").await;
+    add_server(&st, "secret").await;
+    st.db.call(|c| c.execute("INSERT INTO grants(server_id,user_id,bundle) VALUES ('mine','u1','manager')", []).map(|_| ())).await.unwrap();
+    let w = wf("u1", "player.joined", &[], vec![Action::Notify { title: "hi".into(), body: String::new() }]);
+    workflows::insert(&st, &w).await.unwrap();
+    let on = |sid: &str, name: &str| Ev { kind: "player.joined", server: Some((sid.into(), name.into())), data: json!({"player": "Alex"}) };
+    run::handle(&st, &on("secret", "srv-secret")).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(workflows::runs(&st, &w.id).await.unwrap().is_empty(), "no run record for an invisible server");
+    let after = workflows::get(&st, &w.id).await.unwrap().unwrap();
+    assert!(after.enabled && after.disabled_reason.is_none() && after.last_result.is_none(), "not disabled, nothing stored");
+    run::run_one(st.clone(), w.clone(), on("secret", "srv-secret")).await;
+    assert!(workflows::runs(&st, &w.id).await.unwrap().is_empty(), "run_one also skips it silently");
+    run::handle(&st, &on("mine", "srv-mine")).await;
+    assert_eq!(wait_runs(&st, &w.id, 1).await.len(), 1, "own servers still match");
+    // an explicitly listed server that is no longer permitted does disable
+    let w2 = wf("u1", "player.joined", &["secret"], vec![Action::Notify { title: "x".into(), body: String::new() }]);
+    workflows::insert(&st, &w2).await.unwrap();
+    run::run_one(st.clone(), w2.clone(), on("secret", "srv-secret")).await;
+    assert!(!workflows::get(&st, &w2.id).await.unwrap().unwrap().enabled);
+}
+
+#[tokio::test]
+async fn dry_run_never_names_servers_the_creator_cannot_view() {
+    let st = testutil::state(|_| {}).await;
+    add_user(&st, "u1", "user").await;
+    add_server(&st, "mine").await;
+    add_server(&st, "secret").await;
+    st.db.call(|c| c.execute("INSERT INTO grants(server_id,user_id,bundle) VALUES ('mine','u1','manager')", []).map(|_| ())).await.unwrap();
+    let w = wf("u1", "player.joined", &[], vec![Action::Restart { server: "secret".into() }, Action::Restart { server: "trigger".into() }]);
+    let p = run::plan(&st, &w, &run::sample_event("player.joined", Some(("mine".into(), "srv-mine".into())))).await;
+    assert!(!p.to_string().contains("srv-secret"), "{p}");
+    assert_eq!(p["steps"][0]["allowed"], json!(false));
+    assert_eq!(p["steps"][1]["server"], "srv-mine");
+}
+
+#[tokio::test]
+async fn rights_are_rechecked_before_every_step() {
+    let st = testutil::state(|_| {}).await;
+    add_user(&st, "u1", "user").await;
+    add_server(&st, "s1").await;
+    st.db.call(|c| c.execute("INSERT INTO grants(server_id,user_id,bundle) VALUES ('s1','u1','manager')", []).map(|_| ())).await.unwrap();
+    let w = wf("u1", "server.crashed", &["s1"], vec![Action::Notify { title: "a".into(), body: String::new() }, Action::Wait { seconds: 1 }, Action::Command { server: "trigger".into(), command: "say x".into() }]);
+    workflows::insert(&st, &w).await.unwrap();
+    let (st2, w2) = (st.clone(), w.clone());
+    let h = tokio::spawn(async move { run::run_one(st2, w2, ev("server.crashed", json!({}))).await });
+    tokio::time::sleep(Duration::from_millis(300)).await; // inside the wait
+    st.db.call(|c| c.execute("DELETE FROM grants WHERE user_id='u1'", []).map(|_| ())).await.unwrap();
+    h.await.unwrap();
+    let runs = workflows::runs(&st, &w.id).await.unwrap();
+    assert_eq!(runs[0]["ok"], json!(false));
+    assert!(runs[0]["log"].to_string().contains("lost access"), "{runs:?}");
+    assert!(!workflows::get(&st, &w.id).await.unwrap().unwrap().enabled);
+}
+
+#[test]
+fn total_waiting_is_capped() {
+    let w = |s: u64| Action::Wait { seconds: s };
+    assert!(validate("server.started", None, &[w(600), w(600), w(600)], false).is_ok());
+    assert_eq!(validate("server.started", None, &[w(600), w(600), w(600), w(1)], false).unwrap_err().0, "actions");
 }

@@ -258,9 +258,19 @@ async fn public_data(st: &St, slug: &str) -> ApiResult<Option<Public>> {
 
 // ---- rate limit ---------------------------------------------------------------------------------------------------
 
+const MAX_TRACKED: usize = 10_000;
+
 /// Fixed-window counter per client address: `limit` requests per 60 seconds. Memory is bounded.
 fn allow(m: &mut HashMap<String, (Instant, u32)>, key: &str, now: Instant, limit: u32) -> bool {
-    if m.len() > 10_000 { m.retain(|_, (t, _)| now.duration_since(*t) < Duration::from_secs(60)); if m.len() > 10_000 { m.clear(); } }
+    if m.len() >= MAX_TRACKED && !m.contains_key(key) {
+        m.retain(|_, (t, _)| now.duration_since(*t) < Duration::from_secs(60));
+        // still full of live entries: drop the oldest tenth, never everyone (that would reset every limit at once)
+        if m.len() >= MAX_TRACKED {
+            let mut by_age: Vec<(Instant, String)> = m.iter().map(|(k, (t, _))| (*t, k.clone())).collect();
+            by_age.sort_unstable();
+            for (_, k) in by_age.into_iter().take(MAX_TRACKED / 10) { m.remove(&k); }
+        }
+    }
     let e = m.entry(key.to_string()).or_insert((now, 0));
     if now.duration_since(e.0) >= Duration::from_secs(60) { *e = (now, 0); }
     e.1 += 1;
@@ -416,6 +426,18 @@ mod tests {
         assert!(!allow(&mut m, "a", t, 3));
         assert!(allow(&mut m, "b", t, 3));
         assert!(allow(&mut m, "a", t + Duration::from_secs(61), 3));
+    }
+
+    #[test]
+    fn a_full_rate_limit_table_evicts_the_oldest_not_everyone() {
+        let mut m = HashMap::new();
+        let t = Instant::now();
+        for i in 0..MAX_TRACKED - 1 { allow(&mut m, &format!("ip{i}"), t, 3); }
+        for _ in 0..4 { allow(&mut m, "attacker", t + Duration::from_secs(1), 3); }
+        assert_eq!(m.len(), MAX_TRACKED);
+        assert!(allow(&mut m, "newcomer", t + Duration::from_secs(2), 3));
+        assert!(m.len() <= MAX_TRACKED, "memory stays bounded: {}", m.len());
+        assert!(!allow(&mut m, "attacker", t + Duration::from_secs(3), 3), "a full table does not reset limits that are still running");
     }
 
     #[tokio::test]

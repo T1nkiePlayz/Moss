@@ -15,6 +15,9 @@ pub mod run;
 pub const MAX_ACTIONS: usize = 20;
 pub const MAX_WAIT_S: u64 = 600;
 pub const KEEP_RUNS: i64 = 50;
+/// Total waiting allowed in one workflow, and workflows a non-administrator may own.
+pub const MAX_TOTAL_WAIT_S: u64 = 1800;
+pub const MAX_USER_WORKFLOWS: i64 = 50;
 
 fn trigger_target() -> String { "trigger".into() }
 
@@ -75,8 +78,8 @@ impl Workflow {
             "actions": self.actions, "created_by": self.created_by, "created_at": self.created_at, "last_run_at": self.last_run_at,
             "last_result": self.last_result, "disabled_reason": self.disabled_reason})
     }
-    /// Is the event about a server this workflow covers? (No server list = any server; the creator's permissions are
-    /// checked when it runs.) Events without a server only match workflows without a server list.
+    /// Is the event about a server this workflow covers? (No server list = any server the creator can view, which
+    /// `run::handle` checks; the actions' permissions are checked when it runs.) Events without a server only match workflows without a server list.
     pub fn covers(&self, server_id: Option<&str>) -> bool {
         self.server_ids.is_empty() || server_id.is_some_and(|s| self.server_ids.iter().any(|x| x == s))
     }
@@ -142,6 +145,8 @@ pub fn validate(trigger: &str, condition: Option<&Value>, actions: &[Action], al
     if let Some(c) = condition.filter(|c| !c.is_null()) && let Err(m) = eval::validate_condition(c) { return bad("condition", &m); }
     if actions.is_empty() { return bad("actions", "Add at least one action."); }
     if actions.len() > MAX_ACTIONS { return bad("actions", &format!("At most {MAX_ACTIONS} actions.")); }
+    let total_wait: u64 = actions.iter().map(|a| if let Action::Wait { seconds } = a { *seconds } else { 0 }).sum();
+    if total_wait > MAX_TOTAL_WAIT_S { return bad("actions", &format!("Waits add up to at most {} minutes.", MAX_TOTAL_WAIT_S / 60)); }
     for (i, a) in actions.iter().enumerate() {
         let f = format!("actions[{i}]");
         if let Some((s, _)) = a.target() {

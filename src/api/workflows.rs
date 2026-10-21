@@ -57,6 +57,11 @@ pub(super) async fn workflows_list(State(st): State<St>, user: User) -> ApiResul
 
 pub(super) async fn workflows_create(State(st): State<St>, user: User, Json(b): Json<Value>) -> ApiResult<(StatusCode, Json<Value>)> {
     if b.get("name").is_none() { return Err(v("name", "Give the workflow a name of up to 60 characters.")); }
+    if !user.is_admin() {
+        let uid = user.id.clone();
+        let n: i64 = st.db.call(move |c| c.query_row("SELECT COUNT(*) FROM workflows WHERE created_by=?", [uid], |r| r.get(0))).await?;
+        if n >= workflows::MAX_USER_WORKFLOWS { return Err(v("name", &format!("You can have at most {} workflows. Delete one first.", workflows::MAX_USER_WORKFLOWS))); }
+    }
     let w = apply(&st, &user, blank(&user), &b).await?;
     workflows::insert(&st, &w).await?;
     st.audit(&user.actor(), "workflow.create", &w.name, &w.trigger, None).await;
@@ -91,9 +96,14 @@ pub(super) async fn workflows_runs(State(st): State<St>, user: User, Path(id): P
 pub(super) async fn workflows_test(State(st): State<St>, user: User, Path(id): Path<String>, body: Option<Json<Value>>) -> ApiResult<Json<Value>> {
     let w = find(&st, &user, &id).await?;
     let b = body.map(|b| b.0).unwrap_or(Value::Null);
+    // The sample server is one the caller can view: asking for any other looks exactly like a missing server.
     let all = server::list(&st).await?;
-    let pick = b["server_id"].as_str().map(String::from).or_else(|| w.server_ids.first().cloned()).or_else(|| all.first().map(|s| s.id.clone()));
-    let server = pick.and_then(|p| all.iter().find(|s| s.id == p).map(|s| (s.id.clone(), s.name.clone())));
+    let mut viewable = vec![];
+    for s in all { if authz(&st, &user, &s.id, "server.view").await.is_ok() { viewable.push((s.id, s.name)); } }
+    let server = match b["server_id"].as_str() {
+        Some(p) => Some(viewable.iter().find(|(i, _)| i == p).cloned().ok_or_else(|| ApiError::not_found("server"))?),
+        None => w.server_ids.iter().find_map(|p| viewable.iter().find(|(i, _)| i == p)).or_else(|| viewable.first()).cloned(),
+    };
     let mut ev = run::sample_event(&w.trigger, server.or_else(|| Some(("sample".into(), "Sample server".into()))).filter(|_| w.trigger != "update.available"));
     if let (Some(extra), Some(d)) = (b["data"].as_object(), ev.data.as_object_mut()) { for (k, x) in extra { d.insert(k.clone(), x.clone()); } }
     Ok(Json(run::plan(&st, &w, &ev).await))

@@ -132,7 +132,9 @@ pub async fn spawn_background(st: &St) {
             if acts.is_empty() { continue; }
             // staging runs are not servers (no row to attach the data to)
             if let Some(i) = e.data["id"].as_str() && crate::server::is_staging(&st1, i).await { continue; }
+            let joins: Vec<(String, String)> = acts.iter().filter_map(|a| if let Act::Open { server, player, .. } = a { Some((server.clone(), player.clone())) } else { None }).collect();
             let _ = st1.db.call(move |c| { apply(c, &acts); Ok(()) }).await;
+            for (server, player) in joins { crate::notify::player_joined(&st1, &server, &player).await; }
         }
     });
     let st2 = st.clone();

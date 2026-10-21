@@ -643,6 +643,8 @@ async function handleX(method: string, p: string, qs: URLSearchParams, b: Record
     return { items, unread: notifs.filter((n) => !n.read).length };
   }
   if (p === '/notifications/read') { const ids = b.ids as string[] | undefined; notifs.forEach((n) => { if (b.all || ids?.includes(n.id)) n.read = true; }); return; }
+  if (p === '/push/key') return { key: 'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8' };
+  if (p === '/push/subscriptions') return;
   if (p === '/notifications/test') {
     await sleep(600);
     return /fail/i.test(String(settings.notify_webhook_url)) ? { delivered: false, detail: 'Gave up after 3 attempts: the server answered HTTP 502.' } : { delivered: true, detail: 'HTTP 204 from discord.com in 212 ms.' };

@@ -27,8 +27,12 @@ pub(super) async fn static_files(State(st): State<St>, uri: Uri, req_headers: ax
     if is_index {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
         let sb = st.cfg.supabase_url.trim_end_matches('/');
-        let csp = format!("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://cdn.modrinth.com https://*.forgecdn.net https://hangarcdn.papermc.io https://*.supabase.co https://avatars.githubusercontent.com https://gravatar.com https://*.gravatar.com; connect-src 'self' {sb} ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+        let csp = format!("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://cdn.modrinth.com https://*.forgecdn.net https://hangarcdn.papermc.io https://*.supabase.co https://avatars.githubusercontent.com https://gravatar.com https://*.gravatar.com; connect-src 'self' {sb} ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'");
         if let Ok(v) = HeaderValue::from_str(&csp) { h.insert(header::CONTENT_SECURITY_POLICY, v); }
+    } else if path == "sw.js" || path == "manifest.webmanifest" {
+        // The service worker must be revalidated on every load so updates reach installed copies.
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        if path == "manifest.webmanifest" { h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/manifest+json")); }
     } else if path.starts_with("assets/") {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
     }

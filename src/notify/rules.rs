@@ -2,7 +2,7 @@
 //! disk-space hysteresis. Nothing here touches the database or the network.
 use crate::error::ApiError;
 
-pub const KINDS: &[&str] = &["crash", "crash_loop", "backup_failed", "disk_low", "operation_failed", "restart_failed", "update_available", "security", "webhook_disabled"];
+pub const KINDS: &[&str] = &["crash", "crash_loop", "backup_failed", "disk_low", "operation_failed", "restart_failed", "update_available", "security", "webhook_disabled", "player_join"];
 pub const DEFAULT_EVENTS: &[&str] = &["crash", "crash_loop", "backup_failed", "disk_low", "restart_failed"];
 /// Kinds that describe the whole host or instance: only administrators may see them.
 pub const ADMIN_ONLY: &[&str] = &["disk_low", "update_available", "security", "webhook_disabled"];

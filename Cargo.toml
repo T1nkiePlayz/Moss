@@ -8,6 +8,7 @@ repository = "https://github.com/T1nkiePlayz/Moss"
 readme = "README.md"
 
 [dependencies]
+aes-gcm = "0.11"
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws", "multipart", "macros"] }
 base64 = "0.23.1"
@@ -17,10 +18,12 @@ clap = { version = "4.6.7", features = ["derive", "env"] }
 flate2 = "1.1.10"
 futures-util = "0.3.34"
 hex = "0.4.3"
+hkdf = "0.13"
 jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
 libc = "0.2.191"
 lzma-rs = "0.3.0"
 mime_guess = "2.0.5"
+p256 = { version = "0.14", features = ["ecdh", "pkcs8"] }
 rand = "0.10.3"
 regex = "1"
 reqwest = { version = "0.13.5", features = ["rustls", "json", "stream", "query"] }

@@ -29,6 +29,7 @@ mod limits;
 mod map_proxy;
 mod metrics;
 mod notifications;
+mod push;
 pub mod origin;
 mod reinstall;
 mod servers;
@@ -42,7 +43,7 @@ mod webhooks;
 mod workflows;
 
 use access::*; use activity::*; use backup_destinations::*; use assets::static_files; use container::*; use java::*; use reinstall::*; use servers::*; use session::*; use settings::*; use setup::*; use tokens::*;
-use {analytics::*, metrics::*, notifications::*, status_pages::*, support::*, webhooks::*, workflows::*};
+use {analytics::*, metrics::*, notifications::*, push::*, status_pages::*, support::*, webhooks::*, workflows::*};
 pub use servers::{create_server_from_value, free_port_for};
 
 type Q = Query<HashMap<String, String>>;
@@ -162,6 +163,8 @@ pub fn router(st: St) -> Router {
         .route("/notifications", get(notifications_list))
         .route("/notifications/read", post(notifications_read))
         .route("/notifications/test", post(notifications_test))
+        .route("/push/key", get(push_key))
+        .route("/push/subscriptions", post(push_subscribe).delete(push_unsubscribe))
         .route("/webhooks", get(webhooks_list).post(webhooks_create))
         .route("/webhooks/{id}", patch(webhooks_patch).delete(webhooks_delete))
         .route("/webhooks/{id}/rotate-secret", post(webhooks_rotate))

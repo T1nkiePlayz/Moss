@@ -486,7 +486,7 @@ export interface Schedule { tz?: string }
 export type AuditMode = 'redacted' | 'all' | 'off';
 export interface Settings { notify_webhook_url?: string; notify_events?: string[]; audit_console_commands?: AuditMode; access_message?: string }
 
-export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security' | 'webhook_disabled';
+export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security' | 'webhook_disabled' | 'player_join';
 export type Severity = 'info' | 'warn' | 'critical';
 export interface AppNotification { id: string; time: string; kind: NotificationKind; severity: Severity; title: string; body: string; server_id: string | null; read: boolean }
 export interface NotificationList { items: AppNotification[]; unread: number }
@@ -559,6 +559,9 @@ export const apiOps = {
   notifications: (o: { unread?: boolean; limit?: number } = {}) => get<NotificationList>(`/notifications${q({ unread: o.unread ? 1 : undefined, limit: o.limit ?? 50 })}`),
   markRead: (b: { ids?: string[]; all?: boolean }) => send('POST', '/notifications/read', b),
   testWebhook: () => send<{ delivered: boolean; detail: string }>('POST', '/notifications/test'),
+  pushKey: () => get<{ key: string }>('/push/key', { ttl: 0 }),
+  pushSubscribe: (b: PushSubscriptionJSON) => send('POST', '/push/subscriptions', b),
+  pushUnsubscribe: (endpoint: string) => send('DELETE', '/push/subscriptions', { endpoint }),
   tokens: (all = false) => get<ApiToken[]>(`/tokens${q({ all: all ? 1 : undefined })}`),
   createToken: (b: { name: string; scope: TokenScope; expires_in_days?: number }) => send<CreatedToken>('POST', '/tokens', b),
   revokeToken: (id: string) => send('DELETE', `/tokens/${e(id)}`),

@@ -138,7 +138,7 @@ pub async fn promote(State(st): State<St>, user: User, Path(id): Path<String>) -
         let _g = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
         if crate::lifecycle::process_alive(&s) { return Err(anyhow!("the server was started in the meantime; stop it and promote again")); }
         ctx.stage("Swapping in the restored files (the previous ones are kept)");
-        let (dir, kept) = (s.dir(&st), st.cfg.data_dir.join("removed").join(format!("{}-pre-restore-{}", s.id, chrono::Utc::now().format("%Y%m%d-%H%M%S"))));
+        let (dir, kept) = (s.dir(&st), super::swap::kept_path(&st.cfg.data_dir, &s.id));
         let (st2, d2, k2, only) = (stage.clone(), dir.clone(), kept.clone(), r.only.clone());
         tokio::task::spawn_blocking(move || match &only { Some(o) => { let r = swap_selected(&st2, &d2, &k2, o); let _ = std::fs::remove_dir_all(&st2); r } None => swap_full(&st2, &d2, &k2) }).await??;
         let i = id.clone();

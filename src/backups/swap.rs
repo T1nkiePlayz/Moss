@@ -16,6 +16,14 @@ pub fn validate_only(only: &[String]) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Where a swap keeps the previous files. Unique even for back-to-back restores in the same second, since a rename
+/// onto an existing non-empty `kept` fails.
+pub fn kept_path(data_dir: &std::path::Path, sid: &str) -> std::path::PathBuf {
+    let base = format!("{sid}-pre-restore-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S%.3f"));
+    let removed = data_dir.join("removed");
+    (1..).map(|n| removed.join(if n == 1 { base.clone() } else { format!("{base}-{n}") })).find(|p| std::fs::symlink_metadata(p).is_err()).unwrap()
+}
+
 /// Replace the whole server directory with `stage`, keeping the old one at `kept`. Two same-filesystem renames; if the
 /// second fails the first is undone. Moss's own `.moss` metadata (never part of a backup) moves over to the new directory.
 pub fn swap_full(stage: &Path, dir: &Path, kept: &Path) -> Result<()> {

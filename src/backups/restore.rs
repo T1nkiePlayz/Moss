@@ -46,7 +46,7 @@ pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, 
             let (p3, stage2, tok, only2) = (p.clone(), stage.clone(), ctx.token.clone(), only.clone());
             if let Err(e) = tokio::task::spawn_blocking(move || extract_archive(&p3, &stage2, &tok, only2.as_deref())).await? { let _ = tokio::fs::remove_dir_all(&stage).await; return Err(e); }
             ctx.stage("Swapping in the restored files (the previous ones are kept)");
-            let (dir, kept) = (s.dir(&st), st.cfg.data_dir.join("removed").join(format!("{}-pre-restore-{}", s.id, chrono::Utc::now().format("%Y%m%d-%H%M%S"))));
+            let (dir, kept) = (s.dir(&st), super::swap::kept_path(&st.cfg.data_dir, &s.id));
             if let Some(only) = &only {
                 let (stage2, dir2, kept2, only2) = (stage.clone(), dir.clone(), kept.clone(), only.clone());
                 let r = tokio::task::spawn_blocking(move || swap_selected(&stage2, &dir2, &kept2, &only2)).await?;

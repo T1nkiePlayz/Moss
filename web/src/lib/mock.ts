@@ -14,7 +14,9 @@ const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 const MIN = 60000, HOUR = 3600000, DAY = 86400000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const caps = ['console', 'files', 'content', 'backups', 'players', 'properties', 'schedules'];
+const caps = ['console', 'files', 'content', 'backups', 'players', 'properties', 'schedules', 'java', 'eula'];
+/** Capabilities of a non-Minecraft game server: no Java, content or EULA; players when the game can be queried. */
+const gameCaps = (...extra: string[]) => ['console', 'files', 'backups', 'schedules', ...extra];
 function mk(p: Partial<A.Server> & { name: string; runtime: string }): A.Server {
   return {
     id: 'srv-' + p.name.toLowerCase().replace(/\W+/g, '-'), game_version: '1.21.4', loader_version: null, java_major: 21, port: 25565, memory_mb: 4096, flags_profile: 'balanced',
@@ -27,6 +29,11 @@ const servers: A.Server[] = [
   mk({ name: 'Survival SMP', runtime: 'paper', desired: 'running', state: 'running', state_since: ago(26 * HOUR), uptime_s: 26 * 3600 + 421, pid: 4211, players: { online: 3, max: 20, sample: ['Alex_Builds', 'creeper_hug', 'Notch2'] }, motd: 'Welcome to the Survival SMP', cpu_pct: 18, mem_bytes: 2.4e9, tags: ['friends', 'main'], notes: 'Weekly restart Sunday 04:00.' }),
   mk({ name: 'Creative Plots', runtime: 'purpur', port: 25566, memory_mb: 2048, tags: ['creative'], created_at: ago(12 * DAY) }),
   mk({ name: 'Modded Fabric', runtime: 'fabric', loader_version: '0.16.9', port: 25567, memory_mb: 6144, content_kind: 'mods', desired: 'running', state: 'crashed', state_detail: 'Exited with code 1 (OutOfMemoryError)', state_since: ago(14 * MIN), tags: ['mods'], created_at: ago(5 * DAY), capabilities: caps.filter((c) => c !== 'players') }),
+  mk({ name: 'Terraria', runtime: 'terraria', game_version: '1.4.4.9', java_major: 0, port: 7777, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(9 * HOUR), uptime_s: 9 * 3600 + 80, pid: 5120, players: { online: 2, max: 8, sample: ['Guide', 'Dryad_fan'] }, cpu_pct: 4, mem_bytes: 6.2e8, tags: ['game'], created_at: ago(9 * DAY), capabilities: gameCaps('players') }),
+  mk({ name: 'Valheim', runtime: 'valheim', game_version: 'latest', java_major: 0, port: 2456, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(2 * DAY), uptime_s: 2 * 86400 + 900, pid: 5230, players: { online: 4, max: 10, sample: ['Ragnar', 'Freya', 'Bjorn', 'Astrid'] }, cpu_pct: 31, mem_bytes: 3.4e9, tags: ['game', 'friends'], created_at: ago(20 * DAY), capabilities: gameCaps('players') }),
+  mk({ name: 'Factorio', runtime: 'factorio', game_version: '2.0.55', java_major: 0, port: 34197, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(5 * HOUR), uptime_s: 5 * 3600 + 12, pid: 5340, players: { online: 1, max: 0, sample: ['engineer42'] }, cpu_pct: 22, mem_bytes: 1.1e9, tags: ['game'], created_at: ago(14 * DAY), capabilities: gameCaps('players') }),
+  mk({ name: 'Bedrock Realm', runtime: 'bedrock', game_version: '1.21.124.2', java_major: 0, port: 19132, memory_mb: 2048, content_kind: 'none', desired: 'stopped', state: 'stopped', tags: ['game', 'bedrock'], created_at: ago(6 * DAY), capabilities: gameCaps('players', 'properties', 'eula') }),
+  mk({ name: 'CS2 Wingman', runtime: 'cs2', game_version: 'latest', java_major: 0, port: 27015, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(3 * HOUR), uptime_s: 3 * 3600 + 300, pid: 5450, players: { online: 6, max: 10, sample: ['s1mple_fan', 'AWPer', 'rush_b', 'eco_king', 'smoke_me', 'flashbang'] }, motd: 'de_dust2', cpu_pct: 46, mem_bytes: 5.8e9, tags: ['game', 'lan'], created_at: ago(3 * DAY), capabilities: gameCaps('players') }),
   mk({ name: 'Velocity Proxy', runtime: 'velocity', game_version: '3.4.0', port: 25577, memory_mb: 512, java_major: 21, content_kind: 'proxy_plugins', desired: 'running', state: 'running', state_since: ago(3 * DAY), uptime_s: 3 * 86400 + 12, pid: 2210, players: { online: 3, max: 100, sample: [] }, cpu_pct: 2, mem_bytes: 3.1e8, tags: ['edge'], capabilities: caps.filter((c) => !['backups', 'properties'].includes(c)) }),
 ];
 const sv = (id: string) => {
@@ -45,7 +52,33 @@ const runtimes: A.Runtime[] = [
   { id: 'velocity', name: 'Velocity', category: 'proxy', tier: 'stable', content_kind: 'proxy_plugins', description: 'Modern proxy to link several servers together.', installable: true },
   { id: 'custom', name: 'Custom command', category: 'custom', tier: 'experimental', content_kind: 'none', description: 'Run any command in a managed directory.', installable: true },
   ...extraRuntimes,
+  ...gameRuntimes(),
 ];
+function gameRuntimes(): A.Runtime[] {
+  const g = (id: string, name: string, description: string, port: number, protocol: 'udp' | 'tcp', platforms: string[], tracking: 'none' | 'log' | 'a2s', max: number, extra: Partial<A.Runtime> = {}): A.Runtime =>
+    ({ id, name, category: 'game', tier: 'experimental', content_kind: 'none', description, installable: true, default_port: port, protocol, platforms, player_tracking: tracking, max_players: max, ...extra });
+  const steam = 'via SteamCMD (anonymous). Linux x86_64 only.';
+  return [
+    g('bedrock', 'Minecraft Bedrock', 'Official Bedrock Dedicated Server (Windows 10/11, consoles, phones). Linux only. Needs the Minecraft EULA.', 19132, 'udp', ['linux'], 'log', 10, { tier: 'stable', needs_eula: true }),
+    g('terraria', 'Terraria', 'Official Terraria dedicated server. Creates a medium world on first start. Linux and macOS.', 7777, 'tcp', ['linux', 'macos'], 'log', 8, { tier: 'stable' }),
+    g('factorio', 'Factorio', 'Official headless Factorio server (stable or experimental). Creates a save on install. Linux only.', 34197, 'udp', ['linux'], 'log', 0, { tier: 'stable' }),
+    g('valheim', 'Valheim', `Valheim dedicated server ${steam} A password is generated into moss-game.cfg.`, 2456, 'udp', ['linux'], 'a2s', 10),
+    g('gmod', "Garry's Mod", `Garry's Mod dedicated server ${steam} Starts on gm_construct.`, 27015, 'udp', ['linux'], 'a2s', 16),
+    g('cs2', 'Counter-Strike 2', `Counter-Strike 2 dedicated server ${steam} Large download (30 GB or more).`, 27015, 'udp', ['linux'], 'a2s', 10),
+    g('tf2', 'Team Fortress 2', `Team Fortress 2 dedicated server ${steam} Starts on ctf_2fort.`, 27015, 'udp', ['linux'], 'a2s', 24),
+    g('l4d2', 'Left 4 Dead 2', `Left 4 Dead 2 dedicated server ${steam}`, 27015, 'udp', ['linux'], 'a2s', 8),
+    g('rust', 'Rust', `Rust dedicated server ${steam} Needs 8 GB or more RAM.`, 28015, 'udp', ['linux'], 'a2s', 50),
+    g('palworld', 'Palworld', `Palworld dedicated server ${steam} 16 GB RAM recommended. Player counts are not available.`, 8211, 'udp', ['linux'], 'none', 32),
+    g('zomboid', 'Project Zomboid', `Project Zomboid dedicated server ${steam} Admin password is generated into moss-game.cfg.`, 16261, 'udp', ['linux'], 'none', 16),
+    g('satisfactory', 'Satisfactory', `Satisfactory dedicated server ${steam} 12 GB RAM recommended.`, 7777, 'udp', ['linux'], 'none', 4),
+  ];
+}
+const gameVersions: Record<string, A.Versions> = {
+  bedrock: { versions: [{ id: '1.21.124.2', stable: true }], recommended: '1.21.124.2' },
+  terraria: { versions: [{ id: '1.4.5.0', stable: true }, { id: '1.4.4.9', stable: true }], recommended: '1.4.5.0' },
+  factorio: { versions: [{ id: '2.0.55', stable: true }, { id: '2.1.1', stable: false }], recommended: '2.0.55' },
+};
+for (const id of ['valheim', 'gmod', 'cs2', 'tf2', 'l4d2', 'rust', 'palworld', 'zomboid', 'satisfactory']) gameVersions[id] = { versions: [{ id: 'latest', stable: true }], recommended: 'latest' };
 
 // ---- operations & events ----
 const ops: A.Operation[] = [];
@@ -295,7 +328,7 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
   if (p === '/ticket') return { ticket: 'mock' };
   if (p === '/status') return { version: '0.1.0-mock', uptime_s: 9 * 86400 + 4000, auth_mode: 'dev', host: { cpu_pct: 24 + Math.random() * 12, mem_total: 16e9, mem_used: 7.4e9 + Math.random() * 3e8, disk_total: 500e9, disk_free: 312e9, load1: 0.84, hostname: 'moss-host' }, counts: { servers: servers.length, running: servers.filter((s) => s.state === 'running').length, players: servers.reduce((n, s) => n + (s.players?.online ?? 0), 0) } };
   if (p === '/runtimes') return runtimes;
-  if (M(/^\/runtimes\/([^/]+)\/versions$/)) return versionsFor(m![1]);
+  if (M(/^\/runtimes\/([^/]+)\/versions$/)) return gameVersions[m![1]] ?? versionsFor(m![1]);
   if (p === '/modpacks/inspect') return inspectModpack(body);
   if (p === '/java' && method === 'GET') return { installs: javaInstalls };
   if (p === '/java/install') return op('java.install', `Installing Java ${b.major}`, null, ['Resolving build', 'Downloading JDK', 'Verifying checksum', 'Extracting'], { done: () => javaInstalls.push({ major: b.major, path: `/var/lib/moss/java/${b.major}`, managed: true, version: `${b.major}.0.1` }) });
@@ -324,7 +357,10 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
 
   if (p === '/servers') {
     if (method === 'GET') return servers;
-    const s = mk({ name: b.name, runtime: b.runtime, game_version: b.game_version, loader_version: b.loader_version ?? null, memory_mb: b.memory_mb, port: b.port ?? 25570 + servers.length, desired: 'stopped', state: 'installing', content_kind: runtimes.find((r) => r.id === b.runtime)?.content_kind ?? 'none', eula_accepted: !!b.accept_eula });
+    const rt = runtimes.find((r) => r.id === b.runtime);
+    const game = rt?.category === 'game' ? rt : null;
+    const s = mk({ name: b.name, runtime: b.runtime, game_version: b.game_version, loader_version: b.loader_version ?? null, memory_mb: b.memory_mb, port: b.port ?? (game?.default_port ?? 25565) + (game ? 0 : 5 + servers.length), desired: 'stopped', state: 'installing', content_kind: rt?.content_kind ?? 'none', eula_accepted: !!b.accept_eula,
+      ...(game ? { java_major: 0, capabilities: gameCaps(...(game.player_tracking !== 'none' ? ['players'] : []), ...(game.id === 'bedrock' ? ['properties', 'eula'] : [])) } : {}) });
     servers.push(s); seedFs(s); content[s.id] = b.modpack_token ? itemsFromPack(s, b.modpack_token) : []; emitServer(s);
     log('server.create', s.name);
     const o = startOp('server.install', `Installing ${s.name}`, s.id, ['Resolving build', 'Downloading server jar', 'Verifying checksum', 'Writing config', 'First-run setup'], { done: () => setState(s, 'stopped') });

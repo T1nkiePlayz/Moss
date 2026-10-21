@@ -23,6 +23,7 @@ pub fn catalogue(dev: bool) -> Value {
         json!({"id":"forge","name":"Forge","category":"modded","tier":"experimental","content_kind":"mods","description":"Minecraft Forge. 1.17 and newer use the modern installer; 1.12.2 to 1.16.5 are legacy builds that run on Java 8. Runs the official installer.","installable":true}),
         json!({"id":"quilt","name":"Quilt","category":"modded","tier":"stable","content_kind":"mods","description":"Fabric-compatible mod loader with its own ecosystem.","installable":true}),
     ];
+    v.extend(crate::games::catalogue());
     if dev { v.push(json!({"id":"sim","name":"Simulated server","category":"custom","tier":"experimental","content_kind":"none","description":"Built-in fake Minecraft server for demos and testing. No Java needed.","installable":true})); }
     Value::Array(v)
 }
@@ -76,6 +77,7 @@ pub async fn versions(st: &St, runtime: &str) -> Result<Value> {
                 return Ok(j);
             }
             "sim" => (vec![("1.0".into(), true)], Some("1.0".into())),
+            game if crate::games::get(game).is_some() => crate::games::versions::list(st, crate::games::get(game).unwrap()).await?,
             "custom" => (vec![("custom".into(), true)], Some("custom".into())),
             other => return Err(anyhow!("runtime {other} has no installable versions")),
         };
@@ -130,6 +132,7 @@ pub async fn resolve(st: &St, runtime: &str, game: &str, loader: Option<&str>) -
             Ok(Resolved { url: format!("https://meta.fabricmc.net/v2/versions/loader/{game}/{loader}/{inst}/server/jar"), hash: None, java_major: java_for_game(st, game).await, loader_version: Some(loader) })
         }
         "neoforge" | "forge" | "quilt" => modded::resolve(st, runtime, game, loader).await,
+        id if crate::games::get(id).is_some() => crate::games::versions::resolve(st, crate::games::get(id).unwrap(), game).await,
         other => Err(anyhow!("runtime {other} cannot be installed")),
     }
 }

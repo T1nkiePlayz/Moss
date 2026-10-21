@@ -6,6 +6,7 @@ use crate::{error::{ApiError, ApiResult}, runtimes::launch, server::Srv, state::
 pub fn build_command(st: &St, s: &Srv) -> ApiResult<Vec<String>> {
     match s.runtime.as_str() {
         "sim" => Ok(vec![std::env::current_exe()?.to_string_lossy().into(), "sim-server".into(), "--port".into(), s.port.to_string()]),
+        _ if s.is_game() => crate::games::command(&s.dir(st), s),
         "custom" if s.isolation == "container" => Err(ApiError::bad("container.unsupported", "custom servers cannot run in a container")),
         "custom" => s.custom_cmd.clone().filter(|c| !c.is_empty()).ok_or_else(|| ApiError::bad("custom.command", "custom server has no command")),
         _ => {

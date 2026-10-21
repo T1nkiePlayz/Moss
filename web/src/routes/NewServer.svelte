@@ -7,6 +7,7 @@
   import { api, ApiError, errMsg, type Runtime, type Versions, type JavaInstall, type ModpackInspect } from '../lib/api';
   import { host, ops, trackOp, toastError } from '../lib/stores.svelte';
   import { bytes } from '../lib/format';
+  import { runtimeIcon } from '../lib/icons';
   import { navigate } from '../lib/router.svelte';
   import { serverHref } from '../lib/route';
 
@@ -35,7 +36,7 @@
   let fieldErr = $state<Record<string, string>>({});
   let formErr = $state('');
 
-  const catLabel: Record<string, string> = { official: 'Official', plugins: 'Plugin servers', modded: 'Modded', proxy: 'Proxies', custom: 'Custom' };
+  const catLabel: Record<string, string> = { official: 'Official', plugins: 'Plugin servers', modded: 'Modded', proxy: 'Proxies', custom: 'Custom', game: 'Other games' };
   const kindLabel: Record<string, string> = { plugins: 'Plugins', mods: 'Mods', proxy_plugins: 'Proxy plugins', datapacks: 'Datapacks', none: 'No add-ons' };
 
   async function loadRt() {
@@ -50,11 +51,17 @@
     for (const r of runtimes ?? []) { const o = m.get(r.id); if (!o || (!o.installable && r.installable)) m.set(r.id, r); }
     return [...m.values()];
   });
-  const grouped = $derived.by(() => {
+  // Minecraft runtimes grouped by kind, then the other games, then the custom command.
+  const mcGroups = $derived.by(() => {
     const g: Record<string, Runtime[]> = {};
-    for (const r of usableRuntimes) (g[r.category] ??= []).push(r);
+    for (const r of usableRuntimes) if (r.category !== 'game' && r.category !== 'custom') (g[r.category] ??= []).push(r);
     return Object.entries(g);
   });
+  const gameList = $derived(usableRuntimes.filter((r) => r.category === 'game'));
+  const customList = $derived(usableRuntimes.filter((r) => r.category === 'custom'));
+  const isGame = $derived(runtime?.category === 'game');
+  const platformNote = (r: Runtime) => (r.platforms ?? []).map((p) => (p === 'macos' ? 'macOS' : 'Linux')).join(' + ');
+  const trackNote = (r: Runtime) => (r.player_tracking === 'none' ? 'no player counts' : 'player counts');
   const loaders = $derived(versions?.loader_versions?.[version] ?? []);
   $effect(() => { const l = loaders; if (!fromPack) loaderVer = l.find((x) => x.recommended)?.id ?? l[0]?.id ?? ''; });
 
@@ -77,12 +84,13 @@
       api.versions(r.id).then((v) => { versions = v; version = v.recommended; }).catch((e) => (vErr = errMsg(e)));
     }
     if (!name) name = r.name === 'Custom command' ? 'Custom server' : `My ${r.name} server`;
-    memory = r.id === 'velocity' ? 512 : Math.max(memory, 2048);
+    memory = r.category === 'game' ? 2048 : r.id === 'velocity' ? 512 : Math.max(memory, 2048);
     step = 2;
   }
 
   const shown = $derived((versions?.versions ?? []).filter((v) => vFilter === 'all' || v.stable));
-  const needsEula = $derived(!!runtime && runtime.id !== 'velocity' && runtime.id !== 'custom');
+  const needsEula = $derived(!!runtime && (runtime.category === 'game' ? !!runtime.needs_eula : runtime.id !== 'velocity' && runtime.id !== 'custom'));
+  const hasUnstable = $derived((versions?.versions ?? []).some((v) => !v.stable));
   const maxMem = $derived(Math.max(4096, Math.floor(((host.status?.host.mem_total ?? 16e9) / 1048576) * 0.9 / 256) * 256));
   // Rough Java requirement by game version (informational; the backend decides the real value).
   const javaNeed = $derived.by(() => {
@@ -110,7 +118,7 @@
     busy = true; fieldErr = {}; formErr = '';
     try {
       const r = await api.createServer({
-        name: name.trim(), runtime: runtime.id, game_version: runtime.id === 'custom' ? 'custom' : version, memory_mb: memory,
+        name: name.trim(), runtime: runtime.id, game_version: runtime.id === 'custom' ? 'custom' : version, memory_mb: isGame ? 2048 : memory,
         port: port ?? undefined, accept_eula: needsEula ? eula : false,
         ...((fromPack || loaders.length) && loaderVer ? { loader_version: loaderVer } : {}),
         ...(fromPack && pack ? { modpack_token: pack.token } : {}),
@@ -141,6 +149,22 @@
   {/each}
 </ol>
 
+{#snippet rtCard(r: Runtime)}
+  {@const off = !r.installable}
+  {@const tier = r.tier === 'planned' && r.installable ? 'experimental' : r.tier}
+  <button class="card hover rt" class:off class:sel={runtime?.id === r.id} disabled={off} onclick={() => pick(r)} aria-label="{r.name}, {tier}">
+    <div class="row between" style="align-items:flex-start">
+      <div class="rico"><Icon name={runtimeIcon(r)} size={20} /></div>
+      <span class="badge {tier === 'stable' ? 'ok' : tier === 'experimental' ? 'warn' : ''}">{tier === 'planned' ? 'Planned' : tier === 'stable' ? 'Stable' : 'Experimental'}</span>
+    </div>
+    <h3>{r.name}</h3>
+    <p class="muted sm">{r.description}</p>
+    {#if r.category === 'game'}
+      <div class="xs faint">{platformNote(r)} · {r.default_port}/{r.protocol} · {trackNote(r)}{off ? ' · not supported on this host' : ''}</div>
+    {:else}<div class="xs faint">{kindLabel[r.content_kind] ?? ''}</div>{/if}
+  </button>
+{/snippet}
+
 {#if step === 1}
   {#if rtErr}<States kind="error" text={rtErr} retry={loadRt} />
   {:else if !runtimes}<States kind="loading" rows={3} />
@@ -155,24 +179,19 @@
         <div class="xs faint">Mods</div>
       </button>
     </div>
-    {#each grouped as [cat, list]}
+    <h2 class="sect">Minecraft</h2>
+    {#each mcGroups as [cat, list]}
       <h3 class="cat">{catLabel[cat] ?? cat}</h3>
-      <div class="grid cols-auto" style="--gap:12px">
-        {#each list as r (r.id)}
-          {@const off = !r.installable}
-          {@const tier = r.tier === 'planned' && r.installable ? 'experimental' : r.tier}
-          <button class="card hover rt" class:off class:sel={runtime?.id === r.id} disabled={off} onclick={() => pick(r)} aria-label="{r.name}, {tier}">
-            <div class="row between" style="align-items:flex-start">
-              <div class="rico"><Icon name={r.category === 'proxy' ? 'link' : r.category === 'modded' ? 'puzzle' : r.category === 'custom' ? 'terminal' : 'cube'} size={20} /></div>
-              <span class="badge {tier === 'stable' ? 'ok' : tier === 'experimental' ? 'warn' : ''}">{tier === 'planned' ? 'Planned' : tier === 'stable' ? 'Stable' : 'Experimental'}</span>
-            </div>
-            <h3>{r.name}</h3>
-            <p class="muted sm">{r.description}</p>
-            <div class="xs faint">{kindLabel[r.content_kind] ?? ''}</div>
-          </button>
-        {/each}
-      </div>
+      <div class="grid cols-auto" style="--gap:12px">{#each list as r (r.id)}{@render rtCard(r)}{/each}</div>
     {/each}
+    {#if gameList.length}
+      <h2 class="sect">Other games</h2>
+      <div class="grid cols-auto" style="--gap:12px">{#each gameList as r (r.id)}{@render rtCard(r)}{/each}</div>
+    {/if}
+    {#if customList.length}
+      <h2 class="sect">Custom</h2>
+      <div class="grid cols-auto" style="--gap:12px">{#each customList as r (r.id)}{@render rtCard(r)}{/each}</div>
+    {/if}
   {/if}
 {:else if step === 2 && fromPack && !packReady}
   <div class="card form" style="max-width:760px">
@@ -193,14 +212,14 @@
           <label for="ver">Version</label>
           <div class="row g6" role="group" aria-label="Version channel">
             <button class="chip" aria-pressed={vFilter === 'stable'} onclick={() => (vFilter = 'stable')}>Stable</button>
-            <button class="chip" aria-pressed={vFilter === 'all'} onclick={() => (vFilter = 'all')}>Include snapshots</button>
+            {#if !isGame || hasUnstable}<button class="chip" aria-pressed={vFilter === 'all'} onclick={() => (vFilter = 'all')}>{isGame ? 'Include experimental' : 'Include snapshots'}</button>{/if}
           </div>
         </div>
         {#if vErr}<States kind="error" text={vErr} retry={() => pick(runtime!)} />
         {:else if !versions}<div class="skel" style="height:36px"></div>
         {:else}
           <select id="ver" class="select" bind:value={version}>
-            {#each shown as v}<option value={v.id}>{v.id}{v.id === versions.recommended ? ' (recommended)' : ''}{v.stable ? '' : ' (snapshot)'}</option>{/each}
+            {#each shown as v}<option value={v.id}>{v.id}{v.id === versions.recommended ? ' (recommended)' : ''}{v.stable ? '' : isGame ? ' (experimental)' : ' (snapshot)'}</option>{/each}
           </select>
           {#if version === versions.recommended}<span class="badge ok" style="width:fit-content"><Icon name="star" size={12} />Recommended</span>{/if}
         {/if}
@@ -223,17 +242,19 @@
       <input id="nm" class="input" maxlength="48" bind:value={name} aria-invalid={!nameOk || !!fieldErr.name} />
       {#if fieldErr.name}<span class="err">{fieldErr.name}</span>{/if}
     </div>
-    <div class="field">
+    {#if !isGame}<div class="field">
       <div class="row between"><label for="mem">Memory</label><span class="tnum"><b>{memory >= 1024 ? (memory / 1024).toFixed(memory % 1024 ? 2 : 0) + ' GB' : memory + ' MB'}</b></span></div>
       <input id="mem" type="range" min="512" max={maxMem} step="256" bind:value={memory} />
       <span class="hint">Host has {host.status ? bytes(host.status.host.mem_total) : '…'} in total. Leave room for the OS and other servers.</span>
       {#if fieldErr.memory_mb}<span class="err">{fieldErr.memory_mb}</span>{/if}
-    </div>
+    </div>{/if}
     <div class="field">
       <label for="pt">Port <span class="faint">(optional)</span></label>
-      <input id="pt" class="input" type="number" min="1024" max="65535" placeholder="Auto-assign" bind:value={port} aria-invalid={!portOk || !!fieldErr.port} />
+      <input id="pt" class="input" type="number" min="1024" max="65535" placeholder={runtime.default_port ? `Auto-assign (starts at ${runtime.default_port})` : 'Auto-assign'} bind:value={port} aria-invalid={!portOk || !!fieldErr.port} />
+      {#if runtime.category === 'game'}<span class="hint">Players connect on {runtime.default_port} ({runtime.protocol?.toUpperCase()}) by default; forward that port on your router.</span>{/if}
       {#if fieldErr.port}<span class="err">{fieldErr.port}</span>{/if}
     </div>
+    {#if isGame}<div class="banner" style="align-items:center"><Icon name="info" size={16} /><div class="grow sm">{runtime.description} Edit the game's own config from the Files tab after installing.</div></div>{/if}
     {#if formErr && step === 2}<div class="banner danger" role="alert">{formErr}</div>{/if}
     <div class="row end"><button class="btn" onclick={() => (step = 1)}>Back</button><button class="btn primary" disabled={!canNext2} onclick={toReview}>Review<Icon name="chevron-right" size={15} /></button></div>
   </div>
@@ -244,11 +265,12 @@
       <dt>Name</dt><dd>{name}</dd>
       <dt>Runtime</dt><dd>{runtime.name}{runtime.id !== 'custom' ? ' ' + version : ''}{loaderVer && runtime.id !== 'custom' ? ` · loader ${loaderVer}` : ''}</dd>
       {#if fromPack && pack}<dt>Modpack</dt><dd>{pack.name} {pack.version}<div class="xs muted">{pack.files.server} server mods will be downloaded and installed</div></dd>{/if}
-      <dt>Memory</dt><dd class="tnum">{memory} MB</dd>
-      <dt>Port</dt><dd class="tnum">{port ?? 'Auto'}</dd>
-      <dt>Add-ons</dt><dd>{kindLabel[runtime.content_kind]}</dd>
+      {#if !isGame}<dt>Memory</dt><dd class="tnum">{memory} MB</dd>{/if}
+      <dt>Port</dt><dd class="tnum">{port ?? 'Auto'}{isGame ? ` (${runtime.protocol?.toUpperCase()})` : ''}</dd>
+      {#if !isGame}<dt>Add-ons</dt><dd>{kindLabel[runtime.content_kind]}</dd>{/if}
     </dl>
-    {#if runtime.id !== 'custom'}
+    {#if isGame}<div class="banner" style="align-items:center"><Icon name="download" size={16} /><div class="grow sm">Moss downloads the server from its official source when you create it{runtime.player_tracking === 'none' ? '' : '; player counts appear on the dashboard once it is running'}.</div></div>{/if}
+    {#if runtime.id !== 'custom' && !isGame}
       {#if !java}<div class="skel" style="height:44px"></div>
       {:else if javaOk}<div class="banner" style="align-items:center"><span style="color:var(--a-text)"><Icon name="check-circle" size={18} /></span>Java {javaNeed}+ is installed ({java.map((j) => j.major).join(', ')}).</div>
       {:else}<div class="banner warn" style="align-items:center"><Icon name="alert" size={18} /><div class="grow">This version needs Java {javaNeed}+ and none is installed. You can create the server now, but it will not start until Java is available.</div><button class="btn sm" onclick={installJava}>Install Java {javaNeed}</button></div>{/if}
@@ -280,6 +302,7 @@
   @media (max-width: 560px) { .lb { display: none; } .on .lb { display: inline; } }
   .cat { margin: 22px 0 10px; font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
   .cat:first-of-type { margin-top: 0; }
+  .sect { margin: 28px 0 6px; font-size: var(--fs-lg, 1.05rem); }
   .rt { text-align: left; display: flex; flex-direction: column; gap: 6px; cursor: pointer; color: inherit; font: inherit; }
   .rt.sel { border-color: var(--a2); }
   .rt.off { opacity: .5; cursor: not-allowed; }

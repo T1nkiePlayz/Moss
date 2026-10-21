@@ -34,7 +34,7 @@ async fn run(ctx: &OpCtx, st: &St, s: &Srv) -> Result<()> {
         let (i, java, lv) = (s.id.clone(), r.java_major as i64, r.loader_version.clone());
         st.db.call(move |c| c.execute("UPDATE servers SET java_major=?, loader_version=COALESCE(?,loader_version) WHERE id=?", rusqlite::params![java, lv, i])).await?;
     }
-    if crate::java::find_async(st, r.java_major).await.is_none() && !is_modded(&s.runtime) {
+    if !s.is_game() && crate::java::find_async(st, r.java_major).await.is_none() && !is_modded(&s.runtime) {
         ctx.log(format!("Java {} is not installed — install it from Settings → Java before starting.", r.java_major));
     }
     install_files(ctx, st, s, &r, &dir).await?;
@@ -51,6 +51,7 @@ async fn run(ctx: &OpCtx, st: &St, s: &Srv) -> Result<()> {
 /// Put the runtime's files into `dir`: the server jar, or the output of the official installer for modded loaders.
 /// `s` carries the target game version and loader; `r` is what `runtimes::resolve` returned for it.
 pub async fn install_files(ctx: &OpCtx, st: &St, s: &Srv, r: &Resolved, dir: &Path) -> Result<()> {
+    if s.is_game() { return crate::games::install::install(ctx, st, s, r, dir).await; }
     if is_modded(&s.runtime) {
         let mut target = s.clone();
         target.loader_version = r.loader_version.clone().or_else(|| s.loader_version.clone());

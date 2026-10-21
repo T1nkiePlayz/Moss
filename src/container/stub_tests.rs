@@ -13,9 +13,17 @@ fn setup_with(game_cmd: &str, installer: &str, extra_env: &str) -> Env {
     std::fs::create_dir_all(dir.join(".moss")).unwrap();
     let log = root.join("calls.log");
     let wrapper = root.join("docker");
-    std::fs::write(&wrapper, format!("#!/usr/bin/env bash\nexport STUB_STATE='{}' STUB_LOG='{}' STUB_GAME_CMD='{game_cmd}' STUB_INSTALLER_CMD='{installer}' {extra_env}\nexec '{}/tests/stubs/docker' \"$@\"\n",
+    std::fs::write(&wrapper, format!("#!/usr/bin/env bash\n[ \"$1\" = __probe ] && exit 0\nexport STUB_STATE='{}' STUB_LOG='{}' STUB_GAME_CMD='{game_cmd}' STUB_INSTALLER_CMD='{installer}' {extra_env}\nexec '{}/tests/stubs/docker' \"$@\"\n",
         state.display(), log.display(), env!("CARGO_MANIFEST_DIR"))).unwrap();
     std::fs::set_permissions(&wrapper, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    // A process another test forks while the file is being written inherits its write handle until that process
+    // execs, and exec'ing the wrapper meanwhile fails with ETXTBSY. Wait until it runs.
+    for i in 0.. {
+        match std::process::Command::new(&wrapper).arg("__probe").status() {
+            Err(e) if e.raw_os_error() == Some(26) && i < 100 => std::thread::sleep(std::time::Duration::from_millis(10)),
+            r => { assert!(r.expect("run stub wrapper").success()); break; }
+        }
+    }
     Env { engine: cli::detect(wrapper.to_str().unwrap()).expect("stub engine"), log, dir }
 }
 

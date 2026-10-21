@@ -101,6 +101,18 @@ pub async fn insert(st: &St, w: &Workflow) -> anyhow::Result<()> {
     st.db.call(move |c| c.execute("INSERT INTO workflows(id,name,enabled,\"trigger\",server_ids,condition,actions,created_by,created_at,last_run_at,last_result,disabled_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         rusqlite::params![w.id, w.name, w.enabled, w.trigger, json!(w.server_ids).to_string(), w.condition.as_ref().map(|c| c.to_string()), json!(w.actions).to_string(), w.created_by, w.created_at, w.last_run_at, w.last_result, w.disabled_reason]).map(|_| ())).await
 }
+/// Inserts unless the creator already has `cap` workflows. The count and the insert run in one database call, which
+/// holds the only connection, so parallel creates cannot both slip under the cap. Returns false when at the cap.
+pub async fn insert_capped(st: &St, w: &Workflow, cap: i64) -> anyhow::Result<bool> {
+    let w = w.clone();
+    st.db.call(move |c| {
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM workflows WHERE created_by=?", [&w.created_by], |r| r.get(0))?;
+        if n >= cap { return Ok(false); }
+        c.execute("INSERT INTO workflows(id,name,enabled,\"trigger\",server_ids,condition,actions,created_by,created_at,last_run_at,last_result,disabled_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            rusqlite::params![w.id, w.name, w.enabled, w.trigger, json!(w.server_ids).to_string(), w.condition.as_ref().map(|c| c.to_string()), json!(w.actions).to_string(), w.created_by, w.created_at, w.last_run_at, w.last_result, w.disabled_reason])?;
+        Ok(true)
+    }).await
+}
 /// Rewrites the editable fields (not the run bookkeeping).
 pub async fn update(st: &St, w: &Workflow) -> anyhow::Result<()> {
     let w = w.clone();

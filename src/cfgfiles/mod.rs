@@ -173,7 +173,7 @@ pub async fn put(State(st): State<St>, user: User, Path((id, file)): Path<(Strin
     let port = (def.id == "velocity").then(|| doc.get("bind").and_then(Value::as_str).and_then(|b| b.rsplit_once(':')).and_then(|(_, p)| p.parse::<i64>().ok())).flatten();
     if let Some(p) = port {
         if !(1..=65535).contains(&p) { return Err(ApiError::bad("validation", "invalid port in bind").field("bind", "1–65535")); }
-        if crate::server::list(&st).await?.iter().any(|o| o.id != id && o.port == p) { return Err(ApiError::conflict("port.taken", "that port is assigned to another Moss server").field("bind", "already assigned")); }
+        if crate::games::clashes_with_span(p, s.port_span(), &id, &crate::server::list(&st).await?) { return Err(ApiError::conflict("port.taken", "that port is assigned to another Moss server").field("bind", "already assigned")); }
     }
     let undo_id = undo::snapshot(&st, &s, &format!("Edit {}", def.rel), std::slice::from_ref(&def.rel)).await?;
     let (p2, n2) = (path, new);

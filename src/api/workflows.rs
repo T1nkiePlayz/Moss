@@ -57,13 +57,11 @@ pub(super) async fn workflows_list(State(st): State<St>, user: User) -> ApiResul
 
 pub(super) async fn workflows_create(State(st): State<St>, user: User, Json(b): Json<Value>) -> ApiResult<(StatusCode, Json<Value>)> {
     if b.get("name").is_none() { return Err(v("name", "Give the workflow a name of up to 60 characters.")); }
-    if !user.is_admin() {
-        let uid = user.id.clone();
-        let n: i64 = st.db.call(move |c| c.query_row("SELECT COUNT(*) FROM workflows WHERE created_by=?", [uid], |r| r.get(0))).await?;
-        if n >= workflows::MAX_USER_WORKFLOWS { return Err(v("name", &format!("You can have at most {} workflows. Delete one first.", workflows::MAX_USER_WORKFLOWS))); }
-    }
     let w = apply(&st, &user, blank(&user), &b).await?;
-    workflows::insert(&st, &w).await?;
+    if user.is_admin() { workflows::insert(&st, &w).await?; }
+    else if !workflows::insert_capped(&st, &w, workflows::MAX_USER_WORKFLOWS).await? {
+        return Err(v("name", &format!("You can have at most {} workflows. Delete one first.", workflows::MAX_USER_WORKFLOWS)));
+    }
     st.audit(&user.actor(), "workflow.create", &w.name, &w.trigger, None).await;
     Ok((StatusCode::CREATED, Json(w.to_json())))
 }

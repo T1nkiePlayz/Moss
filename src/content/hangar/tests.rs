@@ -196,8 +196,9 @@ async fn hangar_malformed_json_timeouts_and_unreachable_hosts_fail_fast() {
     let s = stub(|_, _| Reply::Raw(200, vec![("content-type", "application/json".into())], "{\"result\": [".into())).await;
     assert!(err_text(&hg(&hg_state(&s.base).await, "/projects", &[]).await.unwrap_err()).contains("could not read"));
     let s = stub(|_, _| Reply::Hang).await;
+    let st = hg_state(&s.base).await; // set up outside the timed part: opening the database can be slow under load
     let t = Instant::now();
-    let e = hg(&hg_state(&s.base).await, "/projects", &[]).await.err().unwrap();
+    let e = hg(&st, "/projects", &[]).await.err().unwrap();
     assert!(err_text(&e).contains("did not answer in time") && t.elapsed() < Duration::from_secs(5), "{}", err_text(&e));
     let dead = { let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); format!("http://{}", l.local_addr().unwrap()) };
     let e = hg(&hg_state(&dead).await, "/projects", &[]).await.err().unwrap();

@@ -146,8 +146,15 @@ mod tests {
 
     #[tokio::test]
     async fn port_pick_skips_used_and_bound_ports() {
-        let l = tokio::net::TcpListener::bind(("0.0.0.0", 0)).await.unwrap();
-        let busy = l.local_addr().unwrap().port();
+        // Other tests bind ports too: retry until busy+2 is free right before the pick, so only a real bug fails this.
+        let mut tries = 0;
+        let (_l, busy) = loop {
+            let l = tokio::net::TcpListener::bind(("0.0.0.0", 0)).await.unwrap();
+            let busy = l.local_addr().unwrap().port();
+            if busy < 65000 && std::net::TcpListener::bind(("0.0.0.0", busy + 2)).is_ok() { break (l, busy); }
+            tries += 1;
+            assert!(tries < 50, "no usable port pair");
+        };
         let p = pick_port((busy, busy + 2), &[busy as i64 + 1]).await.unwrap();
         assert_eq!(p, busy as i64 + 2);
         assert!(pick_port((busy, busy), &[]).await.is_none());

@@ -295,3 +295,15 @@ fn total_waiting_is_capped() {
     assert!(validate("server.started", None, &[w(600), w(600), w(600)], false).is_ok());
     assert_eq!(validate("server.started", None, &[w(600), w(600), w(600), w(1)], false).unwrap_err().0, "actions");
 }
+
+#[tokio::test]
+async fn the_per_user_cap_holds_under_parallel_creates() {
+    let st = testutil::state(|_| {}).await;
+    add_user(&st, "u1", "user").await;
+    let tasks: Vec<_> = (0..8).map(|_| { let st = st.clone(); tokio::spawn(async move { workflows::insert_capped(&st, &wf("u1", "server.crashed", &[], vec![]), 5).await.unwrap() }) }).collect();
+    let mut ok = 0;
+    for t in tasks { if t.await.unwrap() { ok += 1; } }
+    assert_eq!(ok, 5);
+    let n: i64 = st.db.call(|c| c.query_row("SELECT COUNT(*) FROM workflows WHERE created_by='u1'", [], |r| r.get(0))).await.unwrap();
+    assert_eq!(n, 5);
+}

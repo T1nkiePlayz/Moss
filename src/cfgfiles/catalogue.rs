@@ -30,10 +30,12 @@ pub struct Key {
     pub danger: bool,
     /// A string setting that may also be a plain number ("default" or a distance).
     pub mixed: bool,
+    /// How a boolean is written in text formats (`true`/`false`, `1`/`0`, `True`/`False`).
+    pub bools: (&'static str, &'static str),
 }
 
 const fn k(path: &'static str, ty: Ty, default: &'static str, group: &'static str, desc: &'static str) -> Key {
-    Key { path, ty, default, group, desc, min: None, max: None, options: &[], restart: false, since: None, until: None, secret: false, danger: false, mixed: false }
+    Key { path, ty, default, group, desc, min: None, max: None, options: &[], restart: false, since: None, until: None, secret: false, danger: false, mixed: false, bools: ("true", "false") }
 }
 impl Key {
     const fn range(mut self, lo: f64, hi: f64) -> Self { self.min = Some(lo); self.max = Some(hi); self }
@@ -44,6 +46,7 @@ impl Key {
     const fn secret(mut self) -> Self { self.secret = true; self }
     const fn danger(mut self) -> Self { self.danger = true; self }
     const fn mixed(mut self) -> Self { self.mixed = true; self }
+    const fn bools(mut self, t: &'static str, f: &'static str) -> Self { self.bools = (t, f); self }
 
     pub fn default_json(&self) -> Value { serde_json::from_str(self.default).unwrap_or(Value::Null) }
 
@@ -244,10 +247,97 @@ pub static VELOCITY: &[Key] = &[
     k("query.show-plugins", Bool, "false", "Query", "List installed proxy plugins in query responses."),
 ];
 
+// ---- games ----
+
+pub static VALHEIM_GAME: &[Key] = &[
+    k("name", Str, "\"\"", "Server", "The name shown in the server list. Defaults to the Moss server name. The password must not be part of it."),
+    k("world", Str, "\"Dedicated\"", "Server", "The world to load or create. Changing it starts a fresh world next to the old one.").restart(),
+    k("password", Str, "\"\"", "Server", "The join password: at least 5 characters, and not part of the server name.").restart().secret(),
+    k("max_players", Int, "10", "Server", "How many players Moss reports as the limit. Valheim itself allows up to 10.").range(1.0, 64.0),
+];
+
+pub static ZOMBOID_GAME: &[Key] = &[
+    k("servername", Str, "\"moss\"", "Server", "The server's name and the name of its settings and save files. Changing it starts a new world.").restart().danger(),
+    k("password", Str, "\"\"", "Server", "The admin password Project Zomboid is started with. It cannot be empty.").restart().secret(),
+    k("max_players", Int, "16", "Server", "How many players Moss reports as the limit.").range(1.0, 100.0),
+];
+
+pub static ZOMBOID_SERVER: &[Key] = &[
+    k("PublicName", Str, "\"My PZ Server\"", "Server", "The name shown in the server browser."),
+    k("PublicDescription", Str, "\"\"", "Server", "The description shown in the server browser."),
+    k("Public", Bool, "false", "Server", "List the server in the public server browser."),
+    k("Password", Str, "\"\"", "Server", "The password players need to join. Empty means anyone may join.").secret(),
+    k("MaxPlayers", Int, "32", "Gameplay", "The most players that can be connected at once.").range(1.0, 100.0).restart(),
+    k("PVP", Bool, "true", "Gameplay", "Players can hurt each other."),
+    k("PauseEmpty", Bool, "true", "Gameplay", "Pause the world while nobody is connected."),
+    k("SaveWorldEveryMinutes", Int, "0", "Saving", "Save the world this often (in minutes). 0 saves only when the server stops.").min(0.0),
+];
+
+pub static FACTORIO: &[Key] = &[
+    k("name", Str, "\"Factorio Server\"", "Server", "The name shown in the server list."),
+    k("description", Str, "\"\"", "Server", "The description shown in the server list."),
+    k("max_players", Int, "0", "Server", "The most players that can join at once. 0 means no limit.").min(0.0).restart(),
+    k("game_password", Str, "\"\"", "Access", "The password players need to join. Empty means anyone may join.").secret().restart(),
+    k("require_user_verification", Bool, "true", "Access", "Only players with a verified factorio.com account can join.").restart(),
+    k("visibility.public", Bool, "false", "Access", "List the game on the public matchmaking server (needs a factorio.com login in the file).").restart(),
+    k("visibility.lan", Bool, "false", "Access", "Advertise the game to the local network.").restart(),
+    k("autosave_interval", Int, "10", "Saving", "Minutes between autosaves.").min(1.0).restart(),
+    k("autosave_slots", Int, "5", "Saving", "How many rotating autosave files are kept.").min(1.0).restart(),
+    k("afk_autokick_interval", Int, "0", "Gameplay", "Kick players who are idle this many minutes. 0 never kicks.").min(0.0).restart(),
+    k("auto_pause", Bool, "true", "Gameplay", "Pause the game while nobody is connected.").restart(),
+    k("only_admins_can_pause_the_game", Bool, "true", "Gameplay", "Only admins can pause the game.").restart(),
+    k("max_upload_in_kilobytes_per_second", Int, "0", "Network", "Cap the upload speed for each player. 0 means no limit.").min(0.0).restart(),
+];
+
+pub static TERRARIA: &[Key] = &[
+    k("worldname", Str, "\"Moss\"", "World", "The name given to a world that is created automatically.").restart(),
+    k("world", Str, "\"\"", "World", "Path of the world file to load.").restart(),
+    k("autocreate", Int, "2", "World", "Size of a world created when the file does not exist: 1 small, 2 medium, 3 large.").range(1.0, 3.0).restart(),
+    k("difficulty", Int, "0", "World", "Difficulty of a newly created world: 0 classic, 1 expert, 2 master, 3 journey.").range(0.0, 3.0).restart(),
+    k("maxplayers", Int, "8", "Server", "The most players that can join at once.").range(1.0, 255.0).restart(),
+    k("password", Str, "\"\"", "Server", "The password players need to join. Empty means anyone may join.").secret().restart(),
+    k("motd", Str, "\"Welcome!\"", "Server", "The message players see when they join.").restart(),
+    k("language", Str, "\"en-US\"", "Server", "The language of server messages.").opts(&["en-US", "de-DE", "it-IT", "fr-FR", "es-ES", "ru-RU", "zh-Hans", "pt-BR", "pl-PL"]).restart(),
+    k("secure", Bool, "true", "Server", "Turn on cheat protection.").bools("1", "0").restart(),
+    k("upnp", Bool, "false", "Network", "Ask the router to forward the port automatically.").bools("1", "0").restart(),
+    k("npcstream", Int, "15", "Network", "How fast enemies are streamed to clients. Lower values reduce enemy skipping. 0 turns it off.").min(0.0).restart(),
+];
+
+pub static PALWORLD: &[Key] = &[
+    k("ServerName", Str, "\"Default Palworld Server\"", "Server", "The name shown in the server list.").restart(),
+    k("ServerDescription", Str, "\"\"", "Server", "The description shown in the server list.").restart(),
+    k("ServerPassword", Str, "\"\"", "Server", "The password players need to join. Empty means anyone may join.").secret().restart(),
+    k("AdminPassword", Str, "\"\"", "Server", "The password for admin commands in game. Choose one; an empty password disables them.").secret().restart(),
+    k("ServerPlayerMaxNum", Int, "32", "Server", "The most players that can join at once.").range(1.0, 128.0).restart(),
+    k("Difficulty", Str, "\"None\"", "Gameplay", "Difficulty preset.").opts(&["None", "Casual", "Normal", "Hard"]).restart(),
+    k("DayTimeSpeedRate", Float, "1.0", "Gameplay", "How fast daytime passes. Below 1 makes days longer.").range(0.1, 5.0).restart(),
+    k("NightTimeSpeedRate", Float, "1.0", "Gameplay", "How fast nighttime passes. Below 1 makes nights longer.").range(0.1, 5.0).restart(),
+    k("ExpRate", Float, "1.0", "Gameplay", "Experience gained, as a multiplier.").range(0.1, 20.0).restart(),
+    k("PalCaptureRate", Float, "1.0", "Gameplay", "How easy Pals are to capture, as a multiplier.").range(0.5, 2.0).restart(),
+    k("DeathPenalty", Str, "\"All\"", "Gameplay", "What a player drops on death.").opts(&["None", "Item", "ItemAndEquipment", "All"]).restart(),
+    k("bIsPvP", Bool, "false", "Gameplay", "Players can fight each other.").bools("True", "False").restart(),
+    k("bEnableFastTravel", Bool, "true", "Gameplay", "Players can fast travel between unlocked points.").bools("True", "False").restart(),
+];
+
+/// Source engine `server.cfg`; the cvars most servers change.
+pub static SRCDS: &[Key] = &[
+    k("hostname", Str, "\"My Server\"", "Server", "The name shown in the server browser."),
+    k("sv_password", Str, "\"\"", "Server", "The password players need to join. Empty means anyone may join.").secret(),
+    k("rcon_password", Str, "\"\"", "Server", "The remote console password. Leave it empty to turn remote console off.").secret().danger(),
+    k("sv_lan", Bool, "false", "Server", "Run as a LAN server: not listed on the internet and only reachable from the local network.").bools("1", "0"),
+    k("sv_region", Int, "255", "Server", "Region shown in the browser: 0 US East, 1 US West, 2 South America, 3 Europe, 4 Asia, 5 Australia, 6 Middle East, 7 Africa, 255 world.").opts(&["0", "1", "2", "3", "4", "5", "6", "7", "255"]),
+    k("sv_cheats", Bool, "false", "Gameplay", "Allow cheat commands for players.").bools("1", "0").danger(),
+    k("mp_timelimit", Int, "0", "Gameplay", "Minutes a map is played before the next one. 0 means no limit.").min(0.0),
+    k("mp_friendlyfire", Bool, "false", "Gameplay", "Players can hurt their own team.").bools("1", "0"),
+    k("sv_alltalk", Bool, "false", "Gameplay", "Players hear voice chat from both teams.").bools("1", "0"),
+    k("sv_maxrate", Int, "0", "Network", "Highest data rate (bytes per second) a player may use. 0 means no limit.").min(0.0),
+    k("sv_minrate", Int, "5000", "Network", "Lowest data rate (bytes per second) a player may use.").min(0.0),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    const ALL: &[(&str, &[Key])] = &[("paper-global", PAPER_GLOBAL), ("paper-world", PAPER_WORLD), ("spigot", SPIGOT), ("bukkit", BUKKIT), ("purpur", PURPUR), ("velocity", VELOCITY)];
+    const ALL: &[(&str, &[Key])] = &[("paper-global", PAPER_GLOBAL), ("paper-world", PAPER_WORLD), ("spigot", SPIGOT), ("bukkit", BUKKIT), ("purpur", PURPUR), ("velocity", VELOCITY), ("valheim-game", VALHEIM_GAME), ("zomboid-game", ZOMBOID_GAME), ("zomboid-server", ZOMBOID_SERVER), ("factorio", FACTORIO), ("terraria", TERRARIA), ("palworld", PALWORLD), ("srcds", SRCDS)];
 
     #[test]
     fn every_default_is_valid_for_its_own_key() {

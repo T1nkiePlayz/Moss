@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../../components/Icon.svelte';
+  import Lazy from '../../components/Lazy.svelte';
   import States from '../../components/States.svelte';
   import { api, errMsg, type Server } from '../../lib/api';
   import { PROP_GROUPS, parseProps, setProp } from '../../lib/props';
@@ -14,8 +15,12 @@
   let rawMode = $state(false);
   let saving = $state(false);
   const canWrite = $derived(can('config.write'));
+  // games without a server.properties use the structured editor for their own settings files
+  const hasProps = $derived(s.capabilities.includes('properties'));
+  const loadEditor = () => import('../../components/ConfigEditor.svelte');
 
   async function load() {
+    if (!hasProps) return;
     err = ''; loaded = false;
     try { const r = await api.properties(s.id); raw = original = r.raw; } catch (e) { err = errMsg(e); }
     loaded = true;
@@ -42,7 +47,9 @@
   }
 </script>
 
-{#if err}
+{#if !hasProps}
+  <Lazy load={loadEditor} props={{ server: s }} />
+{:else if err}
   <States kind="error" text={err} retry={load} />
 {:else if !loaded}
   <States kind="loading" rows={4} />

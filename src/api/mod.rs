@@ -32,6 +32,7 @@ mod metrics;
 mod notifications;
 mod push;
 pub mod origin;
+mod player_lists;
 mod players_online;
 mod reinstall;
 mod servers;
@@ -93,6 +94,11 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/players/online", get(players_online::list))
         .route("/servers/{id}/players/{name}/kick", post(players_online::kick))
         .route("/servers/{id}/players/{name}/ban", post(players_online::ban))
+        .route("/servers/{id}/player-lists", get(player_lists::server_get).put(player_lists::server_put))
+        .route("/player-lists", get(player_lists::lists).post(player_lists::list_create))
+        .route("/player-lists/{id}", patch(player_lists::list_patch).delete(player_lists::list_delete))
+        .route("/player-lists/{id}/entries", get(player_lists::entries).post(player_lists::entry_add))
+        .route("/player-lists/{id}/entries/{name}", axum::routing::delete(player_lists::entry_remove))
         .route("/servers/{id}/stats", get(server_stats))
         .route("/servers/{id}/timeline", get(server_timeline))
         .route("/servers/{id}/health", get(health::server_health))

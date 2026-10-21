@@ -26,6 +26,7 @@ async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     if tokio::net::TcpListener::bind(("0.0.0.0", s.port as u16)).await.is_err() {
         return Err(ApiError::conflict("port.in_use", format!("port {} is already in use on this host", s.port)));
     }
+    crate::playerlists::apply(st, &s.id).await; // shared allow/ban lists into the files the game reads at start
     // Java discovery may run `java -version`, so keep it off the async worker threads.
     let argv = tokio::task::spawn_blocking({ let (st, s) = (st.clone(), s.clone()); move || build_command(&st, &s) }).await.map_err(anyhow::Error::from)??;
     let (dir, mdir) = (s.dir(st), s.moss_dir(st));

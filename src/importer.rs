@@ -360,7 +360,8 @@ pub async fn start(State(st): State<St>, user: User, Json(r): Json<ImportReq>) -
     if r.accept_eula != Some(true) { return Err(ApiError::bad("eula.required", "You must accept the Minecraft EULA to run a Minecraft server.").field("accept_eula", "required")); }
     let mem = r.memory_mb.unwrap_or(2048);
     if !(256..=262144).contains(&mem) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", "256–262144")); }
-    let existing: Vec<i64> = crate::server::list(&st).await?.iter().map(|s| s.port).collect();
+    // every port another server uses, including a game's extra ports (Valheim takes port+1 and port+2)
+    let existing: Vec<i64> = crate::server::list(&st).await?.iter().flat_map(|s| s.port..=s.port + s.port_span()).collect();
     let default_port = if runtime == "velocity" { 25577 } else { 25565 };
     let port = match r.port.or(d.port) {
         Some(p) if !(1..=65535).contains(&p) => return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")),

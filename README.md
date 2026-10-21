@@ -55,6 +55,13 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 | **Event workflows** | *When this happens, do that*: restart after a crash, greet players, back up after every stop. Any webhook event can trigger start, stop, restart, console commands, backups, waits, notifications or a web call, with a dry run, loop protection and the creator's permissions re-checked on every run. |
 | **Player analytics** | Who played, when and for how long: unique players, peak, playtime, an hourly chart, a weekday-by-hour heatmap and top players, kept 90 days. |
 | **Public status pages** | Opt-in pages anyone can open without signing in: chosen servers, online state, players and uptime, server-rendered with a strict CSP and nothing private in them. |
+| **Remote admin for games** | Moss sets up RCON for Source games, Rust, Factorio, Palworld and Project Zomboid with a generated password, shows who is online and can kick or ban them from the Players tab. |
+| **Game mods** | Thunderstore mods with BepInEx for Valheim, the Factorio mod portal, and Steam Workshop collections and maps for Garry's Mod and CS2, see [docs/game-mods.md](docs/game-mods.md). |
+| **Game updates** | Checks Steam build ids, Factorio, Terraria and Bedrock releases; one click (or a `game_update` schedule) updates with a backup first and keeps your configs and worlds. |
+| **Game config editors** | Form editors for `server.cfg`, `serverconfig.txt`, `server-settings.json`, `PalWorldSettings.ini`, Zomboid's server ini and `moss-game.cfg`, with a raw view. |
+| **Shared player lists** | Allow and ban lists defined once and applied to every subscribed Minecraft Java and Bedrock server; ban lists also reach games with an admin channel while they run, see [docs/player-lists.md](docs/player-lists.md). |
+| **Live maps** | A web map plugin (BlueMap, Dynmap, squaremap, Pl3xMap) shown in a Map tab and, if you choose, on the public status page, through a sandboxed proxy, see [docs/maps.md](docs/maps.md). |
+| **Installable app and push** | The panel installs as an app and sends Web Push notifications (crashes, backups, players joining) to phones and desktops, see [docs/push.md](docs/push.md). |
 | **Command palette** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> reaches every page, server and action. |
 
 ## Features
@@ -243,7 +250,7 @@ Data layout: `moss.sqlite`, `servers/<id>/` (game files; Moss metadata in `.moss
 | Palworld, Satisfactory | SteamCMD | Linux x86-64 | – | Stopped with SIGINT so the world is saved |
 | Project Zomboid | SteamCMD | Linux x86-64 | – | Generated admin password in `moss-game.cfg` |
 
-Games get the console, files, backups, schedules, workflows and status pages; their default ports are picked so that two servers of the same game never share the extra ports the game uses. Steam games are downloaded anonymously with SteamCMD (it needs 32-bit libraries, e.g. `lib32gcc-s1`). Container isolation is Minecraft-only for now. Game installs and launches are covered by unit tests of their commands, download parsers and log rules, but have not all been run against the real servers yet: please report anything that does not start.
+Games get the console, files, backups, schedules, workflows, status pages, config editors and update checks; RCON games also get an online-player list with kick and ban, and Valheim, Factorio, Garry's Mod and CS2 get a Mods tab; their default ports are picked so that two servers of the same game never share the extra ports the game uses. Steam games are downloaded anonymously with SteamCMD (it needs 32-bit libraries, e.g. `lib32gcc-s1`). Container isolation works for games too (Settings → Isolation; Bedrock, SteamCMD and Debian base images). Game installs and launches are covered by unit tests of their commands, download parsers and log rules, but have not all been run against the real servers yet: please report anything that does not start.
 
 A runtime is only offered as installable when it works end to end. Spigot (BuildTools) is intentionally not offered: it cannot be redistributed, use Paper. The Forge, NeoForge and Quilt installers run the official installer jar in the server directory with a cleared environment and a time limit; they are not sandboxed (see [Security model](#security-model)).
 
@@ -304,7 +311,7 @@ macOS binaries are built in CI and are ad-hoc signed, not notarised; see [docs/m
 
 ## Current limitations
 
-- Container mode has only been tested against a stand-in for Docker and Podman. Game-only networking (no outbound access) needs Docker; Podman is refused rather than weakened. It is offered for Minecraft servers only.
+- Container mode has only been tested against a stand-in for Docker and Podman. Game-only networking (no outbound access) needs Docker; Podman is refused rather than weakened. Game containers have not been run against real games yet.
 - The desktop app source is in `desktop/` but has not been built or run yet; there are no desktop downloads.
 - Release checksums are signed with cosign, but no signed release has been published yet.
 - Moss has had an internal security review only; an external one is still to come.
@@ -328,7 +335,7 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | |
 | **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode with game-only network and extra UDP/TCP ports | |
 | **M6 Release 1.0** | ✅ | OpenAPI document and [freeze with compatibility tests](docs/api-policy.md), MFA policy, API tokens, [event webhooks](docs/webhooks.md), [internal security review](docs/security-review.md), dependency audit, soak tests, cosign-signed checksums, [SECURITY.md](SECURITY.md) | A 20-minute release-profile soak, first signed release |
-| **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and nine SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages | Run every game end to end on hardware |
+| **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and nine SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages, RCON admin, game mods, game updates, game config editors, container isolation for games, shared player lists, live maps, installable app with Web Push | Run every game end to end on hardware |
 | **M8 After First Release** | 🔴 | - | Multi-node, extensions and SDK. |
 
 ## Documentation
@@ -340,6 +347,8 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | [docs/recovery.md](docs/recovery.md) | `moss recover`: locked-out owner, stuck jobs, integrity |
 | [docs/threat-model.md](docs/threat-model.md) · [docs/security-review.md](docs/security-review.md) · [SECURITY.md](SECURITY.md) | What Moss defends against, what the internal review found, how to report a problem |
 | [docs/webhooks.md](docs/webhooks.md) | Signed event webhooks and how to verify them |
+| [docs/game-mods.md](docs/game-mods.md) · [docs/player-lists.md](docs/player-lists.md) | Mods for Valheim, Factorio, Garry's Mod and CS2; shared allow and ban lists |
+| [docs/maps.md](docs/maps.md) · [docs/push.md](docs/push.md) | Live web maps; installing the app and Web Push |
 | [docs/api-policy.md](docs/api-policy.md) | The frozen API and what counts as a breaking change |
 | [docs/desktop.md](docs/desktop.md) | The desktop app |
 | [docs/architecture.md](docs/architecture.md) · [docs/adr](docs/adr) | How it works and why |

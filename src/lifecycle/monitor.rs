@@ -93,6 +93,8 @@ fn sample(st: &St) {
                 };
                 game_players.extend(crate::games::admin::poll_players(&st2, &admin_games).await);
             }
+            // a list ban on an admin-channel game can only land while that player is connected
+            for (id, p) in &game_players { crate::playerlists::players_seen(&st2, id, &p.sample); }
             let mut pings: HashMap<String, _> = pinged.iter().map(|s| s.id.clone()).zip(futures_util::future::join_all(pinged.iter().map(|s| crate::mcping::ping(s.port as u16))).await).collect();
             for s in servers.iter().filter(|s| s.installed && s.pid.is_some()) {
                 let Some(pid) = s.pid else { continue };

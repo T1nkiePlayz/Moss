@@ -118,7 +118,7 @@ pub(super) async fn server_get(State(st): State<St>, user: User, Path(id): Path<
     }).await?;
     let note = if s.is_proxy() { Some("Velocity has no whitelist. Subscribe the servers behind the proxy instead.") }
         else if s.runtime == "bedrock" { Some("Bedrock has no ban command: only allowlists apply here.") }
-        else if !sup.allow && sup.ban { Some("This game supports ban lists only; banning works while the server runs, and removing a name does not unban it.") }
+        else if !sup.allow && sup.ban { Some("This game supports ban lists only. A ban lands while the server runs and the player is connected (Moss retries when they join); removing a name does not unban it.") }
         else if !sup.allow && !sup.ban { Some("This game has no admin channel Moss can use for player lists.") } else { None };
     Ok(Json(json!({"lists": items, "support": {"allow": sup.allow, "ban": sup.ban, "note": note}, "pending": {"allow": pa, "ban": pb}, "allowlist_enabled": playerlists::allow_enabled(&st, &s)})))
 }

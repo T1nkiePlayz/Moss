@@ -6,7 +6,8 @@ use std::collections::HashSet;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub name: String, pub uuid: Option<String>, pub reason: String }
 
-pub fn key(name: &str) -> String { name.to_lowercase() }
+/// ASCII case folding, the same as SQLite's `lower()` used by the entry index.
+pub fn key(name: &str) -> String { name.to_ascii_lowercase() }
 
 fn md5(data: &[u8]) -> [u8; 16] {
     const S: [u32; 64] = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
@@ -49,9 +50,9 @@ pub fn dashed(hex: &str) -> Option<String> {
 }
 
 /// Online-mode UUID from Mojang. None when the name is unknown, malformed, or Mojang does not answer in time.
-pub async fn mojang_uuid(http: &reqwest::Client, base: &str, name: &str) -> Option<String> {
+pub async fn mojang_uuid(http: &reqwest::Client, base: &str, name: &str, timeout: std::time::Duration) -> Option<String> {
     if name.is_empty() || name.len() > 16 || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { return None; }
-    let r = http.get(format!("{base}/users/profiles/minecraft/{name}")).timeout(std::time::Duration::from_secs(5)).send().await.ok()?;
+    let r = http.get(format!("{base}/users/profiles/minecraft/{name}")).timeout(timeout).send().await.ok()?;
     if !r.status().is_success() { return None; }
     dashed(r.json::<Value>().await.ok()?["id"].as_str()?)
 }
@@ -65,6 +66,12 @@ pub fn merge(existing: &str, desired: &[Item], applied: &HashSet<String>, entry:
     list.retain(|v| v["name"].as_str().is_none_or(|n| { let k = key(n); !applied.contains(&k) && !want.contains(&k) }));
     list.extend(desired.iter().map(entry));
     Ok(serde_json::to_string_pretty(&list).unwrap_or_default() + "\n")
+}
+
+/// Names in a JSON list file (lowercased key to the entry's uuid, if any). Empty when the file is missing or unreadable.
+pub fn names_in(existing: &str) -> std::collections::HashMap<String, Option<String>> {
+    serde_json::from_str::<Vec<Value>>(existing).unwrap_or_default().iter()
+        .filter_map(|v| Some((key(v["name"].as_str()?), v["uuid"].as_str().map(String::from)))).collect()
 }
 
 pub fn whitelist_entry(i: &Item) -> Value { json!({"uuid": i.uuid, "name": i.name}) }

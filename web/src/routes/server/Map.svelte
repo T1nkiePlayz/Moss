@@ -1,6 +1,7 @@
 <script lang="ts">
   import States from '../../components/States.svelte';
-  import { apiOps, errMsg, type Server, type ServerMap } from '../../lib/api';
+  import { apiExtra } from '../../lib/api-extra';
+  import { errMsg, type Server, type ServerMap } from '../../lib/api';
 
   let { server: s }: { server: Server } = $props();
   let info = $state<ServerMap | null>(null);
@@ -11,7 +12,7 @@
   async function load() {
     const my = ++seq;
     err = '';
-    try { const r = await apiOps.map(s.id); if (my === seq) info = r; } catch (e) { if (my === seq) err = errMsg(e); }
+    try { const r = await apiExtra.map(s.id); if (my === seq) info = r; } catch (e) { if (my === seq) err = errMsg(e); }
   }
   // Reload when the server changes, starts or stops; the link is signed and expires, so renew it well before then.
   $effect(() => {

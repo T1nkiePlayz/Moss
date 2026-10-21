@@ -30,7 +30,7 @@ Server object:
  state:"installing"|"stopped"|"starting"|"running"|"stopping"|"crashed"|"failed"|"needs_attention",
  state_detail|null,state_since,uptime_s|null,pid|null,players:{online,max,sample:string[]}|null,motd|null,
  cpu_pct|null,mem_bytes|null,content_kind,tags:string[],notes,created_at,
- capabilities:string[] /* console,files,content,backups,players,properties,schedules */}
+ capabilities:string[] /* console,files,content,backups,players,properties,config,schedules */}
 ```
 - `GET /servers` → `Server[]`
 - `POST /servers {name,runtime,game_version,loader_version?,memory_mb,port?,accept_eula:boolean,flags_profile?,autostart?,custom?:{command:string[]}}` → 202 `{server,operation}`. `accept_eula` must be true for Minecraft runtimes (recorded + audited).
@@ -145,6 +145,8 @@ Server object gains `limits:{memory_mb:number|null, cpu_pct:number|null, pids:nu
 
 ### Actions
 - `POST /servers/{id}/actions/reinstall {keep_data:boolean}` → 202 `{operation}`. Allowed when the install failed or the server is stopped; `keep_data:true` only re-downloads the server jar/loader files.
+- `GET /servers/{id}/game-update[?refresh=true]` → `{installed, latest, available, checked_at, source}` for game servers (Steam: installed `buildid` from `steamapps/appmanifest_<appid>.acf` vs the public branch on steamcmd.net; Factorio: `data/base/info.json` vs factorio.com; Terraria/Bedrock: stored version vs upstream). Lookups are cached for an hour; a fresh lookup that finds an update raises the admin-only `update_available` notification. `server.view`.
+- `POST /servers/{id}/game-update` → 202 `{operation}` (kind `server.game_update`): pre-change backup, stop if running, reinstall over the files (worlds, saves and config files are kept), record the version, start again if it was running. 409 `game_update.current` when already up to date, `server.installing` while installing. `config.write`. Schedules may use `kind:"game_update"` (updates only when one is available).
 - `DELETE /java/{major}` → 204. Managed Java only; 409 `java.in_use` naming servers that need it. `POST /java/install` returns 409 `java.in_use` if any running server uses that major (install into a temp dir, atomic swap only when none run).
 - `GET /status` host gains `os: "Linux"|"macOS"`.
 
@@ -233,7 +235,7 @@ A test copy is a hidden server on a free port (`MOSS_STAGING_PORT_RANGE`, defaul
 
 ### Configuration files
 Structured editors for `paper-global.yml`, `paper-world-defaults.yml`, per-world `paper-world.yml`, `spigot.yml`, `bukkit.yml`, `purpur.yml` (Purpur only) and `velocity.toml`. Edits change single lines of the text, so comments and unknown keys survive. Every change takes an undo snapshot (revert with `POST /undo/{id}/revert`).
-- `GET /servers/{id}/config` -> `{files:[{id,title,path,format:"yaml"|"toml",exists}]}` (`files.read`). Ids: `paper-global`, `paper-world-defaults`, `world--<name>`, `spigot`, `bukkit`, `purpur`, `velocity`.
+- `GET /servers/{id}/config` -> `{files:[{id,title,path,format:"yaml"|"toml"|"json"|"keyvalue"|"cvar"|"ini",exists,creatable}]}` (`files.read`). Ids: `paper-global`, `paper-world-defaults`, `world--<name>`, `spigot`, `bukkit`, `purpur`, `velocity`; games: `moss-game` (Valheim, Zomboid), `zomboid-server`, `server-settings` (Factorio), `serverconfig` (Terraria), `palworld-settings`, `server-cfg` (gmod, tf2, l4d2, cs2). Servers of those games have the `config` capability (the Config tab). `creatable` files (server.cfg) may be written before the game has made them.
 - `GET /servers/{id}/config/{file}` -> `{id,title,path,format,exists,raw,parse_error|null,fields:[{key,type:"bool"|"int"|"float"|"string"|"enum",default,group,description,min,max,options,restart,secret,danger,mixed,present,value}],history:[{id,title,created_at}]}`. Fields are the curated catalogue for the server's Minecraft version; `secret` values are never returned.
 - `PUT /servers/{id}/config/{file}` (`config.write`) with exactly one of `{raw}` (whole text, must parse) or `{set:{"dotted.key":value},unset:["dotted.key"]}` (catalogue keys only, validated for type, range and options) -> `{undo_id|null,changed}`. Errors: 400 `config.invalid` / `config.unknown_key`, 404 unknown file id, 409 `config.missing` (file not created yet).
 - `GET /servers/{id}/config/{file}/diff?snapshot=` -> `{current,previous|null,snapshot:{id,title,created_at}|null}`; defaults to the latest snapshot; only snapshots of that file are accepted.

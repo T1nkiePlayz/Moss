@@ -1,0 +1,4 @@
+info--format{{.ServerVersion}}|{{.SecurityOptions}}
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly
+networkcreate--driverbridge--optcom.docker.network.bridge.enable_ip_masquerade=falsemoss-gameonly
+networkinspect--format{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}moss-gameonly

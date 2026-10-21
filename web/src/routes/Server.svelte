@@ -33,7 +33,7 @@
     const t: { id: string; label: string; icon: string }[] = [{ id: 'overview', label: 'Overview', icon: 'home' }];
     if (c.includes('console')) t.push({ id: 'console', label: 'Console', icon: 'terminal' });
     if (c.includes('files')) t.push({ id: 'files', label: 'Files', icon: 'folder' });
-    if (c.includes('properties')) t.push({ id: 'config', label: 'Config', icon: 'sliders' });
+    if (c.includes('properties') || c.includes('config')) t.push({ id: 'config', label: 'Config', icon: 'sliders' });
     if (c.includes('content') && s.content_kind !== 'none') t.push({ id: 'content', label: kindName[s.content_kind] ?? 'Content', icon: 'puzzle' });
     if (c.includes('game_mods')) t.push({ id: 'game-mods', label: 'Mods', icon: 'puzzle' });
     if (c.includes('java')) t.push({ id: 'upgrade', label: 'Upgrade', icon: 'arrow-up' });

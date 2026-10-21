@@ -2,7 +2,8 @@
   import Icon from '../../components/Icon.svelte';
   import States from '../../components/States.svelte';
   import OpCard from '../../components/OpCard.svelte';
-  import { errMsg, gameMods, type GameModHit, type GameModsInfo, type Operation, type Server } from '../../lib/api';
+  import { gameMods } from '../../lib/api-extra';
+  import { errMsg, type GameModHit, type GameModsInfo, type Operation, type Server } from '../../lib/api';
   import { compact } from '../../lib/format';
   import { onOp, ops, toast, toastError, trackOp } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';

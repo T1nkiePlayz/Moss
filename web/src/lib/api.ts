@@ -119,7 +119,7 @@ export interface Backup {
   verified_at: string | null; note: string; kind: 'manual' | 'scheduled' | 'pre-change'; consistent: boolean; files: number;
 }
 export interface Schedule {
-  id: string; server_id: string; kind: 'backup' | 'restart' | 'start' | 'stop' | 'command'; command: string | null;
+  id: string; server_id: string; kind: 'backup' | 'restart' | 'start' | 'stop' | 'command' | 'game_update'; command: string | null;
   every_minutes: number | null; daily_at: string | null; tz_offset_min: number; enabled: boolean; keep: number | null;
   last_run: string | null; next_run: string | null; last_status: string | null;
 }
@@ -128,13 +128,14 @@ export interface Operation {
   state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; stage: string; progress: number | null;
   log: string[]; error: string | null; created_at: string; started_at: string | null; ended_at: string | null; cancellable: boolean;
 }
-export interface ConfigFileInfo { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean }
+export type ConfigFormat = 'yaml' | 'toml' | 'json' | 'keyvalue' | 'cvar' | 'ini';
+export interface ConfigFileInfo { id: string; title: string; path: string; format: ConfigFormat; exists: boolean; creatable?: boolean }
 export interface ConfigField {
   key: string; type: 'bool' | 'int' | 'float' | 'string' | 'enum' | string; default: unknown; group: string; description: string; min: number | null; max: number | null; options: string[];
   restart: boolean; secret: boolean; danger: boolean; mixed: boolean; present: boolean; value: unknown;
 }
 export interface ConfigSnapshot { id: string; title: string; created_at: string }
-export interface ConfigFile { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean; raw: string; parse_error: string | null; fields: ConfigField[]; history: ConfigSnapshot[] }
+export interface ConfigFile { id: string; title: string; path: string; format: ConfigFormat; exists: boolean; creatable?: boolean; raw: string; parse_error: string | null; fields: ConfigField[]; history: ConfigSnapshot[] }
 export interface ConfigDiff { current: string; previous: string | null; snapshot: ConfigSnapshot | null }
 export interface SavedView { id: string; scope: 'servers' | 'content'; name: string; filters: Record<string, unknown>; sort: string; created_at: string }
 export interface Blueprint { id: string; name: string; runtime: string; game_version: string; loader_version: string | null; memory_mb: number; properties: number; content: number; schedules: number; created_by: string; created_at: string }
@@ -244,7 +245,7 @@ export function send<T = void>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path
 }
 export const clearCache = () => cache.clear();
 
-const q = (o: Record<string, string | number | undefined | null>) => {
+export const q = (o: Record<string, string | number | undefined | null>) => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(o)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v));
   const s = p.toString();
@@ -560,9 +561,6 @@ export const apiOps = {
   notifications: (o: { unread?: boolean; limit?: number } = {}) => get<NotificationList>(`/notifications${q({ unread: o.unread ? 1 : undefined, limit: o.limit ?? 50 })}`),
   markRead: (b: { ids?: string[]; all?: boolean }) => send('POST', '/notifications/read', b),
   testWebhook: () => send<{ delivered: boolean; detail: string }>('POST', '/notifications/test'),
-  pushKey: () => get<{ key: string }>('/push/key', { ttl: 0 }),
-  pushSubscribe: (b: PushSubscriptionJSON) => send('POST', '/push/subscriptions', b),
-  pushUnsubscribe: (endpoint: string) => send('DELETE', '/push/subscriptions', { endpoint }),
   tokens: (all = false) => get<ApiToken[]>(`/tokens${q({ all: all ? 1 : undefined })}`),
   createToken: (b: { name: string; scope: TokenScope; expires_in_days?: number }) => send<CreatedToken>('POST', '/tokens', b),
   revokeToken: (id: string) => send('DELETE', `/tokens/${e(id)}`),
@@ -586,11 +584,7 @@ export const apiOps = {
   serverDestination: (sid: string) => get<ServerDestination>(`/servers/${e(sid)}/backup-destination`, { ttl: 0 }),
   setServerDestination: (sid: string, destination_id: string) => send<ServerDestination>('PUT', `/servers/${e(sid)}/backup-destination`, { destination_id }),
   metrics: (id: string, range: MetricRange) => get<MetricSeries>(`/servers/${e(id)}/metrics${q({ range })}`),
-  map: (id: string) => get<ServerMap>(`/servers/${e(id)}/map`, { ttl: 0 }),
   analytics: (id: string, days: AnalyticsDays) => get<PlayerAnalytics>(`/servers/${e(id)}/analytics${q({ days })}`),
-  onlinePlayers: (id: string) => get<OnlinePlayers>(`/servers/${e(id)}/players/online`),
-  kickPlayer: (id: string, name: string, reason?: string) => send('POST', `/servers/${e(id)}/players/${e(name)}/kick`, { reason }),
-  banPlayer: (id: string, name: string, reason?: string) => send('POST', `/servers/${e(id)}/players/${e(name)}/ban`, { reason }),
   hostMetrics: (range: MetricRange) => get<MetricSeries>(`/metrics/host${q({ range })}`),
   supportPreview: () => get<SupportPreview>('/support-bundle?preview=1'),
   downloadSupportBundle: () => download('/support-bundle', 'moss-support-bundle.zip'),
@@ -612,13 +606,6 @@ export interface GameModsInfo {
   credentials?: { username: string | null; has_token: boolean };
   workshop?: { field: 'collection' | 'map'; id: string | null; url: string | null; has_api_key: boolean };
 }
-export const gameMods = {
-  info: (id: string) => get<GameModsInfo>(`/servers/${e(id)}/game-mods`, { ttl: 0 }),
-  search: (id: string, text: string) => get<{ results: GameModHit[] }>(`/servers/${e(id)}/game-mods/search${q({ q: text })}`, { ttl: 30000 }),
-  updates: (id: string) => get<{ updates: { id: string; installed: string; latest: string }[] }>(`/servers/${e(id)}/game-mods/updates`, { ttl: 0 }),
-  install: (id: string, mod: string, version?: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/game-mods`, { id: mod, version }),
-  setEnabled: (id: string, mod: string, enabled: boolean) => send('PATCH', `/servers/${e(id)}/game-mods/${e(mod)}`, { enabled }),
-  remove: (id: string, mod: string) => send('DELETE', `/servers/${e(id)}/game-mods/${e(mod)}`),
-  setWorkshop: (id: string, b: { collection?: string; map?: string }) => send('PUT', `/servers/${e(id)}/game-mods/workshop`, b),
-  setCredentials: (id: string, username: string, token?: string) => send('PUT', `/servers/${e(id)}/game-mods/credentials`, { username, token }),
-};
+/** GET /servers/{id}/game-update: installed vs latest version of a game server's software. */
+export interface GameUpdate { installed: string | null; latest: string | null; available: boolean; checked_at: string; source: string }
+/** Game servers (everything that is not a Minecraft Java server, a custom command or the simulator). */

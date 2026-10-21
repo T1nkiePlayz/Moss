@@ -1,6 +1,7 @@
 // In-memory backend for `VITE_MOCK=1`. Never imported in production builds.
 import type * as A from './api';
 import { ApiError } from './api';
+import { handlePlayerLists, NONE as NOT_PLAYERLISTS } from './mock-playerlists';
 import { handleWebhooks, NONE as NOT_WEBHOOK } from './mock-webhooks';
 import { handleWorkflows, NONE as NOT_WORKFLOW } from './mock-workflows';
 import { handleRemote, NONE as NOT_REMOTE, seedRemote } from './mock-remote';
@@ -622,6 +623,8 @@ function handleStatusPages(method: string, p: string, b: Record<string, any>): u
 
 async function handleX(method: string, p: string, qs: URLSearchParams, b: Record<string, any>): Promise<unknown> {
   if (p.startsWith('/status-pages')) return handleStatusPages(method, p, b);
+  const pl = await handlePlayerLists({ uid, now }, method, p, b);
+  if (pl !== NOT_PLAYERLISTS) return pl;
   const wh = await handleWebhooks({ uid, now, servers }, method, p, b);
   if (wh !== NOT_WEBHOOK) return wh;
   const wf = await handleWorkflows({ uid, now, servers }, method, p, b);

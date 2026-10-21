@@ -301,3 +301,11 @@ Valheim (Thunderstore), Factorio (mod portal) and Garry's Mod / CS2 (Steam Works
 - `DELETE /servers/{id}/game-mods/{mod}` (`content.manage`) → 204; 409 `game_mods.required` while another installed mod needs it, 409 `server.running`
 - `PUT /servers/{id}/game-mods/workshop {collection}` (gmod) or `{map}` (cs2) (`content.manage`) → `{ok:true,id}`; an empty value clears it; 400 `validation` unless digits
 - `PUT /servers/{id}/game-mods/credentials {username, token?}` (`config.write`, Factorio only) → `{ok:true}`; an empty username clears both; the token is never returned
+
+## Shared player lists
+Named whitelists and ban lists managed once and applied to every subscribed server; guide in `docs/player-lists.md`. List management is admin-only (non-admins get 403); `GET /servers/{id}/player-lists` needs `server.view`.
+- `GET /player-lists` → `{items:[{id,name,kind:"allow"|"ban",entries,servers,created_at}]}` · `POST /player-lists {name, kind}` → 201 · `PATCH /player-lists/{id} {name}` · `DELETE /player-lists/{id}` → 204
+- `GET /player-lists/{id}/entries` → `{items:[{name,uuid|null,reason,added_by,added_at}]}` · `POST /player-lists/{id}/entries {name, reason?}` → 201 (409 `player.exists`, names are unique ignoring case) · `DELETE /player-lists/{id}/entries/{name}` → 204
+- `GET /servers/{id}/player-lists` → `{lists:[{id,name,kind,entries,subscribed}], support:{allow,ban,note|null}, pending:{allow,ban}, allowlist_enabled:boolean|null}`
+- `PUT /servers/{id}/player-lists {list_ids}` (admin) replaces the subscriptions; 422 if a list kind is unsupported by the game.
+Changes are applied in the background and recorded in the activity log (`playerlist.*`).

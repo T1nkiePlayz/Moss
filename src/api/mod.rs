@@ -24,6 +24,7 @@ mod activity;
 mod assets;
 mod backup_destinations;
 mod container;
+pub(crate) mod game_mods;
 mod java;
 mod limits;
 mod map_proxy;
@@ -133,6 +134,12 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/upgrade", post(content::upgrade_start))
         .route("/servers/{id}/content/{item}", patch(content::patch_item).delete(content::remove))
         .route("/servers/{id}/content/{item}/update", post(content::update))
+        .route("/servers/{id}/game-mods", get(game_mods::list).post(game_mods::install))
+        .route("/servers/{id}/game-mods/search", get(game_mods::search))
+        .route("/servers/{id}/game-mods/updates", get(game_mods::updates))
+        .route("/servers/{id}/game-mods/workshop", axum::routing::put(game_mods::workshop_put))
+        .route("/servers/{id}/game-mods/credentials", axum::routing::put(game_mods::credentials_put))
+        .route("/servers/{id}/game-mods/{item}", patch(game_mods::patch).delete(game_mods::delete))
         .route("/backups", get(backups::list_all))
         .route("/servers/{id}/backups", get(backups::list).post(backups::create))
         .route("/backups/{id}", patch(backups::patch).delete(backups::delete))

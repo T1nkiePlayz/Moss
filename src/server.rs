@@ -86,6 +86,7 @@ impl Srv {
         if self.is_mc() { c.push("java"); }
         if self.needs_eula() { c.push("eula"); }
         if self.content_kind() != "none" { c.push("content"); }
+        if matches!(self.runtime.as_str(), "valheim" | "factorio" | "gmod" | "cs2") { c.push("game_mods"); }
         c
     }
 }

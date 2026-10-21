@@ -279,3 +279,15 @@ Outbound, signed event subscriptions; consumer guide in `docs/webhooks.md`.
 - `POST /webhooks/{id}/test` → `{delivery}`: one attempt now, even if disabled, logged but never retried or counted towards auto-disable
 - `GET /webhooks/{id}/deliveries` → `{items:[{id,event_id,type,test,state:"pending"|"delivered"|"dead",attempts,max_attempts,created_at,finished_at,next_attempt_at,status_code,latency_ms,response,error}]}` (the last 100 finished plus anything pending; `response` is truncated)
 - `POST /webhooks/{id}/deliveries/{did}/retry` → `{delivery}`; 409 `webhook.not_retryable` unless the delivery is `dead`
+## Game mods
+
+Valheim (Thunderstore), Factorio (mod portal) and Garry's Mod / CS2 (Steam Workshop); see [game-mods.md](game-mods.md). Servers with these runtimes list `game_mods` in `capabilities`. Other runtimes answer 400 `capability.unsupported`.
+
+- `GET /servers/{id}/game-mods` (`server.view`) → `{kind:"thunderstore"|"factorio"|"workshop", runtime, running, installed:[{id,title,version,enabled,auto,requires,url,installed_at}], bepinex?, credentials?:{username,has_token}, workshop?:{field:"collection"|"map",id,url,has_api_key}}`
+- `GET /servers/{id}/game-mods/search?q=` (`server.view`) → `{results:[{id,title,author,summary,downloads,icon_url,version?,url}]}`; 400 for Workshop servers, 502 `provider.unavailable` when the provider is down
+- `GET /servers/{id}/game-mods/updates` (`server.view`) → `{updates:[{id,installed,latest}]}`
+- `POST /servers/{id}/game-mods {id, version?}` (`content.manage`) → 202 `{operation}` (kind `gamemods.install`); installs the mod and its required dependencies. Installing an installed mod again updates it. 409 `server.running`, `server.not_installed`, `game_mods.credentials` (Factorio without login); 400 `validation` for a malformed id
+- `PATCH /servers/{id}/game-mods/{mod} {enabled}` (`content.manage`) → `{ok:true}`; 404 unknown mod; 400 `game_mods.core` for BepInEx; 409 `server.running`
+- `DELETE /servers/{id}/game-mods/{mod}` (`content.manage`) → 204; 409 `game_mods.required` while another installed mod needs it, 409 `server.running`
+- `PUT /servers/{id}/game-mods/workshop {collection}` (gmod) or `{map}` (cs2) (`content.manage`) → `{ok:true,id}`; an empty value clears it; 400 `validation` unless digits
+- `PUT /servers/{id}/game-mods/credentials {username, token?}` (`config.write`, Factorio only) → `{ok:true}`; an empty username clears both; the token is never returned

@@ -35,6 +35,7 @@
     if (c.includes('files')) t.push({ id: 'files', label: 'Files', icon: 'folder' });
     if (c.includes('properties')) t.push({ id: 'config', label: 'Config', icon: 'sliders' });
     if (c.includes('content') && s.content_kind !== 'none') t.push({ id: 'content', label: kindName[s.content_kind] ?? 'Content', icon: 'puzzle' });
+    if (c.includes('game_mods')) t.push({ id: 'game-mods', label: 'Mods', icon: 'puzzle' });
     if (c.includes('java')) t.push({ id: 'upgrade', label: 'Upgrade', icon: 'arrow-up' });
     if (c.includes('backups')) t.push({ id: 'backups', label: 'Backups', icon: 'archive' });
     if (c.includes('players')) t.push({ id: 'players', label: 'Players', icon: 'users' });
@@ -47,6 +48,7 @@
     files: () => import('./server/Files.svelte'),
     config: () => import('./server/Config.svelte'),
     content: () => import('./server/Content.svelte'),
+    'game-mods': () => import('./server/GameMods.svelte'),
     upgrade: () => import('./server/Upgrade.svelte'),
     backups: () => import('./server/Backups.svelte'),
     players: () => import('./server/Players.svelte'),

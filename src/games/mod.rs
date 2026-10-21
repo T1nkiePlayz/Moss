@@ -11,6 +11,7 @@ use std::{collections::{HashMap, HashSet}, path::Path, sync::{LazyLock, Mutex}};
 
 pub mod a2s;
 pub mod install;
+pub mod mods;
 pub mod track;
 pub mod versions;
 
@@ -110,7 +111,12 @@ fn valheim(l: &Launch) -> Result<Vec<String>, String> {
     let pw = l.get("password").filter(|p| p.chars().count() >= 5).ok_or_else(|| format!("{SETTINGS_FILE} needs a password of at least 5 characters (Valheim refuses to start without one)"))?;
     let name = l.get("name").unwrap_or(l.name);
     if name.to_lowercase().contains(&pw.to_lowercase()) { return Err("the Valheim password must not be part of the server name; edit it in moss-game.cfg".into()); }
-    let mut v = strs(["env", "LD_LIBRARY_PATH=./linux64", "SteamAppId=892970", "./valheim_server.x86_64", "-nographics", "-batchmode", "-public", "0"]);
+    // With BepInEx installed (`command` sets `BEPINEX_KEY`) start through Unity Doorstop, as the pack's start_server_bepinex.sh does.
+    let mut v = if l.cfg.contains_key(mods::BEPINEX_KEY) {
+        strs(["env", "DOORSTOP_ENABLED=1", "DOORSTOP_TARGET_ASSEMBLY=./BepInEx/core/BepInEx.Preloader.dll", "LD_LIBRARY_PATH=./doorstop_libs:./linux64", "LD_PRELOAD=libdoorstop_x64.so", "SteamAppId=892970", "./valheim_server.x86_64", "-nographics", "-batchmode", "-public", "0"])
+    } else {
+        strs(["env", "LD_LIBRARY_PATH=./linux64", "SteamAppId=892970", "./valheim_server.x86_64", "-nographics", "-batchmode", "-public", "0"])
+    };
     v.extend(["-name".into(), name.into(), "-port".into(), l.port.to_string(), "-world".into(), l.get("world").unwrap_or("Dedicated").into(), "-password".into(), pw.into()]);
     Ok(v)
 }
@@ -120,13 +126,18 @@ fn srcds(game: &str, map: &str, l: &Launch) -> Vec<String> {
     v.extend([l.port.to_string(), "+maxplayers".into(), l.max_players.to_string(), "+map".into(), map.into()]);
     v
 }
-fn gmod(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("garrysmod", "gm_construct", l)) }
+fn gmod(l: &Launch) -> Result<Vec<String>, String> {
+    let mut v = srcds("garrysmod", "gm_construct", l);
+    v.extend(mods::workshop::gmod_args(l.cfg));
+    Ok(v)
+}
 fn tf2(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("tf", "ctf_2fort", l)) }
 fn l4d2(l: &Launch) -> Result<Vec<String>, String> { Ok(srcds("left4dead2", "c1m1_hotel", l)) }
 
 fn cs2(l: &Launch) -> Result<Vec<String>, String> {
     let mut v = strs(["./game/bin/linuxsteamrt64/cs2", "-dedicated", "-console", "-usercon", "-port"]);
-    v.extend([l.port.to_string(), "-maxplayers".into(), l.max_players.to_string(), "+map".into(), "de_dust2".into()]);
+    v.extend([l.port.to_string(), "-maxplayers".into(), l.max_players.to_string()]);
+    v.extend(mods::workshop::cs2_map_args(l.cfg));
     Ok(v)
 }
 
@@ -252,7 +263,8 @@ pub fn command(dir: &Path, s: &Srv) -> ApiResult<Vec<String>> {
     let g = get(&s.runtime).ok_or_else(|| ApiError::bad("runtime.unsupported", "unknown game"))?;
     if s.isolation == "container" { return Err(ApiError::bad("container.unsupported", format!("{} servers cannot run in a container", g.name))); }
     if !g.supported_here() { return Err(ApiError::conflict("platform.unsupported", format!("{} is not supported on this host ({})", g.name, g.platforms.join(" / ")))); }
-    let cfg = read_settings(dir);
+    let mut cfg = read_settings(dir);
+    if dir.join("BepInEx/core/BepInEx.Preloader.dll").exists() { cfg.insert(mods::BEPINEX_KEY.into(), "1".into()); }
     let max = cfg.get("max_players").and_then(|v| v.parse().ok()).unwrap_or(g.max_players);
     let port = u16::try_from(s.port).map_err(|_| ApiError::bad("validation", "invalid port"))?;
     let argv = (g.launch)(&Launch { port, max_players: max, name: &s.name, cfg: &cfg }).map_err(|m| ApiError::conflict("game.config", m))?;

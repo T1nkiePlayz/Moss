@@ -593,3 +593,22 @@ export const apiOps = {
 };
 /** Supabase auth REST calls in mock mode are answered by the mock backend (dev only). */
 export const mockAuthCall = (method: string, path: string, body?: unknown): Promise<any> | null => (mock ? mock.handleAuth(method, path, body) : null);
+
+// ---- Game mods (Valheim, Factorio, Garry's Mod, CS2)
+export interface GameMod { id: string; title: string; version: string; enabled: boolean; auto: boolean; requires: string[]; url: string; installed_at: string }
+export interface GameModHit { id: string; title: string; author: string | null; summary: string | null; downloads: number | null; icon_url: string | null; version?: string | null; url: string }
+export interface GameModsInfo {
+  kind: 'thunderstore' | 'factorio' | 'workshop'; runtime: string; installed: GameMod[]; running: boolean; bepinex?: boolean;
+  credentials?: { username: string | null; has_token: boolean };
+  workshop?: { field: 'collection' | 'map'; id: string | null; url: string | null; has_api_key: boolean };
+}
+export const gameMods = {
+  info: (id: string) => get<GameModsInfo>(`/servers/${e(id)}/game-mods`, { ttl: 0 }),
+  search: (id: string, text: string) => get<{ results: GameModHit[] }>(`/servers/${e(id)}/game-mods/search${q({ q: text })}`, { ttl: 30000 }),
+  updates: (id: string) => get<{ updates: { id: string; installed: string; latest: string }[] }>(`/servers/${e(id)}/game-mods/updates`, { ttl: 0 }),
+  install: (id: string, mod: string, version?: string) => send<{ operation: Operation }>('POST', `/servers/${e(id)}/game-mods`, { id: mod, version }),
+  setEnabled: (id: string, mod: string, enabled: boolean) => send('PATCH', `/servers/${e(id)}/game-mods/${e(mod)}`, { enabled }),
+  remove: (id: string, mod: string) => send('DELETE', `/servers/${e(id)}/game-mods/${e(mod)}`),
+  setWorkshop: (id: string, b: { collection?: string; map?: string }) => send('PUT', `/servers/${e(id)}/game-mods/workshop`, b),
+  setCredentials: (id: string, username: string, token?: string) => send('PUT', `/servers/${e(id)}/game-mods/credentials`, { username, token }),
+};

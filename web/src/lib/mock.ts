@@ -6,6 +6,7 @@ import { handleWorkflows, NONE as NOT_WORKFLOW } from './mock-workflows';
 import { handleRemote, NONE as NOT_REMOTE, seedRemote } from './mock-remote';
 import { extraRuntimes, handleContent, hangarHits, inspectModpack, itemsFromPack, NONE, seedContent, versionsFor } from './mock-content';
 import { handleOps, handleOpsGlobal, revertConfig } from './mock-ops';
+import { handleGameMods, NONE as NOT_GAMEMODS } from './mock-gamemods';
 import { nextDailyRun, offsetName } from './tz';
 
 const uid = () => crypto.randomUUID();
@@ -30,10 +31,10 @@ const servers: A.Server[] = [
   mk({ name: 'Creative Plots', runtime: 'purpur', port: 25566, memory_mb: 2048, tags: ['creative'], created_at: ago(12 * DAY) }),
   mk({ name: 'Modded Fabric', runtime: 'fabric', loader_version: '0.16.9', port: 25567, memory_mb: 6144, content_kind: 'mods', desired: 'running', state: 'crashed', state_detail: 'Exited with code 1 (OutOfMemoryError)', state_since: ago(14 * MIN), tags: ['mods'], created_at: ago(5 * DAY), capabilities: caps.filter((c) => c !== 'players') }),
   mk({ name: 'Terraria', runtime: 'terraria', game_version: '1.4.4.9', java_major: 0, port: 7777, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(9 * HOUR), uptime_s: 9 * 3600 + 80, pid: 5120, players: { online: 2, max: 8, sample: ['Guide', 'Dryad_fan'] }, cpu_pct: 4, mem_bytes: 6.2e8, tags: ['game'], created_at: ago(9 * DAY), capabilities: gameCaps('players') }),
-  mk({ name: 'Valheim', runtime: 'valheim', game_version: 'latest', java_major: 0, port: 2456, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(2 * DAY), uptime_s: 2 * 86400 + 900, pid: 5230, players: { online: 4, max: 10, sample: ['Ragnar', 'Freya', 'Bjorn', 'Astrid'] }, cpu_pct: 31, mem_bytes: 3.4e9, tags: ['game', 'friends'], created_at: ago(20 * DAY), capabilities: gameCaps('players') }),
-  mk({ name: 'Factorio', runtime: 'factorio', game_version: '2.0.55', java_major: 0, port: 34197, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(5 * HOUR), uptime_s: 5 * 3600 + 12, pid: 5340, players: { online: 1, max: 0, sample: ['engineer42'] }, cpu_pct: 22, mem_bytes: 1.1e9, tags: ['game'], created_at: ago(14 * DAY), capabilities: gameCaps('players') }),
+  mk({ name: 'Valheim', runtime: 'valheim', game_version: 'latest', java_major: 0, port: 2456, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(2 * DAY), uptime_s: 2 * 86400 + 900, pid: 5230, players: { online: 4, max: 10, sample: ['Ragnar', 'Freya', 'Bjorn', 'Astrid'] }, cpu_pct: 31, mem_bytes: 3.4e9, tags: ['game', 'friends'], created_at: ago(20 * DAY), capabilities: gameCaps('players', 'game_mods') }),
+  mk({ name: 'Factorio', runtime: 'factorio', game_version: '2.0.55', java_major: 0, port: 34197, memory_mb: 2048, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(5 * HOUR), uptime_s: 5 * 3600 + 12, pid: 5340, players: { online: 1, max: 0, sample: ['engineer42'] }, cpu_pct: 22, mem_bytes: 1.1e9, tags: ['game'], created_at: ago(14 * DAY), capabilities: gameCaps('players', 'game_mods') }),
   mk({ name: 'Bedrock Realm', runtime: 'bedrock', game_version: '1.21.124.2', java_major: 0, port: 19132, memory_mb: 2048, content_kind: 'none', desired: 'stopped', state: 'stopped', tags: ['game', 'bedrock'], created_at: ago(6 * DAY), capabilities: gameCaps('players', 'properties', 'eula') }),
-  mk({ name: 'CS2 Wingman', runtime: 'cs2', game_version: 'latest', java_major: 0, port: 27015, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(3 * HOUR), uptime_s: 3 * 3600 + 300, pid: 5450, players: { online: 6, max: 10, sample: ['s1mple_fan', 'AWPer', 'rush_b', 'eco_king', 'smoke_me', 'flashbang'] }, motd: 'de_dust2', cpu_pct: 46, mem_bytes: 5.8e9, tags: ['game', 'lan'], created_at: ago(3 * DAY), capabilities: gameCaps('players') }),
+  mk({ name: 'CS2 Wingman', runtime: 'cs2', game_version: 'latest', java_major: 0, port: 27015, memory_mb: 4096, content_kind: 'none', desired: 'running', state: 'running', state_since: ago(3 * HOUR), uptime_s: 3 * 3600 + 300, pid: 5450, players: { online: 6, max: 10, sample: ['s1mple_fan', 'AWPer', 'rush_b', 'eco_king', 'smoke_me', 'flashbang'] }, motd: 'de_dust2', cpu_pct: 46, mem_bytes: 5.8e9, tags: ['game', 'lan'], created_at: ago(3 * DAY), capabilities: gameCaps('players', 'game_mods') }),
   mk({ name: 'Velocity Proxy', runtime: 'velocity', game_version: '3.4.0', port: 25577, memory_mb: 512, java_major: 21, content_kind: 'proxy_plugins', desired: 'running', state: 'running', state_since: ago(3 * DAY), uptime_s: 3 * 86400 + 12, pid: 2210, players: { online: 3, max: 100, sample: [] }, cpu_pct: 2, mem_bytes: 3.1e8, tags: ['edge'], capabilities: caps.filter((c) => !['backups', 'properties'].includes(c)) }),
 ];
 const sv = (id: string) => {
@@ -393,7 +394,7 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     const rt = runtimes.find((r) => r.id === b.runtime);
     const game = rt?.category === 'game' ? rt : null;
     const s = mk({ name: b.name, runtime: b.runtime, game_version: b.game_version, loader_version: b.loader_version ?? null, memory_mb: b.memory_mb, port: b.port ?? (game?.default_port ?? 25565) + (game ? 0 : 5 + servers.length), desired: 'stopped', state: 'installing', content_kind: rt?.content_kind ?? 'none', eula_accepted: !!b.accept_eula,
-      ...(game ? { java_major: 0, capabilities: gameCaps(...(game.player_tracking !== 'none' ? ['players'] : []), ...(game.id === 'bedrock' ? ['properties', 'eula'] : [])) } : {}) });
+      ...(game ? { java_major: 0, capabilities: gameCaps(...(game.player_tracking !== 'none' ? ['players'] : []), ...(game.id === 'bedrock' ? ['properties', 'eula'] : []), ...(['valheim', 'factorio', 'gmod', 'cs2'].includes(game.id) ? ['game_mods'] : [])) } : {}) });
     servers.push(s); seedFs(s); content[s.id] = b.modpack_token ? itemsFromPack(s, b.modpack_token) : []; emitServer(s);
     log('server.create', s.name);
     const o = startOp('server.install', `Installing ${s.name}`, s.id, ['Resolving build', 'Downloading server jar', 'Verifying checksum', 'Writing config', 'First-run setup'], { done: () => setState(s, 'stopped') });
@@ -435,6 +436,10 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     if (/^\/config(\/|$)/.test(sub)) {
       const r = await handleOps({ uid, now, fs, pushUndo, log }, s, sub, method, b, qs);
       if (r !== NONE) return r;
+    }
+    if (/^\/game-mods(\/|$)/.test(sub)) {
+      const r = await handleGameMods({ uid, now, op: (kind, title, sid, stages, opts) => startOp(kind, title, sid, stages, opts) }, s, sub, method, b, qs);
+      if (r !== NOT_GAMEMODS) return r;
     }
     if (/^\/(content|upgrade|modpacks|staging)(\/|$)/.test(sub)) {
       const r = await handleContent({ uid, now, ago, op: (...a) => startOp(...a), hits, cfHits, log, pushUndo, backups, content, emitServer }, s, sub, method, b);

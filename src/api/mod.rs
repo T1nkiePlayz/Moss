@@ -29,6 +29,7 @@ mod limits;
 mod metrics;
 mod notifications;
 pub mod origin;
+mod players_online;
 mod reinstall;
 mod servers;
 mod session;
@@ -86,6 +87,9 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/actions/reinstall", post(server_reinstall))
         .route("/servers/{id}/actions/{action}", post(server_action))
         .route("/servers/{id}/command", post(server_command))
+        .route("/servers/{id}/players/online", get(players_online::list))
+        .route("/servers/{id}/players/{name}/kick", post(players_online::kick))
+        .route("/servers/{id}/players/{name}/ban", post(players_online::ban))
         .route("/servers/{id}/stats", get(server_stats))
         .route("/servers/{id}/timeline", get(server_timeline))
         .route("/servers/{id}/health", get(health::server_health))

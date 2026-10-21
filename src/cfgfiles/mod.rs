@@ -77,6 +77,11 @@ fn game_defs(runtime: &str, zomboid: &dyn Fn() -> String) -> Vec<Def> {
         "tf2" => vec![d("server-cfg", "server.cfg", "tf/cfg/server.cfg", Fmt::Cvar, catalogue::SRCDS, true)],
         "l4d2" => vec![d("server-cfg", "server.cfg", "left4dead2/cfg/server.cfg", Fmt::Cvar, catalogue::SRCDS, true)],
         "cs2" => vec![d("server-cfg", "server.cfg", "game/csgo/cfg/server.cfg", Fmt::Cvar, catalogue::SRCDS, true)],
+        "l4d" => vec![d("server-cfg", "server.cfg", "left4dead/cfg/server.cfg", Fmt::Cvar, catalogue::SRCDS, true)],
+        "css" => vec![d("server-cfg", "server.cfg", "cstrike/cfg/server.cfg", Fmt::Cvar, catalogue::SRCDS, true)],
+        "dods" => vec![d("server-cfg", "server.cfg", "dod/cfg/server.cfg", Fmt::Cvar, catalogue::SRCDS, true)],
+        "hl2dm" => vec![d("server-cfg", "server.cfg", "hl2mp/cfg/server.cfg", Fmt::Cvar, catalogue::SRCDS, true)],
+        "nmrih" => vec![d("server-cfg", "server.cfg", "nmrih/cfg/server.cfg", Fmt::Cvar, catalogue::SRCDS, true)],
         _ => vec![],
     }
 }
@@ -329,8 +334,8 @@ mod tests {
         assert_eq!(ids("factorio")[0].1, "config/server-settings.json");
         assert_eq!(ids("terraria")[0].1, "serverconfig.txt");
         assert_eq!(ids("palworld")[0].1, "Pal/Saved/Config/LinuxServer/PalWorldSettings.ini");
-        for (r, p) in [("gmod", "garrysmod/cfg/server.cfg"), ("tf2", "tf/cfg/server.cfg"), ("l4d2", "left4dead2/cfg/server.cfg"), ("cs2", "game/csgo/cfg/server.cfg")] { assert_eq!(ids(r), [("server-cfg".into(), p.into(), true)]); }
-        for r in ["rust", "satisfactory", "bedrock", "custom", "sim"] { assert!(ids(r).is_empty() && !has_game_config(r), "{r}"); }
+        for (r, p) in [("gmod", "garrysmod/cfg/server.cfg"), ("tf2", "tf/cfg/server.cfg"), ("l4d2", "left4dead2/cfg/server.cfg"), ("cs2", "game/csgo/cfg/server.cfg"), ("css", "cstrike/cfg/server.cfg"), ("dods", "dod/cfg/server.cfg"), ("hl2dm", "hl2mp/cfg/server.cfg"), ("l4d", "left4dead/cfg/server.cfg"), ("nmrih", "nmrih/cfg/server.cfg")] { assert_eq!(ids(r), [("server-cfg".into(), p.into(), true)]); }
+        for r in ["rust", "satisfactory", "ark", "sdtd", "bedrock", "custom", "sim"] { assert!(ids(r).is_empty() && !has_game_config(r), "{r}"); }
         assert!(has_game_config("cs2") && has_game_config("zomboid"));
         assert!(find_def(&srv("terraria", "latest"), noroot(), "world--x").is_err());
     }

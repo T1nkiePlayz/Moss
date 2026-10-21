@@ -64,7 +64,8 @@ const RUNTIME_NAMES: Record<string, string> = {
   vanilla: 'Vanilla', paper: 'Paper', purpur: 'Purpur', folia: 'Folia', fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge',
   velocity: 'Velocity', custom: 'Custom', sim: 'Simulated', bedrock: 'Bedrock', terraria: 'Terraria', factorio: 'Factorio', valheim: 'Valheim',
   gmod: "Garry's Mod", cs2: 'Counter-Strike 2', tf2: 'Team Fortress 2', l4d2: 'Left 4 Dead 2', rust: 'Rust', palworld: 'Palworld',
-  zomboid: 'Project Zomboid', satisfactory: 'Satisfactory',
+  zomboid: 'Project Zomboid', satisfactory: 'Satisfactory', l4d: 'Left 4 Dead', css: 'Counter-Strike: Source',
+  dods: 'Day of Defeat: Source', hl2dm: 'Half-Life 2: Deathmatch', nmrih: 'No More Room in Hell', ark: 'ARK: Survival Evolved', sdtd: '7 Days to Die',
 };
 
 /** Display name of a runtime id ("cs2" → "Counter-Strike 2"); unknown ids are shown as they are. */

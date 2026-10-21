@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Game servers that keep growing, quietly.</strong><br>
-  A fast, local-first controller for Minecraft and a dozen other game servers on Linux and macOS: one small binary, a polished web panel, full mod and plugin support with compatibility checks, and servers that survive everything except you pulling the plug.
+  A fast, local-first controller for Minecraft and nineteen other game servers on Linux and macOS: one small binary, a polished web panel, full mod and plugin support with compatibility checks, and servers that survive everything except you pulling the plug.
 </p>
 
 <p align="center">
@@ -36,7 +36,7 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 - **Fast and small.** One binary, a Svelte UI with no UI framework (about 34 KB of JavaScript on first load, gzipped), live state over Server-Sent Events and WebSockets, no polling storms. Idle cost is a few tens of MB.
 - **Local first.** Server files, worlds, console logs and backups never leave your machine. The controller works offline except for downloads and the content catalogues.
-- **More than Minecraft.** Bedrock, Terraria, Factorio, Valheim, Counter-Strike 2, Garry's Mod, Team Fortress 2, Left 4 Dead 2, Rust, Palworld, Project Zomboid and Satisfactory install from their official sources (SteamCMD for Steam games), with player counts, console, backups and schedules.
+- **More than Minecraft.** Bedrock, Terraria, Factorio, Valheim, Counter-Strike 2, Counter-Strike: Source, Garry's Mod, Team Fortress 2, Left 4 Dead and Left 4 Dead 2, Day of Defeat: Source, Half-Life 2: Deathmatch, No More Room in Hell, Rust, ARK: Survival Evolved, 7 Days to Die, Palworld, Project Zomboid and Satisfactory install from their official sources (SteamCMD for Steam games), with player counts, console, backups and schedules.
 - **Honest about compatibility.** Plugins for Paper-family servers from Modrinth, CurseForge or Hangar, mods for Fabric, Quilt, Forge and NeoForge, proxy plugins for Velocity, datapacks for Vanilla. Moss reads every jar, checks dependencies, versions and loaders, and tells you what is wrong before the server does.
 - **Recoverable.** Every change Moss makes can be undone, risky changes take a safety backup first, backups are checksummed and verifiable, and restores never delete what they replace.
 
@@ -246,6 +246,9 @@ Data layout: `moss.sqlite`, `servers/<id>/` (game files; Moss metadata in `.moss
 | Factorio | factorio.com (headless) | Linux | From the log | Stable or experimental; creates a save on install |
 | Valheim | SteamCMD | Linux x86-64 | Steam query | Generated password in `moss-game.cfg` |
 | Counter-Strike 2, Garry's Mod, Team Fortress 2, Left 4 Dead 2 | SteamCMD | Linux x86-64 | Steam query | CS2 is a 30 GB+ download |
+| Counter-Strike: Source, Day of Defeat: Source, Half-Life 2: Deathmatch, Left 4 Dead, No More Room in Hell | SteamCMD | Linux x86-64 | Steam query | RCON admin and `server.cfg` editor like the other Source games |
+| ARK: Survival Evolved | SteamCMD | Linux x86-64 | Steam query | About 20 GB; `map`, `password` and `admin_password` in `moss-game.cfg`; stopped with SIGINT |
+| 7 Days to Die | SteamCMD | Linux x86-64 | From the log | Moss sets `ServerPort` and `TelnetPort` in `serverconfig.xml` before each start; stopped with SIGINT |
 | Rust | SteamCMD | Linux x86-64 | Steam query | |
 | Palworld, Satisfactory | SteamCMD | Linux x86-64 | – | Stopped with SIGINT so the world is saved |
 | Project Zomboid | SteamCMD | Linux x86-64 | – | Generated admin password in `moss-game.cfg` |
@@ -335,7 +338,7 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done.
 | **M3 Don't lose data** | ✅ | Verified backups, restore preview, staged restore, remote destinations, upgrade test | |
 | **M4 Mods and packs** | ✅ | Fabric, Quilt, Forge 1.12.2+, NeoForge, packs in and out, pack diff and pin, staged updates, container mode with game-only network and extra UDP/TCP ports | |
 | **M6 Release 1.0** | ✅ | OpenAPI document and [freeze with compatibility tests](docs/api-policy.md), MFA policy, API tokens, [event webhooks](docs/webhooks.md), [internal security review](docs/security-review.md), dependency audit, soak tests, cosign-signed checksums, [SECURITY.md](SECURITY.md) | A 20-minute release-profile soak, first signed release |
-| **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and nine SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages, RCON admin, game mods, game updates, game config editors, container isolation for games, shared player lists, live maps, installable app with Web Push | Run every game end to end on hardware |
+| **M7 Beyond Minecraft** | 🟡 | Other games (Bedrock, Terraria, Factorio and sixteen SteamCMD games), Hangar plugins, event workflows, player analytics, public status pages, RCON admin, game mods, game updates, game config editors, container isolation for games, shared player lists, live maps, installable app with Web Push | Run every game end to end on hardware |
 | **M8 After First Release** | 🔴 | - | Multi-node, extensions and SDK. |
 
 ## Documentation

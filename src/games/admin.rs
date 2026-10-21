@@ -11,7 +11,7 @@ use std::{collections::HashMap, net::{Ipv4Addr, SocketAddr}, time::Duration};
 pub enum Flavor { Source, Rust, Factorio, Palworld, Zomboid }
 
 pub fn flavor(g: &Game) -> Option<Flavor> {
-    Some(match g.id { "gmod" | "tf2" | "l4d2" | "cs2" => Flavor::Source, "rust" => Flavor::Rust, "factorio" => Flavor::Factorio, "palworld" => Flavor::Palworld, "zomboid" => Flavor::Zomboid, _ => return None })
+    Some(match g.id { "gmod" | "tf2" | "l4d2" | "cs2" | "l4d" | "css" | "dods" | "hl2dm" | "nmrih" => Flavor::Source, "rust" => Flavor::Rust, "factorio" => Flavor::Factorio, "palworld" => Flavor::Palworld, "zomboid" => Flavor::Zomboid, _ => return None })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

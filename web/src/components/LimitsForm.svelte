@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import { apiOps, ApiError, type Server } from '../lib/api';
+  import { ApiError, type Server } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { host, toast, toastError } from '../lib/stores.svelte';
   import { can } from '../lib/auth.svelte';
   import { describeLimits, limitWarnings } from '../lib/limits';

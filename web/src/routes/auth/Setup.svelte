@@ -1,7 +1,8 @@
 <script lang="ts">
   import AuthShell from './AuthShell.svelte';
   import Icon from '../../components/Icon.svelte';
-  import { apiOps, ApiError } from '../../lib/api';
+  import { ApiError } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { auth, recheck, signOut } from '../../lib/auth.svelte';
 
   let token = $state('');

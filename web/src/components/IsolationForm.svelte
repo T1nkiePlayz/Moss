@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import { apiOps, ApiError, type ContainerStatus, type Server } from '../lib/api';
+  import { ApiError, type ContainerStatus, type Server } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { toast, toastError } from '../lib/stores.svelte';
   import { can, isAdmin } from '../lib/auth.svelte';
   import { describeEngine, imageHint, ISOLATION_NOTES, parseExtraPorts, formatExtraPorts } from '../lib/container';

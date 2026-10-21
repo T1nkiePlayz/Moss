@@ -2,7 +2,8 @@
   import Icon from '../Icon.svelte';
   import States from '../States.svelte';
   import DestinationForm from './DestinationForm.svelte';
-  import { apiOps, ApiError, errMsg, type BackupDestination, type DestinationTest, type ServerDestination } from '../../lib/api';
+  import { ApiError, errMsg, type BackupDestination, type DestinationTest, type ServerDestination } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { confirmDialog, servers, toast, toastError } from '../../lib/stores.svelte';
   import { keepText } from '../../lib/remote';
 

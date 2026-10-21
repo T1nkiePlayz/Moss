@@ -2,7 +2,8 @@
   import { untrack } from 'svelte';
   import Modal from '../Modal.svelte';
   import Icon from '../Icon.svelte';
-  import { apiOps, ApiError, errMsg, type Webhook, type WebhookEventType } from '../../lib/api';
+  import { ApiError, errMsg, type Webhook, type WebhookEventType } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { webhookProblems } from '../../lib/webhooks';
   import { servers, toast } from '../../lib/stores.svelte';
 

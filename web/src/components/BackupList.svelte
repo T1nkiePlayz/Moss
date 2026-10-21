@@ -1,7 +1,8 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import RestoreModal from './RestoreModal.svelte';
-  import { api, apiOps, download, backupDownloadPath, type Backup } from '../lib/api';
+  import { api, download, backupDownloadPath, type Backup } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { isPreChange, canDeleteBackup, deleteHint } from '../lib/backupPreview';
   import { canCopyToRemote, isRemoteOnly, remoteBadge } from '../lib/remote';
   import { bytes, relTime, dateTime } from '../lib/format';

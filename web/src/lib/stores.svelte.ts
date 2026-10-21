@@ -1,4 +1,4 @@
-import { api, apiOps, openEvents, errMsg, type Activity, type AppNotification, type Finding, type HostStatus, type Operation, type Server, type Stream } from './api';
+import { api, openEvents, errMsg, type Activity, type AppNotification, type Finding, type HostStatus, type Operation, type Server, type Stream } from './api';
 import { toast, toastError, ui } from './feedback.svelte';
 
 // ---------- visibility + polling ----------
@@ -77,7 +77,7 @@ export const feed = $state<{ latest: Activity | null; rev: number }>({ latest: n
 // ---------- notification inbox (live via SSE `notification`) ----------
 export const inbox = $state<{ items: AppNotification[]; unread: number; loaded: boolean; error: string }>({ items: [], unread: 0, loaded: false, error: '' });
 export async function refreshNotifications() {
-  try { const r = await apiOps.notifications({ limit: 50 }); inbox.items = r.items; inbox.unread = r.unread; inbox.error = ''; } catch (e) { inbox.error = errMsg(e); }
+  try { const r = await api.notifications({ limit: 50 }); inbox.items = r.items; inbox.unread = r.unread; inbox.error = ''; } catch (e) { inbox.error = errMsg(e); }
   inbox.loaded = true;
 }
 function onNotification(n: AppNotification) {
@@ -92,7 +92,7 @@ export async function markRead(ids?: string[]) {
   const hit = inbox.items.filter((n) => !n.read && (!ids || ids.includes(n.id)));
   hit.forEach((n) => (n.read = true));
   inbox.unread = ids ? Math.max(0, inbox.unread - hit.length) : 0;
-  try { await apiOps.markRead(ids ? { ids } : { all: true }); } catch (e) { toastError(e, 'Could not mark as read'); void refreshNotifications(); }
+  try { await api.markRead(ids ? { ids } : { all: true }); } catch (e) { toastError(e, 'Could not mark as read'); void refreshNotifications(); }
 }
 /** SSE `resync`: events were dropped, so refetch every list. */
 function resync() { void refreshServers(); void refreshOps(); void refreshNotifications(); feed.rev++; }

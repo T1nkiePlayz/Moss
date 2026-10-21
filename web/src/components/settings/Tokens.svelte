@@ -1,7 +1,8 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
   import States from '../States.svelte';
-  import { apiOps, errMsg, type ApiToken, type CreatedToken, type TokenScope } from '../../lib/api';
+  import { errMsg, type ApiToken, type CreatedToken, type TokenScope } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { confirmDialog, toast, toastError } from '../../lib/stores.svelte';
   import { isAdmin } from '../../lib/auth.svelte';
   import { copyWithToast } from '../../lib/clipboard';

@@ -2,7 +2,8 @@
   import States from '../../components/States.svelte';
   import PlayerListSubs from './PlayerListSubs.svelte';
   import { apiExtra } from '../../lib/api-extra';
-  import { apiOps, errMsg, type AnalyticsDays, type OnlinePlayers, type PlayerAnalytics, type Server } from '../../lib/api';
+  import { errMsg, type AnalyticsDays, type OnlinePlayers, type PlayerAnalytics, type Server } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { confirmDialog, poll, toast, toastError } from '../../lib/stores.svelte';
   import { can } from '../../lib/auth.svelte';
   import { bars, heatmap, weekdays } from '../../lib/analytics';

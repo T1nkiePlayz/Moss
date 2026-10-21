@@ -2,7 +2,8 @@
   import Icon from '../components/Icon.svelte';
   import States from '../components/States.svelte';
   import Lazy from '../components/Lazy.svelte';
-  import { api, apiOps, ApiError, errMsg, type JavaInstall, type Settings as S } from '../lib/api';
+  import { api, ApiError, errMsg, type JavaInstall, type Settings as S } from '../lib/api';
+import { apiOps } from '../lib/api-ops';
   import { confirmDialog, host, prefs, resetA11y, setPref, toast, toastError, trackOp, type Prefs } from '../lib/stores.svelte';
   import { A11Y_DEFAULTS, TEXT_SIZES } from '../lib/a11y';
   import { can, isAdmin } from '../lib/auth.svelte';

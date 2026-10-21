@@ -1,7 +1,8 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
   import States from '../States.svelte';
-  import { apiOps, errMsg, type SupportPreview } from '../../lib/api';
+  import { errMsg, type SupportPreview } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import { toast, toastError } from '../../lib/stores.svelte';
   import { bytes } from '../../lib/format';
 

@@ -6,7 +6,8 @@
   import AnsiLine from '../../components/AnsiLine.svelte';
   import States from '../../components/States.svelte';
   import StatusBadge from '../../components/StatusBadge.svelte';
-  import { api, apiOps, errMsg, type Server, type MetricSample, type TimelineEvent, type Finding, type UndoEntry } from '../../lib/api';
+  import { api, errMsg, type Server, type MetricSample, type TimelineEvent, type Finding, type UndoEntry } from '../../lib/api';
+import { apiOps } from '../../lib/api-ops';
   import type { ChartDef } from '../../lib/metrics';
   import { poll, toast, toastError, confirmDialog } from '../../lib/stores.svelte';
   import { power, consequence } from '../../lib/actions';

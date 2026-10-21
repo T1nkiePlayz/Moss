@@ -31,6 +31,41 @@ pub enum Stop { Command(&'static str), Signal(i32) }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PlayerSource { None, Log, A2s(u16) }
 
+/// Console sequence that makes a running world safe to copy: `pre` is sent in order, then the log is watched for `ready`
+/// (re-sending `query` every couple of seconds) for a bounded time; `after` is always sent afterwards.
+pub struct Flush { pub pre: &'static [&'static str], pub query: Option<&'static str>, pub ready: &'static str, pub after: Option<&'static str> }
+
+/// Every command a flush sends, in order (the wait for `ready` happens between the two halves).
+#[cfg(test)]
+pub fn flush_sequence(f: &Flush) -> Vec<&'static str> { f.pre.iter().copied().chain(f.after).collect() }
+
+static TERRARIA_FLUSH: Flush = Flush { pre: &["save"], query: None, ready: "saved", after: None };
+static FACTORIO_FLUSH: Flush = Flush { pre: &["/server-save"], query: None, ready: "Saving finished", after: None };
+static BEDROCK_FLUSH: Flush = Flush { pre: &["save hold"], query: Some("save query"), ready: "Data saved", after: Some("save resume") };
+
+impl Srv {
+    /// Extra ports above `port` this server occupies (0 for Minecraft and custom servers).
+    pub fn port_span(&self) -> i64 { self.game().map_or(0, |g| i64::from(g.span())) }
+}
+
+/// Whether ports `[a, a + a_span]` and `[b, b + b_span]` overlap.
+pub fn spans_overlap(a: i64, a_span: i64, b: i64, b_span: i64) -> bool { a <= b + b_span && b <= a + a_span }
+
+/// Does a server on `port` with `span` extra ports collide with the port span of any other server in `all`?
+pub fn clashes_with_span(port: i64, span: i64, self_id: &str, all: &[Srv]) -> bool {
+    all.iter().filter(|o| o.id != self_id).any(|o| spans_overlap(port, span, o.port, o.port_span()))
+}
+
+/// First port at or after `preferred` whose whole span `[p, p + span]` avoids `used` and for which `bindable` holds.
+pub fn first_free(preferred: i64, span: i64, used: &[i64], bindable: impl Fn(i64) -> bool) -> i64 {
+    let mut p = preferred;
+    while p <= 65000 {
+        if (p..=p + span).all(|q| !used.contains(&q)) && bindable(p) { return p; }
+        p += 1;
+    }
+    preferred
+}
+
 /// Inputs to a game's argument template.
 pub struct Launch<'a> { pub port: u16, pub max_players: u32, pub name: &'a str, pub cfg: &'a HashMap<String, String> }
 impl Launch<'_> { fn get(&self, k: &str) -> Option<&str> { self.cfg.get(k).map(String::as_str).filter(|v| !v.is_empty()) } }
@@ -165,6 +200,25 @@ impl Game {
     pub fn supported_here(&self) -> bool {
         self.platforms.contains(&OS) && (!matches!(self.install, Install::Steam(_)) || cfg!(target_arch = "x86_64"))
     }
+    /// Extra ports above `port` the game also occupies (A2S query, IPv6 twin, ...).
+    pub fn span(&self) -> u16 { match self.id { "valheim" => 2, "bedrock" | "rust" | "zomboid" => 1, _ => 0 } }
+    /// The server-relative executable a restored copy cannot start without.
+    pub fn main_binary(&self) -> &'static str {
+        match self.id {
+            "bedrock" => "bedrock_server",
+            "terraria" => if cfg!(target_os = "macos") { "TerrariaServer.bin.osx" } else { "TerrariaServer.bin.x86_64" },
+            "factorio" => "bin/x64/factorio",
+            "valheim" => "valheim_server.x86_64",
+            "gmod" | "tf2" | "l4d2" => "srcds_run",
+            "cs2" => "game/bin/linuxsteamrt64/cs2",
+            "rust" => "RustDedicated",
+            "palworld" => "PalServer.sh",
+            "zomboid" => "start-server.sh",
+            _ => "FactoryServer.sh",
+        }
+    }
+    /// Console commands that flush the world before a live backup; `None` when the game has no console save.
+    pub fn flush(&self) -> Option<&'static Flush> { match self.id { "terraria" => Some(&TERRARIA_FLUSH), "factorio" => Some(&FACTORIO_FLUSH), "bedrock" => Some(&BEDROCK_FLUSH), _ => None } }
     pub fn tracks_players(&self) -> bool { self.players != PlayerSource::None }
     pub fn a2s_port(&self, port: i64) -> Option<u16> { match self.players { PlayerSource::A2s(off) => u16::try_from(port + i64::from(off)).ok(), _ => None } }
     /// Whether the console log carries anything the monitor wants (readiness or joins and leaves).
@@ -287,6 +341,38 @@ mod tests {
         assert_eq!(get("cs2").unwrap().a2s_port(27015), Some(27015));
         assert_eq!(get("bedrock").unwrap().a2s_port(19132), None);
         assert!(get("vanilla").is_none() && get("custom").is_none());
+    }
+
+    #[test]
+    fn flush_sequences_and_spans() {
+        let seq = |id: &str| get(id).unwrap().flush().map(flush_sequence);
+        assert_eq!(seq("bedrock").unwrap(), ["save hold", "save resume"]);
+        assert_eq!(get("bedrock").unwrap().flush().unwrap().query, Some("save query"));
+        assert_eq!(seq("terraria").unwrap(), ["save"]);
+        assert_eq!(seq("factorio").unwrap(), ["/server-save"]);
+        assert!(seq("valheim").is_none() && seq("rust").is_none() && seq("palworld").is_none() && seq("gmod").is_none());
+        assert_eq!((get("valheim").unwrap().span(), get("rust").unwrap().span(), get("terraria").unwrap().span()), (2, 1, 0));
+    }
+
+    #[test]
+    fn two_valheim_servers_get_disjoint_spans() {
+        use crate::runtimes::launch::test_srv;
+        let mut a = test_srv("valheim", "latest", None, "balanced");
+        a.id = "a".into(); a.port = 2456;
+        let first: Vec<i64> = (a.port..=a.port + a.port_span()).collect();
+        assert_eq!(first, [2456, 2457, 2458]);
+        assert_eq!(first_free(2456, 2, &first, |_| true), 2459);
+        assert_eq!(first_free(2456, 2, &[], |_| true), 2456);
+        assert_eq!(first_free(2456, 2, &[2458], |p| p != 2459), 2460);
+        assert!(clashes_with_span(2457, 2, "b", std::slice::from_ref(&a)));
+        assert!(clashes_with_span(2454, 2, "b", std::slice::from_ref(&a)));
+        assert!(!clashes_with_span(2459, 2, "b", std::slice::from_ref(&a)));
+        assert!(!clashes_with_span(2457, 2, "a", std::slice::from_ref(&a)));
+        // reverse direction: a Minecraft server sitting on the first one's query port
+        let mut mc = test_srv("paper", "1.21", None, "balanced");
+        mc.id = "m".into(); mc.port = 2457;
+        assert!(clashes_with_span(2456, 2, "a", std::slice::from_ref(&mc)));
+        assert!(clashes_with_span(2458, 0, "m", std::slice::from_ref(&a)));
     }
 
     #[test]

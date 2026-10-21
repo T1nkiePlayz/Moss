@@ -21,7 +21,7 @@ pub async fn start(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
 
 async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     if !s.installed { return Err(ApiError::conflict("server.not_installed", "server is not installed yet")); }
-    if s.is_mc() && s.eula_at.is_none() { return Err(ApiError::conflict("eula.required", "The Minecraft EULA must be accepted before this server can start.")); }
+    if crate::health::eula_missing(s) { return Err(ApiError::conflict("eula.required", "The Minecraft EULA must be accepted before this server can start.")); }
     if st.live.lock().unwrap().get(&s.id).is_some_and(|l| l.alive) { return Err(ApiError::conflict("server.running", "server is already running")); }
     if tokio::net::TcpListener::bind(("0.0.0.0", s.port as u16)).await.is_err() {
         return Err(ApiError::conflict("port.in_use", format!("port {} is already in use on this host", s.port)));

@@ -33,17 +33,17 @@ pub(super) struct CreateReq {
     #[serde(skip_deserializing)] blueprint: Option<Value>,
 }
 
-pub(super) async fn free_port(_st: &St, preferred: i64, used: &[i64]) -> i64 {
+pub(super) async fn free_port(_st: &St, preferred: i64, used: &[i64], span: i64) -> i64 {
     let mut p = preferred;
-    loop {
-        if !used.contains(&p) && tokio::net::TcpListener::bind(("0.0.0.0", p as u16)).await.is_ok() { return p; }
+    while p <= 65000 {
+        if crate::games::first_free(p, span, used, |_| true) == p && tokio::net::TcpListener::bind(("0.0.0.0", p as u16)).await.is_ok() { return p; }
         p += 1;
-        if p > 65000 { return preferred; }
     }
+    preferred
 }
 
 /// Next free TCP port at or after `preferred` that no Moss server uses and nothing is listening on.
-pub async fn free_port_for(st: &St, preferred: i64, used: &[i64]) -> i64 { free_port(st, preferred, used).await }
+pub async fn free_port_for(st: &St, preferred: i64, used: &[i64]) -> i64 { free_port(st, preferred, used, 0).await }
 
 pub(super) async fn servers_create(State(st): State<St>, user: User, Json(r): Json<CreateReq>) -> ApiResult<(StatusCode, Json<Value>)> { create_server(st, user, r).await }
 
@@ -82,12 +82,12 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
     limits::validate_now(&lim)?;
     let flags = r.flags_profile.filter(|f| f == "balanced" || f == "minimal").unwrap_or_else(|| "balanced".into());
     // Game ports and other servers' TCP extra ports are both off limits when picking a free port.
-    let existing: Vec<i64> = server::list_all(&st).await?.iter().flat_map(|s| std::iter::once(s.port).chain(crate::container::ports::parse_stored(&s.extra_ports).into_iter().filter(|e| e.proto == crate::container::ports::Proto::Tcp).map(|e| i64::from(e.port)))).collect();
+    let existing: Vec<i64> = server::list_all(&st).await?.iter().flat_map(|s| (s.port..=s.port + s.port_span()).chain(crate::container::ports::parse_stored(&s.extra_ports).into_iter().filter(|e| e.proto == crate::container::ports::Proto::Tcp).map(|e| i64::from(e.port)))).collect();
     let default_port = if r.runtime == "velocity" { 25577 } else { game.map_or(25565, |g| i64::from(g.port)) };
     let port = match r.port {
         Some(p) if !(1..=65535).contains(&p) => return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")),
         Some(p) => p,
-        None => free_port(&st, default_port, &existing).await,
+        None => free_port(&st, default_port, &existing, game.map_or(0, |g| i64::from(g.span()))).await,
     };
     let (id, now) = (uuid::Uuid::now_v7().to_string(), crate::db::now());
     let eula = (needs_eula && r.accept_eula == Some(true)).then(|| now.clone());
@@ -98,6 +98,7 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
         if tx.query_row("SELECT EXISTS(SELECT 1 FROM servers WHERE port=?)", [row.5], |r| r.get::<_, bool>(0))? { return Ok(false); }
         let all = tx.prepare(&format!("SELECT {} FROM servers", server::COLS))?.query_map([], Srv::from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
         if crate::container::ports::clashes_with_extra(row.5, &row.0, &all) { return Ok(false); }
+        if crate::games::clashes_with_span(row.5, crate::games::get(&row.2).map_or(0, |g| i64::from(g.span())), &row.0, &all) { return Ok(false); }
         tx.execute(
             "INSERT INTO servers(id,name,runtime,game_version,loader_version,port,memory_mb,flags_profile,autostart,eula_at,eula_by,custom_cmd,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             rusqlite::params![row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10, row.11, row.12])?;
@@ -164,6 +165,8 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
             if c.query_row("SELECT EXISTS(SELECT 1 FROM servers WHERE id!=? AND port=?)", rusqlite::params![i, v], |r| r.get::<_, bool>(0))? { return Ok(Some(("port", "port already assigned to another Moss server".to_string()))); }
             let all = c.prepare(&format!("SELECT {} FROM servers", server::COLS))?.query_map([], Srv::from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
             if crate::container::ports::clashes_with_extra(v, &i, &all) { return Ok(Some(("port", "port is used as an extra port by another Moss server".to_string()))); }
+            let span = all.iter().find(|o| o.id == i).map_or(0, |o| o.port_span());
+            if crate::games::clashes_with_span(v, span, &i, &all) { return Ok(Some(("port", "port overlaps the ports another Moss server uses (games also use the next port or two)".to_string()))); }
         }
         if let Some(v) = name { c.execute("UPDATE servers SET name=? WHERE id=?", rusqlite::params![v.trim(), i])?; }
         if let Some(v) = mem { c.execute("UPDATE servers SET memory_mb=? WHERE id=?", rusqlite::params![v, i])?; }

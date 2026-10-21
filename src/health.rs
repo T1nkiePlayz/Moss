@@ -36,10 +36,13 @@ async fn network_finding(st: &St, s: &Srv) -> Option<Value> {
         Some(json!({"label": "Open settings", "kind": "open_tab", "tab": "settings"}))))
 }
 
+/// A server that needs the Minecraft EULA (Java servers and Bedrock) but has not recorded its acceptance.
+pub fn eula_missing(s: &Srv) -> bool { s.needs_eula() && s.eula_at.is_none() }
+
 pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
     let mut f = vec![];
     let (state, detail) = server::state_of(s, st);
-    if s.is_mc() && s.eula_at.is_none() {
+    if eula_missing(s) {
         f.push(finding(format!("{}:eula", s.id), "critical", Some(&s.id), "EULA not accepted", "This server cannot start until the Minecraft EULA is accepted.".into(), vec!["eula_at is empty".into()], Some(json!({"label": "Accept EULA", "kind": "accept_eula"}))));
     }
     if s.installed && s.is_mc() && crate::java::find_async(st, s.java_major as u32).await.is_none() {
@@ -111,4 +114,20 @@ pub async fn server_health(State(st): State<St>, user: User, Path(id): Path<Stri
     let all = server::list(&st).await?;
     let _ = lifecycle::process_alive(&s);
     Ok(Json(Value::Array(for_server(&st, &s, &all).await)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::eula_missing;
+    use crate::runtimes::launch::test_srv;
+
+    #[test]
+    fn bedrock_needs_the_eula_before_it_can_start() {
+        let mut b = test_srv("bedrock", "1.21", None, "balanced");
+        assert!(eula_missing(&b));
+        b.eula_at = Some("2025-01-01T00:00:00Z".into());
+        assert!(!eula_missing(&b));
+        assert!(eula_missing(&test_srv("paper", "1.21", None, "balanced")));
+        assert!(!eula_missing(&test_srv("terraria", "1.4", None, "balanced")) && !eula_missing(&test_srv("custom", "custom", None, "balanced")));
+    }
 }

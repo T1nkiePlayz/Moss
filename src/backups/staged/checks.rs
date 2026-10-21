@@ -12,6 +12,7 @@ impl Check {
 
 /// The files a server of this runtime cannot start without (server-relative). Empty for custom and simulated servers.
 pub fn required_files(s: &Srv) -> Vec<String> {
+    if let Some(g) = s.game() { return vec![g.main_binary().to_string()]; }
     match s.runtime.as_str() {
         "custom" | "sim" => vec![],
         "forge" | "neoforge" => unix_args_path(s).into_iter().collect(),
@@ -78,6 +79,13 @@ mod tests {
         // a server that never generated a world has nothing to check there
         assert!(ok(&run(&stage(&["server.jar"]), &paper, None, &[])));
         assert!(!ok(&run(&stage(&[]), &paper, None, &[])));
+        // game backups are judged on the game's own binary, not server.jar
+        let bedrock = test_srv("bedrock", "1.21", None, "balanced");
+        assert_eq!(required_files(&bedrock), ["bedrock_server"]);
+        assert!(ok(&run(&stage(&["bedrock_server", "worlds/Bedrock level/level.dat"]), &bedrock, None, &[])));
+        let c = run(&stage(&["server.jar"]), &bedrock, None, &[]);
+        assert!(!ok(&c) && c[0].message.contains("bedrock_server"));
+        assert!(ok(&run(&stage(&["valheim_server.x86_64"]), &test_srv("valheim", "latest", None, "balanced"), None, &[])));
     }
 
     #[test]

@@ -43,8 +43,13 @@ async fn backup_inner(ctx: &OpCtx, st: &St, s: &Srv, kind: &str, note: &str, kee
             }
         }
         if !consistent { ctx.log("world flush was not confirmed; the backup may be crash-consistent only"); }
+    } else if running && let Some(f) = s.game().and_then(|g| g.flush()) {
+        ctx.stage("Flushing world to disk");
+        consistent = flush_game(st, s, f).await;
+        if !consistent { ctx.log("world flush was not confirmed; the backup may be crash-consistent only"); }
     } else if running {
         consistent = false;
+        if s.is_game() { ctx.log("this game has no console save command; the world was copied while the server was running"); }
     }
     let mut worlds: Vec<String> = vec![];
     let result: Result<(String, u64, u64)> = async {
@@ -63,6 +68,7 @@ async fn backup_inner(ctx: &OpCtx, st: &St, s: &Srv, kind: &str, note: &str, kee
         match r { Ok(v) => { tokio::fs::rename(&part, &out).await?; Ok(v) } Err(e) => { let _ = tokio::fs::remove_file(&part).await; Err(e) } }
     }.await;
     if running && s.is_mc() { let _ = crate::lifecycle::send_command(st, s, "save-on").await; }
+    else if running && let Some(after) = s.game().and_then(|g| g.flush()).and_then(|f| f.after) { let _ = crate::lifecycle::send_command(st, s, after).await; }
     match result {
         Ok((sha, size, files)) => {
             let (i3, sha2, w) = (id.clone(), sha.clone(), serde_json::to_string(&worlds).unwrap_or_else(|_| "[]".into()));
@@ -82,6 +88,19 @@ async fn backup_inner(ctx: &OpCtx, st: &St, s: &Srv, kind: &str, note: &str, kee
             Err(e)
         }
     }
+}
+
+/// Send a game's flush commands and wait up to about 10 s for its "saved" line. The caller sends `after` (resume) itself.
+async fn flush_game(st: &St, s: &Srv, f: &crate::games::Flush) -> bool {
+    let hub = crate::console::hub(st, &s.id);
+    let before = hub.ring.lock().unwrap().0;
+    for c in f.pre { if crate::lifecycle::send_command(st, s, c).await.is_err() { return false; } }
+    for i in 0..50 {
+        if i > 0 && i % 10 == 0 && let Some(q) = f.query { let _ = crate::lifecycle::send_command(st, s, q).await; } else if i == 0 && let Some(q) = f.query { let _ = crate::lifecycle::send_command(st, s, q).await; }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if hub.ring.lock().unwrap().1.iter().any(|(seq, l)| *seq > before && l.contains(f.ready)) { return true; }
+    }
+    false
 }
 
 /// Keep the newest `keep` backups of `kind` (0 = the `backup_keep` setting), never touching locked ones nor the last verified-good one.

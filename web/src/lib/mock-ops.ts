@@ -42,6 +42,11 @@ const FIELDS: Record<string, Omit<A.ConfigField, 'present' | 'value'>[]> = {
     { key: 'settings.bungeecord', type: 'bool', default: false, group: 'Network', description: 'Turn on only when this server sits behind a proxy that forwards player identity. Leaving it on without a proxy lets anyone impersonate players.', min: null, max: null, options: [], restart: true, secret: false, danger: true, mixed: false },
     { key: 'commands.tab-complete', type: 'int', default: 0, group: 'Commands', description: 'Characters a player must type before tab completion suggests commands.', min: 0, max: 64, options: [], restart: false, secret: false, danger: false, mixed: false },
   ],
+  serverconfig: [
+    { key: 'maxplayers', type: 'int', default: 8, group: 'Server', description: 'The most players that can join at once.', min: 1, max: 255, options: [], restart: true, secret: false, danger: false, mixed: false },
+    { key: 'motd', type: 'string', default: 'Welcome!', group: 'Server', description: 'The message players see when they join.', min: null, max: null, options: [], restart: true, secret: false, danger: false, mixed: false },
+    { key: 'secure', type: 'bool', default: true, group: 'Server', description: 'Turn on cheat protection.', min: null, max: null, options: [], restart: true, secret: false, danger: false, mixed: false },
+  ],
   bukkit: [
     { key: 'settings.allow-end', type: 'bool', default: true, group: 'Worlds', description: 'Lets players travel to the End.', min: null, max: null, options: [], restart: true, secret: false, danger: false, mixed: false },
     { key: 'settings.connection-throttle', type: 'int', default: 4000, group: 'Network', description: 'Milliseconds a player must wait before reconnecting. -1 turns it off.', min: -1, max: 600000, options: [], restart: false, secret: false, danger: false, mixed: false },
@@ -52,10 +57,16 @@ const DEFS: F[] = [
   { id: 'spigot', title: 'Spigot', path: 'spigot.yml' },
   { id: 'bukkit', title: 'Bukkit', path: 'bukkit.yml' },
 ];
-const defsFor = (s: A.Server): F[] => (s.runtime === 'velocity' ? [{ id: 'velocity', title: 'Velocity', path: 'velocity.toml' }] : s.runtime === 'paper' || s.runtime === 'purpur' ? DEFS : s.runtime === 'fabric' ? [] : DEFS.slice(1));
+const TERRARIA = '# Written by Moss on first install; edit freely.\nworldname=Moss\nmaxplayers=8\npassword=\nmotd=Welcome!\nsecure=1\n';
+const defsFor = (s: A.Server): F[] => (s.runtime === 'terraria' ? [{ id: 'serverconfig', title: 'Server config', path: 'serverconfig.txt' }] : s.runtime === 'velocity' ? [{ id: 'velocity', title: 'Velocity', path: 'velocity.toml' }] : s.runtime === 'paper' || s.runtime === 'purpur' ? DEFS : s.runtime === 'fabric' ? [] : DEFS.slice(1));
 
 /** Minimal indentation-based lookup for the mock's seeded YAML (the real backend parses it properly). */
-function scan(raw: string) {
+function scan(raw: string, kv = false) {
+  if (kv) {
+    const o = new Map<string, { line: number; value: string }>();
+    raw.split('\n').forEach((ln, i) => { const m = ln.match(/^([A-Za-z0-9_]+)=(.*)$/); if (m) o.set(m[1], { line: i, value: m[2] }); });
+    return o;
+  }
   const out = new Map<string, { line: number; value: string }>();
   const stack: { indent: number; key: string }[] = [];
   raw.split('\n').forEach((ln, i) => {
@@ -69,7 +80,7 @@ function scan(raw: string) {
   });
   return out;
 }
-const parseVal = (v: string): unknown => (v === 'true' ? true : v === 'false' ? false : v !== '' && !isNaN(+v) ? +v : v);
+const parseVal = (v: string, kv = false): unknown => (kv && (v === '1' || v === '0') ? v === '1' : v === 'true' ? true : v === 'false' ? false : v !== '' && !isNaN(+v) ? +v : v);
 
 const hist: Record<string, { id: string; title: string; created_at: string; text: string; path: string; sid: string }[]> = {};
 export function revertConfig(c: OpsCtx, undoId: string) {
@@ -79,17 +90,19 @@ export function revertConfig(c: OpsCtx, undoId: string) {
   }
 }
 
+const fmtOf = (id: string) => (id === 'velocity' ? 'toml' : id === 'serverconfig' ? 'keyvalue' : 'yaml');
+
 export async function handleOps(c: OpsCtx, s: A.Server, sub: string, method: string, b: Record<string, any>, qs: URLSearchParams): Promise<unknown> {
   let m: RegExpMatchArray | null;
   if (sub === '/config' && method === 'GET') {
     const files = c.fs[s.id];
-    return { files: defsFor(s).map((d) => ({ id: d.id, title: d.title, path: d.path, format: d.id === 'velocity' ? 'toml' : 'yaml', exists: d.path in files })) };
+    return { files: defsFor(s).map((d) => ({ id: d.id, title: d.title, path: d.path, format: fmtOf(d.id), exists: d.path in files })) };
   }
   if (!(m = sub.match(/^\/config\/([^/]+)(\/diff)?$/))) return NONE;
   const d = defsFor(s).find((x) => x.id === decodeURIComponent(m![1]));
   if (!d) throw new ApiError(404, 'config.unknown_file', 'That file is not available for this server.');
   const files = c.fs[s.id];
-  if (!(d.path in files)) { if (d.id === 'paper-global') files[d.path] = PAPER_GLOBAL; else if (d.id === 'spigot') files[d.path] = SPIGOT; }
+  if (!(d.path in files)) { if (d.id === 'serverconfig') files[d.path] = TERRARIA; else if (d.id === 'paper-global') files[d.path] = PAPER_GLOBAL; else if (d.id === 'spigot') files[d.path] = SPIGOT; }
   const key = s.id + ':' + d.id, list = (hist[key] ||= []);
   const snap = (h: { id: string; title: string; created_at: string }) => ({ id: h.id, title: h.title, created_at: h.created_at });
   if (m[2]) {
@@ -100,10 +113,10 @@ export async function handleOps(c: OpsCtx, s: A.Server, sub: string, method: str
   if (method === 'GET') {
     const raw = files[d.path];
     if (raw === undefined) return { id: d.id, title: d.title, path: d.path, format: 'yaml', exists: false, raw: '', parse_error: null, fields: [], history: [] };
-    const vals = scan(raw);
+    const kv = d.id === 'serverconfig', vals = scan(raw, kv);
     return {
-      id: d.id, title: d.title, path: d.path, format: 'yaml', exists: true, raw, parse_error: null,
-      fields: (FIELDS[d.id] ?? []).map((f) => ({ ...f, present: vals.has(f.key), value: vals.has(f.key) ? parseVal(vals.get(f.key)!.value) : null })),
+      id: d.id, title: d.title, path: d.path, format: fmtOf(d.id), exists: true, raw, parse_error: null,
+      fields: (FIELDS[d.id] ?? []).map((f) => ({ ...f, present: vals.has(f.key), value: vals.has(f.key) ? parseVal(vals.get(f.key)!.value, kv) : null })),
       history: list.map(snap),
     };
   }
@@ -120,8 +133,13 @@ export async function handleOps(c: OpsCtx, s: A.Server, sub: string, method: str
       for (const [k, v] of Object.entries(b.set ?? {}) as [string, unknown][]) {
         const f = defs.find((x) => x.key === k);
         if (!f) throw new ApiError(400, 'config.unknown_key', `${k} is not a setting this editor knows. Use the raw editor for it.`);
-        if (f.type === 'bool' ? typeof v !== 'boolean' : typeof v !== 'number') throw new ApiError(400, 'config.invalid', `${k} must be ${f.type === 'bool' ? 'true or false' : 'a number'}.`);
+        if (f.type === 'bool' ? typeof v !== 'boolean' : f.type === 'string' ? typeof v !== 'string' : typeof v !== 'number') throw new ApiError(400, 'config.invalid', `${k} must be ${f.type === 'bool' ? 'true or false' : 'a number'}.`);
         if (typeof v === 'number' && ((f.min != null && v < f.min) || (f.max != null && v > f.max))) throw new ApiError(400, 'config.invalid', `${k} must be between ${f.min} and ${f.max}.`);
+        if (d.id === 'serverconfig') {
+          const t = typeof v === 'boolean' ? (v ? '1' : '0') : String(v), i = lines.findIndex((l) => l.startsWith(k + '='));
+          if (i >= 0) lines[i] = `${k}=${t}`; else lines.splice(lines.length - (lines[lines.length - 1] === '' ? 1 : 0), 0, `${k}=${t}`);
+          continue;
+        }
         const hit = scan(lines.join('\n')).get(k);
         if (hit) lines[hit.line] = lines[hit.line].replace(/:\s*[^#\s][^#]*?(\s+#.*)?$/, (_, c) => `: ${v}${c ?? ''}`);
         else lines.splice(lines.length - (lines[lines.length - 1] === '' ? 1 : 0), 0, ...k.split('.').map((p, i) => '  '.repeat(i) + p + ':' + (i === k.split('.').length - 1 ? ' ' + v : '')));

@@ -83,6 +83,7 @@ impl Srv {
         let mut c = vec!["console", "files", "backups", "schedules"];
         if self.is_mc() || self.game().is_some_and(|g| g.tracks_players()) { c.push("players"); }
         if (self.is_mc() && !self.is_proxy()) || self.runtime == "bedrock" { c.push("properties"); }
+        if self.is_game() && crate::cfgfiles::has_game_config(&self.runtime) { c.push("config"); }
         if self.is_mc() { c.push("java"); }
         if self.needs_eula() { c.push("eula"); }
         if self.content_kind() != "none" { c.push("content"); }

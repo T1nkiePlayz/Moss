@@ -127,13 +127,14 @@ export interface Operation {
   state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; stage: string; progress: number | null;
   log: string[]; error: string | null; created_at: string; started_at: string | null; ended_at: string | null; cancellable: boolean;
 }
-export interface ConfigFileInfo { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean }
+export type ConfigFormat = 'yaml' | 'toml' | 'json' | 'keyvalue' | 'cvar' | 'ini';
+export interface ConfigFileInfo { id: string; title: string; path: string; format: ConfigFormat; exists: boolean; creatable?: boolean }
 export interface ConfigField {
   key: string; type: 'bool' | 'int' | 'float' | 'string' | 'enum' | string; default: unknown; group: string; description: string; min: number | null; max: number | null; options: string[];
   restart: boolean; secret: boolean; danger: boolean; mixed: boolean; present: boolean; value: unknown;
 }
 export interface ConfigSnapshot { id: string; title: string; created_at: string }
-export interface ConfigFile { id: string; title: string; path: string; format: 'yaml' | 'toml'; exists: boolean; raw: string; parse_error: string | null; fields: ConfigField[]; history: ConfigSnapshot[] }
+export interface ConfigFile { id: string; title: string; path: string; format: ConfigFormat; exists: boolean; creatable?: boolean; raw: string; parse_error: string | null; fields: ConfigField[]; history: ConfigSnapshot[] }
 export interface ConfigDiff { current: string; previous: string | null; snapshot: ConfigSnapshot | null }
 export interface SavedView { id: string; scope: 'servers' | 'content'; name: string; filters: Record<string, unknown>; sort: string; created_at: string }
 export interface Blueprint { id: string; name: string; runtime: string; game_version: string; loader_version: string | null; memory_mb: number; properties: number; content: number; schedules: number; created_by: string; created_at: string }

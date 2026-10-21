@@ -8,13 +8,20 @@
   import { initials } from '../lib/format';
 
   // Falls back to initials when Gravatar cannot be reached (offline, blocked).
-  let avatarFailed = $state(false);
-  // Loaded on demand: the hashing code stays out of the initial bundle.
+  // The Gravatar image is shown only once it has loaded (offline or blocked: initials). The hashing code is loaded on
+  // demand and the probe uses a plain Image, so neither adds to the initial bundle.
   let avatarUrl = $state('');
   $effect(() => {
     const email = auth.email;
-    if (!email) { avatarUrl = ''; return; }
-    import('../lib/gravatar').then((m) => { if (auth.email === email) avatarUrl = m.gravatarUrl(email); });
+    avatarUrl = '';
+    if (!email) return;
+    import('../lib/gravatar').then((m) => {
+      const url = m.gravatarUrl(email);
+      const probe = new Image();
+      probe.referrerPolicy = 'no-referrer';
+      probe.onload = () => { if (auth.email === email) avatarUrl = url; };
+      probe.src = url;
+    });
   });
 
   const crumbs = $derived.by(() => {
@@ -68,7 +75,7 @@
     <Icon name={dark ? 'sun' : 'moon'} />
   </button>
   <div class="um" bind:this={menu}>
-    <button class="av" onclick={() => (ui.userMenu = !ui.userMenu)} aria-haspopup="menu" aria-expanded={ui.userMenu} aria-label="User menu">{#if avatarUrl && !avatarFailed}<img src={avatarUrl} alt="" width="32" height="32" referrerpolicy="no-referrer" onerror={() => (avatarFailed = true)} />{:else}{initials(auth.email || 'dev')}{/if}</button>
+    <button class="av" onclick={() => (ui.userMenu = !ui.userMenu)} aria-haspopup="menu" aria-expanded={ui.userMenu} aria-label="User menu">{#if avatarUrl}<img src={avatarUrl} alt="" width="32" height="32" referrerpolicy="no-referrer" />{:else}{initials(auth.email || 'dev')}{/if}</button>
     {#if ui.userMenu}
       <div class="pop" role="menu">
         <div class="who"><div class="ellipsis"><b>{auth.email || 'Local session'}</b></div><div class="xs muted">{auth.me?.role ?? 'owner'}{auth.config?.mode === 'dev' ? ' · dev mode' : ''}</div></div>

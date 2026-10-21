@@ -78,13 +78,3 @@ export const ICONS: Record<string, string> = {
   skull: 'M12 3a8 8 0 0 0-8 8c0 2.5 1.2 4 3 5v4h10v-4c1.8-1 3-2.5 3-5a8 8 0 0 0-8-8zM9 12h.01M15 12h.01',
 };
 export type IconName = keyof typeof ICONS;
-
-/** Icon for a runtime in the wizard and lists: a per-game icon for games, else by category. */
-const GAME_ICONS: Record<string, IconName> = {
-  bedrock: 'layers', terraria: 'tree', factorio: 'settings', valheim: 'axe', gmod: 'wrench', cs2: 'crosshair', tf2: 'crosshair', l4d2: 'skull',
-  rust: 'flame', palworld: 'paw', zomboid: 'skull', satisfactory: 'package',
-};
-export function runtimeIcon(r: { id: string; category: string }): IconName {
-  if (r.category === 'game') return GAME_ICONS[r.id] ?? 'gamepad';
-  return r.category === 'proxy' ? 'link' : r.category === 'modded' ? 'puzzle' : r.category === 'custom' ? 'terminal' : 'cube';
-}

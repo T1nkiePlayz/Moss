@@ -7,7 +7,7 @@
   import { api, ApiError, errMsg, type Runtime, type Versions, type JavaInstall, type ModpackInspect } from '../lib/api';
   import { host, ops, trackOp, toastError } from '../lib/stores.svelte';
   import { bytes } from '../lib/format';
-  import { runtimeIcon } from '../lib/icons';
+  import { runtimeIcon } from '../lib/runtime-icons';
   import { navigate } from '../lib/router.svelte';
   import { serverHref } from '../lib/route';
 

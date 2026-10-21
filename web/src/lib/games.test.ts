@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { runtimeIcon } from './icons';
+import { runtimeIcon } from './runtime-icons';
 import type { Runtime, Server, Versions } from './api';
 
 let handle: (m: string, p: string, b: unknown) => Promise<unknown>;

@@ -11,8 +11,10 @@ export interface HostStatus {
   counts: { servers: number; running: number; players: number };
 }
 export interface Runtime {
-  id: string; name: string; category: 'official' | 'plugins' | 'modded' | 'proxy' | 'custom';
+  id: string; name: string; category: 'official' | 'plugins' | 'modded' | 'proxy' | 'custom' | 'game';
   tier: 'stable' | 'experimental' | 'planned'; content_kind: ContentKind; description: string; installable: boolean;
+  /** Games only (category `game`). */
+  default_port?: number; protocol?: 'udp' | 'tcp'; platforms?: string[]; player_tracking?: 'none' | 'log' | 'a2s'; needs_eula?: boolean; max_players?: number;
 }
 export interface Versions { versions: { id: string; stable: boolean }[]; recommended: string; loader_versions?: Record<string, { id: string; recommended: boolean }[]> }
 export interface JavaInstall { major: number; path: string; managed: boolean; version: string }

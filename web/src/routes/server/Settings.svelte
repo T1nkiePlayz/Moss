@@ -57,13 +57,13 @@
   <section class="card col" style="gap:16px">
     <div class="card-title">General</div>
     <div class="field"><label for="n">Name</label><input id="n" class="input" bind:value={f.name} maxlength="48" required readonly={!canEdit} />{#if errs.name}<span class="err">{errs.name}</span>{/if}</div>
-    <div class="field">
+    {#if s.capabilities.includes('java')}<div class="field">
       <div class="row between"><label for="m">Memory</label><b class="tnum sm">{f.memory_mb} MB</b></div>
       <input id="m" type="range" min="512" max="32768" step="256" bind:value={f.memory_mb} disabled={!canEdit} />{#if errs.memory_mb}<span class="err">{errs.memory_mb}</span>{/if}
-    </div>
+    </div>{/if}
     <div class="field"><label for="p">Port</label><input id="p" class="input" type="number" min="1024" max="65535" bind:value={f.port} readonly={!canEdit} />{#if errs.port}<span class="err">{errs.port}</span>{/if}</div>
-    <div class="field"><label for="fl">JVM flags profile</label>
-      <select id="fl" class="select" bind:value={f.flags_profile} disabled={!canEdit}><option value="balanced">Balanced (Aikar-style tuned flags)</option><option value="minimal">Minimal (just -Xms/-Xmx)</option></select></div>
+    {#if s.capabilities.includes('java')}<div class="field"><label for="fl">JVM flags profile</label>
+      <select id="fl" class="select" bind:value={f.flags_profile} disabled={!canEdit}><option value="balanced">Balanced (Aikar-style tuned flags)</option><option value="minimal">Minimal (just -Xms/-Xmx)</option></select></div>{/if}
     {#if needsRestart}<div class="banner warn"><Icon name="refresh" size={16} />Memory, port and flags apply on the next restart.</div>{/if}
   </section>
 
@@ -80,9 +80,9 @@
     <div class="card-title">Runtime</div>
     <dl class="rt">
       <div><dt>Runtime</dt><dd>{s.runtime} {s.game_version}{s.loader_version ? ` (loader ${s.loader_version})` : ''}</dd></div>
-      <div><dt>Java</dt><dd>Java {s.java_major}</dd></div>
+      {#if s.capabilities.includes('java')}<div><dt>Java</dt><dd>Java {s.java_major}</dd></div>{/if}
       <div><dt>Process</dt><dd class="tnum">{s.pid ? `PID ${s.pid}` : 'not running'}</dd></div>
-      <div><dt>EULA</dt><dd>{s.eula_accepted ? 'Accepted' : 'Not accepted'}</dd></div>
+      {#if s.capabilities.includes('eula')}<div><dt>EULA</dt><dd>{s.eula_accepted ? 'Accepted' : 'Not accepted'}</dd></div>{/if}
       <div><dt>Server ID</dt><dd><code class="xs">{s.id}</code></dd></div>
     </dl>
   </section>

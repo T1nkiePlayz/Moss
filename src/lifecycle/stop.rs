@@ -1,15 +1,29 @@
 //! Graceful stop, escalation to SIGTERM/SIGKILL, force kill and restart.
 use super::{ctr, exit::handle_exit, process_alive, set_detail, start::{send_command, start}};
-use crate::{error::ApiResult, server::{self, Srv}, state::St};
+use crate::{error::ApiResult, games::Stop, server::{self, Srv}, state::St};
 use std::time::{Duration, Instant};
 
 fn kill_group(pid: i64, sig: i32) { unsafe { libc::kill(-(pid as i32), sig); } }
 
-fn stop_command(s: &Srv) -> &'static str { if s.is_proxy() { "end" } else { "stop" } }
+fn stop_command(s: &Srv) -> &'static str {
+    if s.is_proxy() { return "end"; }
+    match s.game().map(|g| g.stop) { Some(Stop::Command(c)) => c, _ => "stop" }
+}
+
+/// Signal-stopped games (Valheim, Palworld, Satisfactory) get the signal on the game process itself, not on the
+/// wrapper shell: the shell must stay alive until the game has finished saving, because its PID is what Moss watches.
+fn signal_game(pid: i64, sig: i32) {
+    let kids = crate::games::descendants(pid, &crate::games::proc_parents());
+    if kids.is_empty() { kill_group(pid, sig); return; }
+    for k in kids { unsafe { libc::kill(k as i32, sig); } }
+}
 
 /// Graceful stop → SIGTERM → SIGKILL, returns when the process is gone.
 pub async fn stop_and_wait(st: &St, s: &Srv, graceful: Duration) {
-    let _ = send_command(st, s, stop_command(s)).await;
+    match (s.game().map(|g| g.stop), s.pid) {
+        (Some(Stop::Signal(sig)), Some(pid)) if !s.in_container => signal_game(pid, sig),
+        _ => { let _ = send_command(st, s, stop_command(s)).await; }
+    }
     let wait = |d: Duration| async move {
         let end = Instant::now() + d;
         while Instant::now() < end {

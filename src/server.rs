@@ -62,7 +62,13 @@ impl Srv {
     pub fn requested_limits(&self) -> crate::platform::cgroup::Requested {
         crate::platform::cgroup::Requested { memory_mb: self.memory_limit_mb, cpu_pct: self.cpu_limit_pct, pids: self.pids_limit }
     }
-    pub fn is_mc(&self) -> bool { !matches!(self.runtime.as_str(), "custom" | "sim") }
+    /// A Minecraft Java server (Java, EULA file, server.properties, content). False for custom, sim and every game.
+    pub fn is_mc(&self) -> bool { !matches!(self.runtime.as_str(), "custom" | "sim") && !self.is_game() }
+    /// The descriptor when this is a non-Minecraft-Java game server (Bedrock, Terraria, Factorio, Steam games).
+    pub fn game(&self) -> Option<&'static crate::games::Game> { crate::games::get(&self.runtime) }
+    pub fn is_game(&self) -> bool { self.game().is_some() }
+    /// The Minecraft EULA must be accepted (Java servers and Bedrock).
+    pub fn needs_eula(&self) -> bool { self.is_mc() || self.game().is_some_and(|g| g.needs_eula) }
     pub fn is_proxy(&self) -> bool { self.runtime == "velocity" }
     pub fn content_kind(&self) -> &'static str {
         match self.runtime.as_str() {
@@ -75,8 +81,10 @@ impl Srv {
     }
     pub fn capabilities(&self) -> Vec<&'static str> {
         let mut c = vec!["console", "files", "backups", "schedules"];
-        if self.is_mc() { c.push("players"); }
-        if self.is_mc() && !self.is_proxy() { c.push("properties"); }
+        if self.is_mc() || self.game().is_some_and(|g| g.tracks_players()) { c.push("players"); }
+        if (self.is_mc() && !self.is_proxy()) || self.runtime == "bedrock" { c.push("properties"); }
+        if self.is_mc() { c.push("java"); }
+        if self.needs_eula() { c.push("eula"); }
         if self.content_kind() != "none" { c.push("content"); }
         c
     }
@@ -161,7 +169,7 @@ pub fn view(s: &Srv, st: &Inner) -> Value {
     json!({
         "id": s.id, "name": s.name, "runtime": s.runtime, "game_version": s.game_version, "loader_version": s.loader_version,
         "java_major": s.java_major, "port": s.port, "memory_mb": s.memory_mb, "flags_profile": s.flags_profile, "autostart": s.autostart,
-        "restart_policy": {"enabled": s.restart_enabled, "max_per_10m": s.restart_max}, "eula_accepted": s.eula_at.is_some() || !s.is_mc(),
+        "restart_policy": {"enabled": s.restart_enabled, "max_per_10m": s.restart_max}, "eula_accepted": s.eula_at.is_some() || !s.needs_eula(),
         "desired": s.desired, "state": state, "state_detail": detail, "state_since": l.and_then(|l| l.state_since.clone()),
         "uptime_s": uptime, "pid": s.pid.filter(|_| l.is_some_and(|l| l.alive)), "players": players,
         "motd": l.and_then(|l| l.motd.clone()), "cpu_pct": l.filter(|l| l.alive).and_then(|l| l.cpu), "mem_bytes": l.filter(|l| l.alive).and_then(|l| l.mem),

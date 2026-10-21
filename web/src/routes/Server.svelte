@@ -63,7 +63,7 @@
     <div class="row g16" style="min-width:0">
       <div style="min-width:0">
         <div class="row wrap g6"><h1 class="ellipsis">{s.name}</h1><StatusBadge state={s.state} detail={s.state_detail} /></div>
-        <p class="ellipsis">{s.runtime} {s.game_version}{s.loader_version ? ` · loader ${s.loader_version}` : ''} · Java {s.java_major} · {s.memory_mb} MB</p>
+        <p class="ellipsis">{s.runtime} {s.game_version}{s.loader_version ? ` · loader ${s.loader_version}` : ''} {#if s.capabilities.includes('java')} · Java {s.java_major} · {s.memory_mb} MB{/if}</p>
       </div>
     </div>
     <div class="row g6 wrap">

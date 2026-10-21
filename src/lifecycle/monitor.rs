@@ -20,6 +20,7 @@ fn supervise(st: &St) {
             let Ok(servers) = server::list_all(&st1).await else { continue };
             if n.is_multiple_of(2) { super::ctr::refresh(&st1, &servers).await; } // one `ps` for every container server
             let mut probe = vec![];
+            let mut game_ticks = vec![];
             for s in servers.iter().filter(|s| s.installed) {
                 let alive = process_alive(s);
                 let (was, ready, restart_due, started) = {
@@ -29,7 +30,10 @@ fn supervise(st: &St) {
                 };
                 if !alive && (s.pid.is_some() || was) { handle_exit(&st1, &s.id).await; }
                 if alive && !was { st1.live.lock().unwrap().entry(s.id.clone()).or_default().alive = true; }
-                if alive && !ready && n.is_multiple_of(3) && started.is_none_or(|t| t.elapsed().as_secs() > 4) {
+                if let Some(g) = s.game() {
+                    // Games: readiness from the console log, A2S or a fallback timer; players from the log or A2S.
+                    if alive { game_ticks.push((s, g)); } else { crate::games::track::forget(&s.id); }
+                } else if alive && !ready && n.is_multiple_of(3) && started.is_none_or(|t| t.elapsed().as_secs() > 4) {
                     if s.is_mc() || s.runtime == "sim" { probe.push(s); } else { mark_ready(&st1, &s.id); }
                 }
                 if restart_due {
@@ -39,6 +43,7 @@ fn supervise(st: &St) {
                 }
                 server::note_state(&st1, s);
             }
+            futures_util::future::join_all(game_ticks.iter().map(|(s, g)| crate::games::track::tick(&st1, s, g, n))).await;
             // Readiness pings take up to 1.5s each; run them together so booting servers don't delay supervising the rest.
             let pings = futures_util::future::join_all(probe.iter().map(|s| crate::mcping::ping(s.port as u16))).await;
             for (s, p) in probe.into_iter().zip(pings) {
@@ -73,6 +78,11 @@ fn sample(st: &St) {
                 let live = st2.live.lock().unwrap();
                 servers.iter().filter(|s| s.installed && s.pid.is_some() && (s.is_mc() || s.runtime == "sim") && live.get(&s.id).is_some_and(|l| l.ready)).collect()
             };
+            let a2s_games: Vec<&crate::server::Srv> = {
+                let live = st2.live.lock().unwrap();
+                servers.iter().filter(|s| s.installed && s.pid.is_some() && s.game().is_some_and(|g| matches!(g.players, crate::games::PlayerSource::A2s(_))) && live.get(&s.id).is_some_and(|l| l.ready)).collect()
+            };
+            let mut game_players = crate::games::track::a2s_players(&a2s_games).await;
             let mut pings: HashMap<String, _> = pinged.iter().map(|s| s.id.clone()).zip(futures_util::future::join_all(pinged.iter().map(|s| crate::mcping::ping(s.port as u16))).await).collect();
             for s in servers.iter().filter(|s| s.installed && s.pid.is_some()) {
                 let Some(pid) = s.pid else { continue };
@@ -106,6 +116,12 @@ fn sample(st: &St) {
                         l.players = Some(Players { online: p.online, max: p.max, sample: p.sample });
                         l.motd = Some(p.motd);
                     }
+                if s.game().is_some_and(|g| g.tracks_players()) {
+                    let mut live = st2.live.lock().unwrap();
+                    let l = live.entry(s.id.clone()).or_default();
+                    if let Some(p) = game_players.remove(&s.id) { l.players = Some(p); }
+                    if l.ready { players = l.players.as_ref().map(|p| p.online); }
+                }
                 {
                     let mut stats = st2.stats.lock().unwrap();
                     let q = stats.entry(s.id.clone()).or_default();

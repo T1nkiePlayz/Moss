@@ -68,6 +68,23 @@ export const ICONS: Record<string, string> = {
   bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
   key: 'M15.5 7.5l3 3L22 7l-3-3M21 2l-9.6 9.6M7.5 21.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z',
   unlock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 7.5-2',
+  gamepad: 'M6 8h12a4 4 0 0 1 4 4v3a2.5 2.5 0 0 1-4.5 1.5L16 15H8l-1.5 1.5A2.5 2.5 0 0 1 2 15v-3a4 4 0 0 1 4-4zM8 10.5v3M6.5 12h3M16 11.5h.01M18 13h.01',
+  tree: 'M12 3l6 8h-3l4 6H5l4-6H6zM12 17v4',
+  axe: 'M13 5l6 6-2 2-6-6zM12 8L4 20M10 10l4 4',
+  crosshair: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 2v5M12 17v5M2 12h5M17 12h5',
+  wrench: 'M15 5a4 4 0 0 0 4.5 5.5L9 21l-4-4L15.5 6.5z',
+  flame: 'M12 21c-4 0-6-2.7-6-6 0-3 2-4.5 3-7 2 1 3 2.5 3 4 1-1 2-2.5 2-5 2.5 2 4 5 4 8 0 3.5-2.5 6-6 6z',
+  paw: 'M12 20c-3 0-5-1.5-5-3.5 0-2.5 3-5.5 5-5.5s5 3 5 5.5c0 2-2 3.5-5 3.5zM6 9h.01M10 6h.01M14 6h.01M18 9h.01',
   skull: 'M12 3a8 8 0 0 0-8 8c0 2.5 1.2 4 3 5v4h10v-4c1.8-1 3-2.5 3-5a8 8 0 0 0-8-8zM9 12h.01M15 12h.01',
 };
 export type IconName = keyof typeof ICONS;
+
+/** Icon for a runtime in the wizard and lists: a per-game icon for games, else by category. */
+const GAME_ICONS: Record<string, IconName> = {
+  bedrock: 'layers', terraria: 'tree', factorio: 'settings', valheim: 'axe', gmod: 'wrench', cs2: 'crosshair', tf2: 'crosshair', l4d2: 'skull',
+  rust: 'flame', palworld: 'paw', zomboid: 'skull', satisfactory: 'package',
+};
+export function runtimeIcon(r: { id: string; category: string }): IconName {
+  if (r.category === 'game') return GAME_ICONS[r.id] ?? 'gamepad';
+  return r.category === 'proxy' ? 'link' : r.category === 'modded' ? 'puzzle' : r.category === 'custom' ? 'terminal' : 'cube';
+}

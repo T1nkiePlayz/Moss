@@ -62,8 +62,11 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
     let cat = runtimes::catalogue(st.cfg.dev_runtimes);
     let rt = cat.as_array().unwrap().iter().find(|x| x["id"] == r.runtime.as_str());
     if !rt.is_some_and(|x| x["installable"] == true) { return Err(ApiError::bad("runtime.unsupported", "unknown or not yet installable runtime").field("runtime", "choose an installable runtime")); }
-    let is_mc = !matches!(r.runtime.as_str(), "custom" | "sim");
-    if is_mc && r.accept_eula != Some(true) { return Err(ApiError::bad("eula.required", "You must accept the Minecraft EULA to create a Minecraft server.").field("accept_eula", "required")); }
+    let game = crate::games::get(&r.runtime);
+    let is_mc = !matches!(r.runtime.as_str(), "custom" | "sim") && game.is_none();
+    let needs_eula = is_mc || game.is_some_and(|g| g.needs_eula);
+    if game.is_some_and(|g| matches!(g.install, crate::games::Install::Steam(_))) && r.game_version != "latest" { return Err(ApiError::bad("validation", "this game always installs the latest build").field("game_version", "use \"latest\"")); }
+    if needs_eula && r.accept_eula != Some(true) { return Err(ApiError::bad("eula.required", "You must accept the Minecraft EULA to create a Minecraft server.").field("accept_eula", "required")); }
     // versions end up in upstream URLs, so only plain version-ish strings are accepted
     let plain = |v: &str| !v.is_empty() && v.len() <= 40 && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'));
     if !plain(&r.game_version) { return Err(ApiError::bad("validation", "invalid game version").field("game_version", "letters, digits and . _ + -")); }
@@ -80,14 +83,14 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
     let flags = r.flags_profile.filter(|f| f == "balanced" || f == "minimal").unwrap_or_else(|| "balanced".into());
     // Game ports and other servers' TCP extra ports are both off limits when picking a free port.
     let existing: Vec<i64> = server::list_all(&st).await?.iter().flat_map(|s| std::iter::once(s.port).chain(crate::container::ports::parse_stored(&s.extra_ports).into_iter().filter(|e| e.proto == crate::container::ports::Proto::Tcp).map(|e| i64::from(e.port)))).collect();
-    let default_port = if r.runtime == "velocity" { 25577 } else { 25565 };
+    let default_port = if r.runtime == "velocity" { 25577 } else { game.map_or(25565, |g| i64::from(g.port)) };
     let port = match r.port {
         Some(p) if !(1..=65535).contains(&p) => return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")),
         Some(p) => p,
         None => free_port(&st, default_port, &existing).await,
     };
     let (id, now) = (uuid::Uuid::now_v7().to_string(), crate::db::now());
-    let eula = (is_mc && r.accept_eula == Some(true)).then(|| now.clone());
+    let eula = (needs_eula && r.accept_eula == Some(true)).then(|| now.clone());
     let row = (id.clone(), name.clone(), r.runtime.clone(), r.game_version.clone(), r.loader_version.clone(), port, mem, flags, r.autostart.unwrap_or(false), eula, user.email.clone(), custom, now);
     // The port check and the INSERT share one transaction so two concurrent creates cannot both take the same port.
     let inserted = st.db.call(move |c| {
@@ -105,7 +108,7 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
     limits::save(&st, &id, lim).await?;
     let s = server::get(&st, &id).await?;
     tokio::fs::create_dir_all(s.dir(&st)).await?;
-    if is_mc { st.audit(&user.actor(), "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
+    if needs_eula { st.audit(&user.actor(), "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
     st.audit(&user.actor(), "server.create", &name, &format!("{} {}", s.runtime, s.game_version), Some(&id)).await;
     let op = ops::spawn_op(&st, "server.install", format!("Install {name}"), Some(&id), true, {
         let (id, tok, u, bp) = (id.clone(), r.modpack_token.clone(), user.clone(), r.blueprint.clone());

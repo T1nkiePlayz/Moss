@@ -51,7 +51,7 @@
   const memMax = $derived(s.memory_mb * 1048576);
   const defs = $derived<ChartDef[]>([
     { id: 'cpu', label: 'CPU', icon: 'cpu', avg: 'cpu_avg', peak: 'cpu_max', max: 100, format: (v) => v.toFixed(0) + '%' },
-    { id: 'mem', label: 'Memory', icon: 'ram', avg: 'mem_avg', peak: 'mem_max', max: memMax, color: 'var(--info)', format: (v) => bytes(v) },
+    { id: 'mem', label: 'Memory', icon: 'ram', avg: 'mem_avg', peak: 'mem_max', max: s.capabilities.includes('java') ? memMax : undefined, color: 'var(--info)', format: (v) => bytes(v) },
     { id: 'players', label: 'Players', icon: 'users', avg: 'players_max', peak: 'players_max', color: 'var(--warn)', format: (v) => Math.round(v) + ' online', show: (m) => s.capabilities.includes('players') && m.some((x) => (x.players_max ?? 0) > 0) },
   ]);
   // Servers without /metrics (older backend): the last hour comes from the raw stats ring buffer.
@@ -83,7 +83,7 @@
       <div><span class="muted xs">Address</span><button class="btn ghost sm copy mono" onclick={copy} aria-label="Copy address {addr}">{addr}<Icon name="copy" size={13} /></button></div>
       <div><span class="muted xs">Players</span><b class="tnum">{s.players ? `${s.players.online} / ${s.players.max}` : '—'}</b></div>
       <div><span class="muted xs">CPU</span><b class="tnum">{pct(s.cpu_pct)}</b></div>
-      <div><span class="muted xs">Memory</span><b class="tnum">{bytes(s.mem_bytes)} <span class="faint">/ {s.memory_mb} MB</span></b></div>
+      <div><span class="muted xs">Memory</span><b class="tnum">{bytes(s.mem_bytes)}{#if s.capabilities.includes('java')} <span class="faint">/ {s.memory_mb} MB</span>{/if}</b></div>
     </div>
     {#if s.motd}<div class="motd mono sm" aria-label="Message of the day">{s.motd}</div>{/if}
   </section>

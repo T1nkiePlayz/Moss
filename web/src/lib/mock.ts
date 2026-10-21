@@ -55,7 +55,7 @@ const runtimes: A.Runtime[] = [
   ...gameRuntimes(),
 ];
 function gameRuntimes(): A.Runtime[] {
-  const g = (id: string, name: string, description: string, port: number, protocol: 'udp' | 'tcp', platforms: string[], tracking: 'none' | 'log' | 'a2s', max: number, extra: Partial<A.Runtime> = {}): A.Runtime =>
+  const g = (id: string, name: string, description: string, port: number, protocol: 'udp' | 'tcp', platforms: string[], tracking: 'none' | 'log' | 'a2s' | 'rcon' | 'api', max: number, extra: Partial<A.Runtime> = {}): A.Runtime =>
     ({ id, name, category: 'game', tier: 'experimental', content_kind: 'none', description, installable: true, default_port: port, protocol, platforms, player_tracking: tracking, max_players: max, ...extra });
   const steam = 'via SteamCMD (anonymous). Linux x86_64 only.';
   return [
@@ -68,9 +68,9 @@ function gameRuntimes(): A.Runtime[] {
     g('tf2', 'Team Fortress 2', `Team Fortress 2 dedicated server ${steam} Starts on ctf_2fort.`, 27015, 'udp', ['linux'], 'a2s', 24),
     g('l4d2', 'Left 4 Dead 2', `Left 4 Dead 2 dedicated server ${steam}`, 27015, 'udp', ['linux'], 'a2s', 8),
     g('rust', 'Rust', `Rust dedicated server ${steam} Needs 8 GB or more RAM.`, 28015, 'udp', ['linux'], 'a2s', 50),
-    g('palworld', 'Palworld', `Palworld dedicated server ${steam} 16 GB RAM recommended. Player counts are not available.`, 8211, 'udp', ['linux'], 'none', 32),
-    g('zomboid', 'Project Zomboid', `Project Zomboid dedicated server ${steam} Admin password is generated into moss-game.cfg.`, 16261, 'udp', ['linux'], 'none', 16),
-    g('satisfactory', 'Satisfactory', `Satisfactory dedicated server ${steam} 12 GB RAM recommended.`, 7777, 'udp', ['linux'], 'none', 4),
+    g('palworld', 'Palworld', `Palworld dedicated server ${steam} 16 GB RAM recommended.`, 8211, 'udp', ['linux'], 'rcon', 32),
+    g('zomboid', 'Project Zomboid', `Project Zomboid dedicated server ${steam} Admin password is generated into moss-game.cfg.`, 16261, 'udp', ['linux'], 'rcon', 16),
+    g('satisfactory', 'Satisfactory', `Satisfactory dedicated server ${steam} 12 GB RAM recommended.`, 7777, 'udp', ['linux'], 'api', 4),
   ];
 }
 const gameVersions: Record<string, A.Versions> = {
@@ -85,6 +85,7 @@ const ops: A.Operation[] = [];
 type Handlers = A.EventHandlers;
 const listeners = new Set<Handlers>();
 const emitOp = (o: A.Operation) => listeners.forEach((l) => l.op(structuredClone(o)));
+const mockOnline = (s: A.Server): A.OnlinePlayers => { const mc = ['paper', 'fabric', 'vanilla', 'forge', 'neoforge', 'purpur', 'folia'].includes(s.runtime); const sample = s.players?.sample ?? []; return { players: sample.map((name, i) => ({ name, id: mc ? null : String(i + 2) })), online: s.players?.online ?? 0, source: mc || s.runtime === 'terraria' || s.runtime === 'bedrock' || s.runtime === 'valheim' ? 'tracked' : 'rcon', can_kick: s.runtime !== 'valheim' && s.runtime !== 'velocity', can_ban: s.runtime !== 'valheim' && s.runtime !== 'bedrock' && s.runtime !== 'velocity' }; };
 const emitServer = (s: A.Server) => listeners.forEach((l) => l.server(structuredClone(s)));
 const emitAct = (a: A.Activity) => listeners.forEach((l) => l.activity(a));
 
@@ -411,6 +412,8 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     }
     if (S(/^\/actions\/(\w+)$/)) { doAction(s, mm![1]); return { server: s }; }
     if (sub === '/command') { log('server.command', s.name, b.command); return; }
+    if (sub === '/players/online') return mockOnline(s);
+    if (S(/^\/players\/([^/]+)\/(kick|ban)$/)) { const n = decodeURIComponent(mm![1]); if (s.players) { s.players.sample = s.players.sample.filter((x) => x !== n); s.players.online = s.players.sample.length; } log('player.' + mm![2], s.name, n); return; }
     if (sub === '/stats') return { samples: stats(s) };
     if (sub === '/timeline') return timeline(s);
     if (sub === '/health') return health().filter((f) => f.server_id === s.id);

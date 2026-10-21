@@ -37,6 +37,8 @@ Server object:
 - `GET /servers/{id}` · `PATCH /servers/{id} {name?,memory_mb?,port?,flags_profile?,autostart?,restart_policy?,tags?,notes?,game_version?}` · `DELETE /servers/{id}?delete_data=false`
 - `POST /servers/{id}/actions/{start|stop|restart|kill}` → `{server}` (start/stop are asynchronous; watch `state`)
 - `POST /servers/{id}/command {command}` → 204
+- `GET /servers/{id}/players/online` → `{players:[{name,id?}], online, source: "rcon"|"api"|"tracked", can_kick, can_ban}`; live list from RCON (Source games, Rust, Factorio, Palworld, Zomboid), the Satisfactory API (count only) or the tracked list
+- `POST /servers/{id}/players/{name}/kick` and `.../ban` `{reason?}` → 204 (needs `server.console.write`; audited as `player.kick` / `player.ban`)
 - `GET /servers/{id}/stats` → `{samples:[{t:number(unix ms),cpu:number,mem:number,players:number|null}]}` (≈1 h at 5 s)
 - `GET /servers/{id}/timeline?limit=` → `[{time,kind:"start"|"ready"|"stop"|"crash"|"restart"|"backup"|"install"|"update"|"undo",detail}]`
 - `GET /servers/{id}/health` → `Finding[]` (see Health)

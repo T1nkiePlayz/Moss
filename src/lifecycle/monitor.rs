@@ -57,8 +57,10 @@ fn sample(st: &St) {
     let st2 = st.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(5));
+        let mut n = 0u64;
         loop {
             tick.tick().await;
+            n += 1;
             let Ok(servers) = server::list_all(&st2).await else { continue };
             // One scan of the process table for every server, plus host CPU and cgroup memory. On macOS these spawn
             // `ps`, so none of it runs on an async worker thread.
@@ -83,6 +85,14 @@ fn sample(st: &St) {
                 servers.iter().filter(|s| s.installed && s.pid.is_some() && s.game().is_some_and(|g| matches!(g.players, crate::games::PlayerSource::A2s(_))) && live.get(&s.id).is_some_and(|l| l.ready)).collect()
             };
             let mut game_players = crate::games::track::a2s_players(&a2s_games).await;
+            // RCON and HTTP-API games (Palworld, Zomboid, Satisfactory) are polled about every 30 s.
+            if n.is_multiple_of(6) {
+                let admin_games: Vec<&crate::server::Srv> = {
+                    let live = st2.live.lock().unwrap();
+                    servers.iter().filter(|s| s.installed && s.pid.is_some() && s.game().is_some_and(|g| matches!(g.players, crate::games::PlayerSource::Rcon | crate::games::PlayerSource::Api)) && live.get(&s.id).is_some_and(|l| l.ready)).collect()
+                };
+                game_players.extend(crate::games::admin::poll_players(&st2, &admin_games).await);
+            }
             let mut pings: HashMap<String, _> = pinged.iter().map(|s| s.id.clone()).zip(futures_util::future::join_all(pinged.iter().map(|s| crate::mcping::ping(s.port as u16))).await).collect();
             for s in servers.iter().filter(|s| s.installed && s.pid.is_some()) {
                 let Some(pid) = s.pid else { continue };

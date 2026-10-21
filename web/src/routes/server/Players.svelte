@@ -1,7 +1,8 @@
 <script lang="ts">
   import States from '../../components/States.svelte';
-  import { apiOps, errMsg, type AnalyticsDays, type PlayerAnalytics, type Server } from '../../lib/api';
-  import { poll } from '../../lib/stores.svelte';
+  import { apiOps, errMsg, type AnalyticsDays, type OnlinePlayers, type PlayerAnalytics, type Server } from '../../lib/api';
+  import { confirmDialog, poll, toast, toastError } from '../../lib/stores.svelte';
+  import { can } from '../../lib/auth.svelte';
   import { bars, heatmap, weekdays } from '../../lib/analytics';
   import { dateTime, duration, num, relTime } from '../../lib/format';
 
@@ -21,6 +22,21 @@
   }
   $effect(() => { days; s.id; data = null; err = ''; return poll(load, 60000); });
 
+  let live = $state<OnlinePlayers | null>(null);
+  let liveErr = $state('');
+  const running = $derived(s.state === 'running');
+  const canAct = $derived(can('server.console.write'));
+  async function loadLive() {
+    const id = s.id;
+    try { const r = await apiOps.onlinePlayers(id); if (id === s.id) { live = r; liveErr = ''; } } catch (e) { if (id === s.id) liveErr = errMsg(e); }
+  }
+  $effect(() => { s.id; running; live = null; liveErr = ''; if (!running) return; return poll(loadLive, 15000); });
+  async function act(name: string, ban: boolean) {
+    const verb = ban ? 'Ban' : 'Kick';
+    if (!(await confirmDialog({ title: `${verb} ${name}?`, body: ban ? 'They will not be able to rejoin until unbanned.' : 'They are disconnected and may rejoin.', confirmLabel: verb, danger: true })).ok) return;
+    try { await (ban ? apiOps.banPlayer : apiOps.kickPlayer)(s.id, name); toast('success', `${verb === 'Ban' ? 'Banned' : 'Kicked'} ${name}`); loadLive(); } catch (e) { toastError(e, `Could not ${verb.toLowerCase()} ${name}`); }
+  }
+
   const pts = $derived(data ? bars(data.hourly, data.days) : []);
   const top = $derived(Math.max(1, ...pts.map((b) => b.peak)));
   const heat = $derived(data ? heatmap(data.hourly) : { cells: [], max: 0 });
@@ -39,6 +55,24 @@
   const hh = (c: number) => `${String(c).padStart(2, '0')}:00`;
   const summary = $derived(data ? `${data.unique_players} unique players, busiest ${data.peak.count} at once` : '');
 </script>
+
+{#if running}
+  <section class="card" style="margin-bottom:14px">
+    <div class="card-title">Online now{live ? ` (${live.online})` : ''}</div>
+    {#if liveErr}<p class="muted sm" style="margin:0">{liveErr}</p>
+    {:else if !live}<States kind="loading" rows={2} />
+    {:else if live.players.length === 0}<p class="muted sm" style="margin:0">{live.online > 0 ? `${live.online} connected; this game only reports a count.` : 'Nobody is online.'}</p>
+    {:else}
+      <ul class="plain" style="margin:0;padding:0;list-style:none">
+        {#each live.players as p (p.name)}
+          <li class="row between g8" style="padding:4px 0"><span>{p.name}{#if p.id} <span class="muted xs mono">{p.id}</span>{/if}</span>
+            {#if canAct && live.can_kick}<span class="row g4"><button class="btn sm" onclick={() => act(p.name, false)}>Kick</button>{#if live.can_ban}<button class="btn sm danger" onclick={() => act(p.name, true)}>Ban</button>{/if}</span>{/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+{/if}
 
 <div class="row between wrap g12" style="margin-bottom:14px">
   <p class="muted sm" style="margin:0">Who played {s.name} and when, from the player list the server reports.</p>

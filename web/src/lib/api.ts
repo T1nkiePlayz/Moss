@@ -14,7 +14,7 @@ export interface Runtime {
   id: string; name: string; category: 'official' | 'plugins' | 'modded' | 'proxy' | 'custom' | 'game';
   tier: 'stable' | 'experimental' | 'planned'; content_kind: ContentKind; description: string; installable: boolean;
   /** Games only (category `game`). */
-  default_port?: number; protocol?: 'udp' | 'tcp'; platforms?: string[]; player_tracking?: 'none' | 'log' | 'a2s'; needs_eula?: boolean; max_players?: number;
+  default_port?: number; protocol?: 'udp' | 'tcp'; platforms?: string[]; player_tracking?: 'none' | 'log' | 'a2s' | 'rcon' | 'api'; needs_eula?: boolean; max_players?: number;
 }
 export interface Versions { versions: { id: string; stable: boolean }[]; recommended: string; loader_versions?: Record<string, { id: string; recommended: boolean }[]> }
 export interface JavaInstall { major: number; path: string; managed: boolean; version: string }
@@ -32,6 +32,7 @@ export interface CreateServer {
   accept_eula: boolean; flags_profile?: string; autostart?: boolean; custom?: { command: string[] }; modpack_token?: string;
 }
 export interface StatSample { t: number; cpu: number; mem: number; players: number | null }
+export interface OnlinePlayers { players: { name: string; id: string | null }[]; online: number; source: 'rcon' | 'api' | 'tracked'; can_kick: boolean; can_ban: boolean }
 export interface TimelineEvent { time: string; kind: 'start' | 'ready' | 'stop' | 'crash' | 'restart' | 'backup' | 'install' | 'update' | 'undo'; detail: string }
 export interface FileEntry { name: string; kind: 'dir' | 'file' | 'symlink'; size: number; modified: string }
 export interface FileList { path: string; entries: FileEntry[] }
@@ -587,6 +588,9 @@ export const apiOps = {
   metrics: (id: string, range: MetricRange) => get<MetricSeries>(`/servers/${e(id)}/metrics${q({ range })}`),
   map: (id: string) => get<ServerMap>(`/servers/${e(id)}/map`, { ttl: 0 }),
   analytics: (id: string, days: AnalyticsDays) => get<PlayerAnalytics>(`/servers/${e(id)}/analytics${q({ days })}`),
+  onlinePlayers: (id: string) => get<OnlinePlayers>(`/servers/${e(id)}/players/online`),
+  kickPlayer: (id: string, name: string, reason?: string) => send('POST', `/servers/${e(id)}/players/${e(name)}/kick`, { reason }),
+  banPlayer: (id: string, name: string, reason?: string) => send('POST', `/servers/${e(id)}/players/${e(name)}/ban`, { reason }),
   hostMetrics: (range: MetricRange) => get<MetricSeries>(`/metrics/host${q({ range })}`),
   supportPreview: () => get<SupportPreview>('/support-bundle?preview=1'),
   downloadSupportBundle: () => download('/support-bundle', 'moss-support-bundle.zip'),

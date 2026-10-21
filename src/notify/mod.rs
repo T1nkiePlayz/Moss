@@ -7,6 +7,7 @@ use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+pub mod push;
 pub mod rules;
 pub mod webhook;
 
@@ -20,7 +21,8 @@ pub const SEL: &str = "SELECT id,time,kind,severity,title,body,server_id,read FR
 fn insert_if_new(c: &Connection, n: &Value, now: chrono::DateTime<chrono::Utc>) -> rusqlite::Result<bool> {
     let cutoff = (now - chrono::Duration::minutes(rules::DEDUPE_WINDOW_MIN)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let (kind, sid) = (n["kind"].as_str(), n["server_id"].as_str());
-    let dup: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM notifications WHERE kind=? AND server_id IS ? AND time>=?)", params![kind, sid, cutoff], |r| r.get(0))?;
+    // Player joins are de-duplicated per player (the body names them), so two players joining together both notify.
+    let dup: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM notifications WHERE kind=?1 AND server_id IS ?2 AND time>=?3 AND (kind<>'player_join' OR body=?4))", params![kind, sid, cutoff, n["body"].as_str()], |r| r.get(0))?;
     if dup { return Ok(false); }
     c.execute("INSERT INTO notifications(id,time,kind,severity,title,body,server_id) VALUES (?,?,?,?,?,?,?)",
         params![n["id"].as_str(), n["time"].as_str(), kind, n["severity"].as_str(), n["title"].as_str(), n["body"].as_str(), sid])?;
@@ -40,10 +42,11 @@ pub async fn send(st: &St, kind: &str, severity: &str, title: &str, body: &str, 
         Err(e) => { tracing::warn!("could not store notification: {e:#}"); return; }
     }
     st.emit("notification", n.clone());
-    let url = st.setting("notify_webhook_url", "").await;
-    if url.is_empty() { return; }
     let enabled = rules::parse_events(st.db.call(|c| c.query_row("SELECT v FROM meta WHERE k='notify_events'", [], |r| r.get::<_, String>(0)).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await.ok().flatten().as_deref());
     if !enabled.iter().any(|k| k == kind) { return; }
+    push::dispatch(st, enabled, kind, severity, title, body, server_id);
+    let url = st.setting("notify_webhook_url", "").await;
+    if url.is_empty() { return; }
     let st = st.clone();
     tokio::spawn(async move {
         let server = match n["server_id"].as_str() { Some(id) => crate::server::get(&st, id).await.ok().map(|s| s.name), None => None };
@@ -78,6 +81,11 @@ pub async fn backup_failed(st: &St, s: &Srv, why: &str) {
 }
 pub async fn remote_backup_failed(st: &St, s: &Srv, destination: &str, why: &str) {
     send(st, "backup_failed", "warn", &format!("Remote copy of {} failed", s.name), &format!("Could not copy the backup to {destination}: {why}"), Some(&s.id)).await;
+}
+/// A player joined a server (opt-in kind; de-duplicated per player and server by `send`).
+pub async fn player_joined(st: &St, server_id: &str, player: &str) {
+    let name = match crate::server::get(st, server_id).await { Ok(s) => s.name, Err(_) => return };
+    send(st, "player_join", "info", &format!("{player} joined {name}"), &format!("{player} joined {name}."), Some(server_id)).await;
 }
 pub async fn operation_failed(st: &St, title: &str, why: &str, server_id: Option<&str>) {
     send(st, "operation_failed", "warn", &format!("{title} failed"), why, server_id).await;
@@ -128,6 +136,24 @@ mod tests {
             Ok((a, dup, other_server, other_kind, global_a, global_b, later))
         }).await.unwrap();
         assert_eq!(r, (true, false, true, true, true, false, true));
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[tokio::test]
+    async fn player_join_is_deduplicated_per_player_and_server() {
+        let (d, p) = db();
+        let now = chrono::Utc::now();
+        let join = |player: &str, sid: &str| json!({"id": uuid::Uuid::now_v7().to_string(), "time": crate::db::now(), "kind": "player_join", "severity": "info", "title": "t", "body": format!("{player} joined."), "server_id": sid});
+        let r = d.call(move |c| {
+            let alex = insert_if_new(c, &join("Alex", "s1"), now)?;
+            let alex_again = insert_if_new(c, &join("Alex", "s1"), now)?;
+            let steve = insert_if_new(c, &join("Steve", "s1"), now)?;
+            let alex_elsewhere = insert_if_new(c, &join("Alex", "s2"), now)?;
+            let alex_later = insert_if_new(c, &join("Alex", "s1"), now + chrono::Duration::minutes(11))?;
+            Ok((alex, alex_again, steve, alex_elsewhere, alex_later))
+        }).await.unwrap();
+        assert_eq!(r, (true, false, true, true, true));
+        assert!(rules::KINDS.contains(&"player_join") && !rules::DEFAULT_EVENTS.contains(&"player_join") && !rules::is_admin_only("player_join"));
         let _ = std::fs::remove_file(p);
     }
 }

@@ -19,6 +19,18 @@
   let saving = $state(false);
   let testing = $state(false);
   let result = $state<{ ok: boolean; detail: string } | null>(null);
+  let push = $state<'unsupported' | 'denied' | 'off' | 'on' | 'loading'>('loading');
+  let pushBusy = $state(false);
+  void import('../../lib/push').then((m) => m.pushState()).then((s) => (push = s), () => (push = 'unsupported'));
+  async function togglePush() {
+    pushBusy = true;
+    try {
+      const m = await import('../../lib/push');
+      push = push === 'on' ? await m.disablePush() : await m.enablePush();
+      if (push === 'on') toast('success', 'Push notifications are on for this browser');
+    } catch (e) { toastError(e, 'Could not change push notifications'); }
+    pushBusy = false;
+  }
 
   const pick = (s: Settings) => ({ url: s.notify_webhook_url ?? '', events: [...(s.notify_events ?? defaultEvents)], audit: s.audit_console_commands ?? 'redacted', message: s.access_message ?? '' });
   async function load() {
@@ -66,8 +78,16 @@
         </div>
       </div>
 
+      <div class="field">
+        <span class="label">Push notifications on this device</span>
+        <div class="row g6 wrap">
+          <button type="button" class="btn" disabled={pushBusy || push === 'loading' || push === 'unsupported' || push === 'denied'} onclick={togglePush}><Icon name="bell" size={14} />{push === 'on' ? 'Turn off push' : 'Turn on push'}</button>
+        </div>
+        <span class="hint">{#if push === 'unsupported'}This browser does not support push notifications (installing Moss to the home screen may enable them).{:else if push === 'denied'}Notifications are blocked for this site in the browser settings.{:else}Sends the events selected below to this browser, for servers you can see. Install Moss as an app to get them on your phone.{/if}</span>
+      </div>
+
       <fieldset class="events">
-        <legend class="label">Send these events to the webhook</legend>
+        <legend class="label">Send these events to the webhook and to push subscribers</legend>
         <div class="evgrid">
           {#each webhookKinds as k}
             <label class="ev"><input type="checkbox" class="check" checked={f.events.includes(k.kind)} onchange={(e) => toggle(k.kind, e.currentTarget.checked)} /><span>{k.label}<span class="hint" style="display:block">{k.hint}</span></span></label>

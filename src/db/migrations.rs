@@ -21,6 +21,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0014_player_analytics", include_str!("migrations/0014_player_analytics.sql")),
     ("0015_status_pages", include_str!("migrations/0015_status_pages.sql")),
     ("0016_workflows", include_str!("migrations/0016_workflows.sql")),
+    ("0018_push_subscriptions", include_str!("migrations/0018_push_subscriptions.sql")),
 ];
 
 /// Number of migrations this build knows (the `user_version` of an up-to-date database).

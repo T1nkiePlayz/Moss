@@ -5,7 +5,7 @@ import { ApiError } from './api';
 export const NONE = Symbol('not a webhook route');
 export interface WCtx { uid: () => string; now: () => string; servers: A.Server[] }
 
-const TYPES: A.WebhookEventType[] = [
+export const TYPES: A.WebhookEventType[] = [
   ['server.started', 'A server finished starting and is ready'], ['server.stopped', 'A server stopped'], ['server.crashed', "A server's process died unexpectedly"],
   ['server.restarted', 'A server came back up shortly after going down'], ['backup.completed', 'A backup finished'], ['backup.failed', 'A backup or a remote copy of one failed'],
   ['operation.completed', 'Any long-running job finished'], ['operation.failed', 'Any long-running job failed'], ['player.joined', 'A player joined (polled every few seconds)'],

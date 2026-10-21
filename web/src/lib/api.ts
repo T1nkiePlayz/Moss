@@ -509,6 +509,20 @@ export interface WebhookList { items: Webhook[]; event_types: WebhookEventType[]
 export interface WebhookDelivery { id: string; event_id: string; type: string; test: boolean; state: 'pending' | 'delivered' | 'dead'; attempts: number; max_attempts: number; created_at: string; finished_at: string | null; next_attempt_at: string | null; status_code: number | null; latency_ms: number | null; response: string | null; error: string | null }
 export interface WebhookInput { name?: string; url?: string; events?: string[]; server_ids?: string[]; enabled?: boolean }
 
+export type WorkflowAction =
+  | { type: 'start' | 'stop' | 'restart' | 'backup'; server: string }
+  | { type: 'command'; server: string; command: string }
+  | { type: 'wait'; seconds: number }
+  | { type: 'notify'; title: string; body: string }
+  | { type: 'webhook'; url?: string; endpoint_id?: string };
+export interface WorkflowCondition { field: string; op: string; value: string | number }
+export interface Workflow { id: string; name: string; enabled: boolean; trigger: string; server_ids: string[]; condition: WorkflowCondition | null; actions: WorkflowAction[]; created_by: string; created_at: string; last_run_at: string | null; last_result: string | null; disabled_reason: string | null }
+export interface WorkflowList { items: Workflow[]; event_types: WebhookEventType[] }
+export interface WorkflowInput { name?: string; enabled?: boolean; trigger?: string; server_ids?: string[]; condition?: WorkflowCondition | null; actions?: WorkflowAction[] }
+export interface WorkflowRun { id: string; at: string; event: { type: string; server: { id: string; name: string } | null; data: Record<string, unknown> }; ok: boolean; log: string[] }
+export interface WorkflowStep { index: number; action: string; description: string; server: string | null; allowed: boolean; problem: string | null }
+export interface WorkflowPlan { event: WorkflowRun['event']; trigger_matches: boolean; condition_holds: boolean; would_run: boolean; executed: false; steps: WorkflowStep[] }
+
 export const apiOps = {
   webhooks: () => get<WebhookList>('/webhooks', { ttl: 0 }),
   addWebhook: (b: WebhookInput) => send<Webhook>('POST', '/webhooks', b),
@@ -518,6 +532,12 @@ export const apiOps = {
   testWebhookEndpoint: (id: string) => send<{ delivery: WebhookDelivery }>('POST', `/webhooks/${e(id)}/test`),
   webhookDeliveries: (id: string) => get<{ items: WebhookDelivery[] }>(`/webhooks/${e(id)}/deliveries`, { ttl: 0 }),
   retryWebhookDelivery: (id: string, did: string) => send<{ delivery: WebhookDelivery }>('POST', `/webhooks/${e(id)}/deliveries/${e(did)}/retry`),
+  workflows: () => get<WorkflowList>('/workflows', { ttl: 0 }),
+  addWorkflow: (b: WorkflowInput) => send<Workflow>('POST', '/workflows', b),
+  patchWorkflow: (id: string, b: WorkflowInput) => send<Workflow>('PATCH', `/workflows/${e(id)}`, b),
+  removeWorkflow: (id: string) => send('DELETE', `/workflows/${e(id)}`),
+  testWorkflow: (id: string, b: { server_id?: string } = {}) => send<WorkflowPlan>('POST', `/workflows/${e(id)}/test`, b),
+  workflowRuns: (id: string) => get<{ items: WorkflowRun[] }>(`/workflows/${e(id)}/runs`, { ttl: 0 }),
   claimSetup: (token: string) => send<{ role: Role }>('POST', '/setup/claim', { token }),
   notifications: (o: { unread?: boolean; limit?: number } = {}) => get<NotificationList>(`/notifications${q({ unread: o.unread ? 1 : undefined, limit: o.limit ?? 50 })}`),
   markRead: (b: { ids?: string[]; all?: boolean }) => send('POST', '/notifications/read', b),

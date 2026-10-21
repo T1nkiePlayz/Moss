@@ -1,6 +1,6 @@
 // Pure hash-route parsing/matching (reactive wrapper lives in router.svelte.ts).
 export type RouteName =
-  | 'overview' | 'servers' | 'new' | 'import' | 'server' | 'backups' | 'activity' | 'users' | 'settings' | 'notfound';
+  | 'overview' | 'servers' | 'new' | 'import' | 'server' | 'backups' | 'activity' | 'workflows' | 'users' | 'settings' | 'notfound';
 
 export interface Route {
   name: RouteName;
@@ -25,7 +25,7 @@ export function parseHash(hash: string): Route {
     if (b === 'import' && seg.length === 2) return r('import');
     if (seg.length <= 3) return r('server', { id: b, tab: c ?? 'overview' });
   }
-  if (seg.length === 1 && ['backups', 'activity', 'users', 'settings'].includes(a)) return r(a as RouteName);
+  if (seg.length === 1 && ['backups', 'activity', 'workflows', 'users', 'settings'].includes(a)) return r(a as RouteName);
   return r('notfound');
 }
 

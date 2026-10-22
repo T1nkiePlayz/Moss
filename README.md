@@ -179,7 +179,7 @@ Install the tarball (or the Homebrew formula from the release), run it as a Laun
 
 ```bash
 moss update --check                                   # show the installed and the latest version
-sudo moss update && sudo systemctl restart moss       # a root-owned /usr/local/bin/moss needs sudo
+moss update && sudo systemctl restart moss            # asks for your password when /usr/local/bin is root-owned
 moss update --version v0.1.1                          # a specific release (also to go back)
 moss update --reinstall                               # reinstall the installed release without asking
 ```
@@ -191,6 +191,8 @@ moss update --reinstall                               # reinstall the installed 
 - Package-managed copies, and setups without write access or the helper, show the command to run on the host instead.
 
 The panel only moves forward; going back is `moss update --version` on the host. Set `MOSS_UPDATE_CHECK=false` to turn the check off.
+
+Like the install script, `moss update` runs as you and uses `sudo` only to copy the new binary into a folder you cannot write, such as `/usr/local/bin`; sudo asks for your password there. The copy is owned by root.
 
 When the latest release is already installed, `moss update` (and the install script) asks whether to reinstall it.
 

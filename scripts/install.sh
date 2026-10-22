@@ -196,33 +196,62 @@ if ! { mkdir -p "$DEST" 2>/dev/null && [ -w "$DEST" ]; }; then
   $SUDO mkdir -p "$DEST"
 fi
 $SUDO install -m 0755 "$TMP/$NAME/moss" "$DEST/moss"
-say "Installed $DEST/moss"
 
 # --- next steps -------------------------------------------------------------------------------------------------
-say ""
-say "Next steps"
-if [ "$OS" = linux ]; then DATA="${XDG_DATA_HOME:-~/.local/share}/moss"; else DATA="~/Library/Application Support/Moss/data"; fi
+# colour only on a terminal, and never with NO_COLOR set (https://no-color.org)
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  B="$(printf '\033[1m')"; D="$(printf '\033[2m')"; G="$(printf '\033[32m')"; Y="$(printf '\033[33m')"; C="$(printf '\033[36m')"; R="$(printf '\033[0m')"
+else
+  B=""; D=""; G=""; Y=""; C=""; R=""
+fi
+tilde() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }
+row() { printf '  %-26s %s\n' "$1" "$2"; }
+
+ONPATH=1
+case ":$PATH:" in *":$DEST:"*) ;; *) ONPATH="" ;; esac
+first="$(command -v moss 2>/dev/null || true)"
+# the short name only when it really runs the copy just installed
+if [ -n "$ONPATH" ] && [ "$first" = "$DEST/moss" ]; then MOSS="moss"; else MOSS="$DEST/moss"; fi
+
+if [ "$OS" = linux ]; then DATA="${XDG_DATA_HOME:-$HOME/.local/share}/moss"; else DATA="$HOME/Library/Application Support/Moss/data"; fi
+OLD=""
 for old in "$HOME/moss/moss-data" "$HOME/moss-data"; do
   # data left by older versions (which kept it next to wherever Moss was started) is still picked up
-  if [ -f "$old/moss.sqlite" ]; then DATA="$old"; say "  Existing data found in $old: Moss keeps using it, from whatever folder you start it."; break; fi
+  if [ -f "$old/moss.sqlite" ]; then DATA="$old"; OLD=1; break; fi
 done
-say "  Start it (sign-in is built in):           $DEST/moss serve      (data goes to $DATA)"
-say "  Then open http://127.0.0.1:8420 and sign in. The first time, Moss asks for its one-time setup token, which proves"
-say "  you own this machine: \`moss serve\` writes it to $DATA/setup-token when it starts and prints that path."
-say "  Try it without sign-in (loopback only):   MOSS_AUTH=dev $DEST/moss serve"
-say "  Check the environment:                    $DEST/moss doctor"
-say "  Update later:                             $DEST/moss update   (with sudo if $DEST needs it)"
+
+say ""
+say "${G}${B}✔ Moss $VERSION is installed${R} at $DEST/moss"
+say ""
+row "Data folder" "$(tilde "$DATA")"
+[ -n "$OLD" ] && row "" "${D}(your existing data; used whichever folder you start Moss from)${R}"
+say ""
+say "${B}Get started${R}"
+say "  1. Start Moss:"
+say "       ${C}$MOSS serve${R}"
+say "  2. Open ${C}http://127.0.0.1:8420${R} and sign in."
+say "  3. The first time, enter the one-time ${B}setup token${R}. It proves you own this machine and makes you the owner."
+say "     Moss writes it to ${C}$(tilde "$DATA")/setup-token${R} when it starts, and prints that path."
+say ""
+say "${B}More${R}"
+row "Try it without sign-in" "${C}MOSS_AUTH=dev $MOSS serve${R}  ${D}(this computer only)${R}"
+row "Check your setup" "${C}$MOSS doctor${R}"
+row "Update later" "${C}$MOSS update${R}  ${D}(asks for your password if needed)${R}"
 if [ "$OS" = linux ]; then
-  say "  Run as a service: the tarball ships moss.service, .env and moss.env.example (see the README, Linux: production-style install)."
+  row "Run as a service" "README, \"Linux: production-style install\""
+  row "" "${D}(the tarball ships moss.service, .env and moss.env.example)${R}"
 else
-  say "  Run at login: the tarball ships io.moss.controller.plist; see docs/macos.md (launchd), or use Homebrew's moss.rb."
-  say "  If macOS blocks the binary: xattr -d com.apple.quarantine $DEST/moss"
+  row "Run at login" "docs/macos.md (launchd), or Homebrew's moss.rb"
+  row "If macOS blocks it" "${C}xattr -d com.apple.quarantine $DEST/moss${R}"
 fi
-ONPATH=1
-case ":$PATH:" in *":$DEST:"*) ;; *) ONPATH=""; say "  Note: $DEST is not on your PATH." ;; esac
-first="$(command -v moss 2>/dev/null || true)"
+
+if [ -z "$ONPATH" ]; then
+  say ""
+  say "${Y}${B}! $DEST is not on your PATH.${R} Run Moss as ${C}$DEST/moss${R}, or add $DEST to PATH."
+fi
 if [ -n "$first" ] && [ "$first" != "$DEST/moss" ]; then
   say ""
-  say "Warning: \`moss\` runs $first ($("$first" --version 2>/dev/null || echo "unknown version")), $( [ -n "$ONPATH" ] && echo "which comes before $DEST on your PATH" || echo "not the copy just installed")."
-  say "  Remove the old copy (rm \"$first\") or run $DEST/moss directly."
+  say "${Y}${B}! Another copy of Moss runs instead of this one.${R}"
+  say "  ${C}moss${R} starts $first ($("$first" --version 2>/dev/null || echo "unknown version"))$( [ -n "$ONPATH" ] && echo ", which comes first on your PATH")."
+  say "  Remove it with ${C}rm \"$first\"${R}, then open a new terminal."
 fi

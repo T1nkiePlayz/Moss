@@ -378,6 +378,39 @@ Milestones are gates, not dates. ✅ done · 🟡 partly done · 🔴 not starte
 | **M8 After First Release** | 🔴 | - | Multi-node, extensions and SDK. |
 | **M9 Other languages** | 🔴 | - | Panel text moved into translation catalogs, a language picker in Settings (following the browser's language by default), dates, numbers and sizes in the chosen locale, right-to-left layouts, the CLI and `moss doctor` messages translated, a community translation workflow, and the first languages beyond English. |
 
+### Ideas and next steps
+
+Smaller items not tied to a milestone. ✅ means it already exists; unticked items are open for contributions.
+
+**Trust and testing**
+- [ ] Run container mode against real Docker and Podman in CI (one Minecraft server and one SteamCMD game each), not just the stand-in.
+- [ ] A nightly game end-to-end matrix (install, start, player query, backup, stop) for every SteamCMD game, with the results published as a compatibility table.
+- [x] The desktop app has a build workflow ([desktop.yml](.github/workflows/desktop.yml), AppImage, `.deb` and `.dmg`). Still open: run it on every pull request as a smoke build, not by hand only.
+- [ ] Ship the first signed release.
+- [ ] An external security review, and fuzz or property tests for the riskiest parsers (archive and modpack import, jar manifests, path confinement in the file manager).
+- [ ] Performance gates in CI for idle memory, startup time and event-stream rate, next to the existing bundle-size budget.
+- [ ] A per-pull-request test-coverage report (`cargo llvm-cov`) to show weak spots such as the newer games.
+
+**Reliability and operations**
+- [x] systemd and launchd unit files ship in [`packaging/`](packaging) and are documented. Still open: a `moss install-service` command that writes and enables them, and a health finding when Moss is not set up to start on boot.
+- [ ] Mirror safety (pre-change) backups to the configured remote destination, so a disk failure does not take the undo points with it.
+- [ ] "Disk full in N days" forecast from the hourly metrics, and backup retention by size as well as by count.
+- [ ] Scheduled restore drills: restore the latest backup into a throwaway server and check that it starts.
+- [x] Support bundle with secrets redacted (`GET /support-bundle`).
+
+**Features**
+- [x] Live and long-term CPU, memory and player graphs per server and for the host. Still open: Paper TPS (from `/tps` or Spark).
+- [x] Discord notifications (webhook embeds). Still open: Telegram, ntfy and Slack targets.
+- [ ] World tools: reset or regenerate a world, swap worlds, pre-generate chunks (Chunky), each with an automatic safety backup.
+- [ ] A public join page with the address and a one-click client modpack download, built on the status pages.
+- [ ] Multi-node, first step: add another Moss as a read-only peer in the servers list.
+- [ ] Typed SDKs (TypeScript and Python) generated from [docs/openapi.frozen.json](docs/openapi.frozen.json).
+
+**Language and docs**
+- [ ] Extract panel strings into a catalog (English only) as the first step of M9, then add a community translation workflow.
+- [ ] A migration guide from Pterodactyl, AMP or a hand-written systemd setup.
+- [ ] A troubleshooting page built from the `moss doctor` messages.
+
 ## Documentation
 
 | Doc | What it covers |

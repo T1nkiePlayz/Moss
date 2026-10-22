@@ -138,10 +138,12 @@ sh install.sh --prefix "$HOME/.local"
 Then start it and open the panel in your browser. Sign-in is built in, so no config file is needed:
 
 ```bash
-mkdir -p ~/moss && cd ~/moss && moss serve   # http://127.0.0.1:8420 ; data goes to ./moss-data (or set MOSS_DATA_DIR)
+moss serve   # http://127.0.0.1:8420
 ```
 
-Sign in, then enter the one-time setup token from `moss-data/setup-token` to become the owner. To keep Moss running in the background, use the service below.
+Moss keeps its data in one place, whichever folder you start it from: `~/.local/share/moss` on Linux (or `$XDG_DATA_HOME/moss`), `~/Library/Application Support/Moss/data` on macOS, or wherever `--data-dir` / `MOSS_DATA_DIR` points. Older versions put data in `./moss-data` under the folder Moss was started from. A Moss database already in `./moss-data`, `~/moss/moss-data` or `~/moss-data` is still used, so existing installs keep their data. To move it, stop Moss and move the folder to the path above.
+
+Sign in, then enter the one-time setup token to become the owner. The token proves you control the machine Moss runs on: on its first start, `moss serve` writes it to `setup-token` in the data folder and prints that path. It is removed once an owner exists. To keep Moss running in the background, use the service below.
 
 ### Try it without any account (development mode)
 
@@ -179,6 +181,7 @@ Install the tarball (or the Homebrew formula from the release), run it as a Laun
 moss update --check                                   # show the installed and the latest version
 sudo moss update && sudo systemctl restart moss       # a root-owned /usr/local/bin/moss needs sudo
 moss update --version v0.1.1                          # a specific release (also to go back)
+moss update --reinstall                               # reinstall the installed release without asking
 ```
 
 **From the panel.** Moss looks for a new release a minute after it starts and every 6 hours after that. When it finds one, administrators get a notification and a short banner at the bottom of the panel, which hides itself after 15 seconds. **Settings → Updates** installs it with the same checks as `moss update` and then restarts Moss; the panel reconnects by itself. How it installs depends on the setup:
@@ -188,6 +191,8 @@ moss update --version v0.1.1                          # a specific release (also
 - Package-managed copies, and setups without write access or the helper, show the command to run on the host instead.
 
 The panel only moves forward; going back is `moss update --version` on the host. Set `MOSS_UPDATE_CHECK=false` to turn the check off.
+
+When the latest release is already installed, `moss update` (and the install script) asks whether to reinstall it.
 
 Copies installed by Homebrew, Nix or a system package (for example the AUR) are left to that package manager unless you pass `--force`. Going back to an older release works only until a newer Moss has upgraded the database: an older Moss refuses a newer database rather than touching it (see [docs/recovery.md](docs/recovery.md)).
 
@@ -231,7 +236,7 @@ Flags and environment variables (flags win):
 | Variable | Default | Meaning |
 |---|---|---|
 | `MOSS_BIND` / `MOSS_PORT` | `127.0.0.1` / `8420` | Listener. Keep loopback unless a TLS proxy fronts it. |
-| `MOSS_DATA_DIR` | `./moss-data` | Database, servers, backups, managed Java, cache. |
+| `MOSS_DATA_DIR` | `~/.local/share/moss` (Linux), `~/Library/Application Support/Moss/data` (macOS); an existing `./moss-data`, `~/moss/moss-data` or `~/moss-data` database wins; `./moss-data` without `HOME` | Database, servers, backups, managed Java, cache. |
 | `MOSS_AUTH` | `supabase` | `supabase` or `dev` (no login, loopback only). |
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` | built in | Only to use your own sign-in project instead of the default. Setting either one (flag, environment or `.env`) turns the built-in pair off, so set both. |
 | `SUPABASE_JWT_SECRET` | – | Only for legacy HS256-signed projects. |

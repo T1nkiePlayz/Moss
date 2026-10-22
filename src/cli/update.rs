@@ -18,6 +18,9 @@ pub struct Update {
     /// Reinstall even when already up to date, and replace a binary that looks managed by a package manager
     #[arg(long)]
     force: bool,
+    /// Reinstall the release that is already installed without asking
+    #[arg(long)]
+    reinstall: bool,
     /// GitHub repository to update from
     #[arg(long, env = "MOSS_REPO", default_value = "T1nkiePlayz/Moss")]
     pub(crate) repo: String,
@@ -47,7 +50,14 @@ pub async fn run(mut a: Update) -> Result<()> {
         }
     }
     let say = |l: String| println!("{l}");
-    let out = update(&a, &exe, env!("CARGO_PKG_VERSION"), &say).await?;
+    let mut out = update(&a, &exe, env!("CARGO_PKG_VERSION"), &say).await?;
+    if matches!(out, Outcome::AlreadyInstalled) && !a.check && a.restart_service.is_none() {
+        match ask("Do you really want to reinstall it? [y/N] ")? {
+            Some(true) => { a.reinstall = true; out = update(&a, &exe, env!("CARGO_PKG_VERSION"), &say).await?; }
+            Some(false) => println!("Nothing changed."),
+            None => {}
+        }
+    }
     if !matches!(out, Outcome::Installed(_)) { return Ok(()); }
     if let Some(unit) = &a.restart_service {
         let ok = std::process::Command::new("systemctl").args(["try-restart", unit]).status().is_ok_and(|s| s.success());
@@ -61,6 +71,17 @@ pub async fn run(mut a: Update) -> Result<()> {
     else { println!("  launchd:   launchctl kickstart -k gui/$(id -u)/io.moss.controller"); }
     println!("  by hand:   stop `moss serve` and start it again");
     Ok(())
+}
+
+/// Ask a yes/no question on the terminal; None without asking when not run interactively.
+fn ask(q: &str) -> Result<Option<bool>> {
+    use std::io::{IsTerminal, Write};
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() { return Ok(None); }
+    print!("{q}");
+    std::io::stdout().flush()?;
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    Ok(Some(matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")))
 }
 
 /// The panel's update request: a tag in a small regular file in the data directory, which a less privileged user
@@ -114,7 +135,7 @@ fn writable(p: &Path) -> bool {
 /// Settings for an update started by the controller (repository and mirror from the same environment as the CLI).
 pub(crate) fn server_args(version: Option<String>) -> Update {
     Update {
-        version, check: false, force: false, request: None, restart_service: None,
+        version, check: false, force: false, reinstall: false, request: None, restart_service: None,
         repo: std::env::var("MOSS_REPO").ok().filter(|r| !r.is_empty()).unwrap_or_else(|| "T1nkiePlayz/Moss".into()),
         release_base: std::env::var("MOSS_RELEASE_BASE").ok().filter(|b| !b.is_empty()),
         skip_cosign: std::env::var("MOSS_SKIP_COSIGN").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes")),
@@ -137,7 +158,7 @@ pub(crate) fn is_newer(candidate: &str, current: &str) -> bool { newer(candidate
 pub(crate) fn valid_tag(v: &str) -> Result<String> { normalise_tag(v) }
 
 #[derive(Debug, PartialEq)]
-enum Outcome { UpToDate, Available(String), Installed(String) }
+enum Outcome { UpToDate, AlreadyInstalled, Available(String), Installed(String) }
 
 /// `vX.Y.Z[-pre]` → comparable numbers; a pre-release sorts before its release.
 fn parse_version(v: &str) -> Option<(u64, u64, u64, bool)> {
@@ -290,9 +311,14 @@ async fn update(a: &Update, exe: &Path, current: &str, say: Say<'_>) -> Result<O
     let tag = match &a.version { Some(v) => normalise_tag(v)?, None => normalise_tag(&src.latest().await?)? };
     let pinned = a.version.is_some();
     say(format!("Installed: v{current}   {}: {tag}", if pinned { "Requested" } else { "Latest" }));
-    let wanted = pinned || newer(&tag, current);
+    let same = !newer(&tag, current) && !newer(current, &tag);
+    let wanted = if same { a.reinstall } else { pinned || newer(&tag, current) };
     if a.check { return Ok(if newer(&tag, current) { say("An update is available: run `moss update`".into()); Outcome::Available(tag) } else { say("Moss is up to date".into()); Outcome::UpToDate }); }
-    if !wanted && !a.force { say("Moss is up to date".into()); return Ok(Outcome::UpToDate); }
+    if !wanted && !a.force {
+        if same { say(format!("Moss {tag} is already installed")); return Ok(Outcome::AlreadyInstalled); }
+        say("Moss is up to date".into());
+        return Ok(Outcome::UpToDate);
+    }
     if pinned && newer(current, &tag) { say(format!("Note: {tag} is older than this Moss. An older Moss refuses a database that a newer one has already upgraded; keep a copy of the data directory.")); }
     if let Some(m) = managed_by(exe) && !a.force { bail!("{} looks managed by {m}, or pass --force to replace it anyway", exe.display()); }
 
@@ -402,7 +428,7 @@ mod tests {
         format!("file://{}", root.display())
     }
 
-    fn args(base: &str) -> Update { Update { version: None, check: false, force: false, request: None, restart_service: None, repo: "T1nkiePlayz/Moss".into(), release_base: Some(base.into()), skip_cosign: true } }
+    fn args(base: &str) -> Update { Update { version: None, check: false, force: false, reinstall: false, request: None, restart_service: None, repo: "T1nkiePlayz/Moss".into(), release_base: Some(base.into()), skip_cosign: true } }
 
     fn quiet(_: String) {}
 
@@ -462,7 +488,10 @@ mod tests {
         assert!(std::fs::read_to_string(&exe).unwrap().contains("moss 9.9.9"));
         #[cfg(unix)]
         { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(&exe).unwrap().permissions().mode() & 0o777, 0o755); }
-        assert_eq!(update(&args(&base), &exe, "9.9.9", &quiet).await.unwrap(), Outcome::UpToDate);
+        assert_eq!(update(&args(&base), &exe, "9.9.9", &quiet).await.unwrap(), Outcome::AlreadyInstalled);
+        assert_eq!(update(&args(&base), &exe, "10.0.0", &quiet).await.unwrap(), Outcome::UpToDate, "a build newer than the latest release is not offered a reinstall");
+        assert_eq!(update(&Update { version: Some("9.9.9".into()), ..args(&base) }, &exe, "9.9.9", &quiet).await.unwrap(), Outcome::AlreadyInstalled, "the installed release is not reinstalled unasked");
+        assert_eq!(update(&Update { reinstall: true, ..args(&base) }, &exe, "9.9.9", &quiet).await.unwrap(), Outcome::Installed("v9.9.9".into()));
         assert_eq!(std::fs::read_dir(exe.parent().unwrap()).unwrap().count(), 1, "no staged file left behind");
         let _ = std::fs::remove_dir_all(&root);
     }

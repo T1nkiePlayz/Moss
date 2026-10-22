@@ -4,7 +4,7 @@
 
 Moss refuses to run these commands while it is running, because two programs changing the same database can lose changes. Stop Moss first (for example `sudo systemctl stop moss`). Your game servers keep running while Moss is stopped. If you are sure no controller is running but you still see the refusal, add `--force` (put it before the subcommand: `moss recover --force db check`).
 
-Point the tool at your data directory with `--data-dir /path/to/moss-data` or the `MOSS_DATA_DIR` variable. It uses the same default as `moss serve`.
+Point the tool at your data directory with `--data-dir /path/to/data` or the `MOSS_DATA_DIR` variable. It uses the same default as `moss serve` (`~/.local/share/moss` on Linux, `~/Library/Application Support/Moss/data` on macOS, or an existing `./moss-data`, `~/moss/moss-data` or `~/moss-data` that holds a database).
 
 Every command prints what it did and exits with status 0. A problem is reported in plain words and the exit status is 1, so the commands are safe to use in scripts.
 

@@ -175,7 +175,7 @@
       <button class="card hover rt" onclick={startPack}>
         <div class="row between" style="align-items:flex-start"><div class="rico"><Icon name="package" size={20} /></div><span class="badge info">New</span></div>
         <h3>From modpack</h3>
-        <p class="muted sm">Upload a .mrpack or CurseForge .zip, or paste a Modrinth/CurseForge link. Moss sets up the right loader, version and mods.</p>
+        <p class="muted sm">Search Modrinth or CurseForge, upload a .mrpack or CurseForge .zip, or paste a link. Moss sets up the right loader, version and mods.</p>
         <div class="xs faint">Mods</div>
       </button>
     </div>

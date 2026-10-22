@@ -1,8 +1,12 @@
 // Calls used only by lazily loaded pages (game servers, maps, push); kept out of api.ts so the initial bundle stays small.
-import { get, send, q, type GameModHit, type GameModsInfo, type GameUpdate, type OnlinePlayers, type Operation, type Server, type ServerMap } from './api';
+import { get, send, q, type GameModHit, type ProviderId, type ProviderInfo, type GameModsInfo, type GameUpdate, type OnlinePlayers, type Operation, type Server, type ServerMap } from './api';
 const e = encodeURIComponent;
 
+export interface ModpackHit { provider: ProviderId; project_id: string; slug: string; title: string; description: string; author: string; icon_url: string | null; downloads: number; game_versions?: string[]; loaders?: string[] }
+
 export const apiExtra = {
+  searchModpacks: (provider: ProviderId, text: string, offset = 0, limit = 20) => get<{ items: ModpackHit[]; total: number; next_offset: number | null }>(`/modpacks/search${q({ provider, q: text, offset, limit })}`, { ttl: 30000 }),
+  providerList: () => get<{ providers: ProviderInfo[] }>('/content/providers', { ttl: 60000 }),
   pushKey: () => get<{ key: string }>('/push/key', { ttl: 0 }),
   pushSubscribe: (b: PushSubscriptionJSON) => send('POST', '/push/subscriptions', b),
   pushUnsubscribe: (endpoint: string) => send('DELETE', '/push/subscriptions', { endpoint }),

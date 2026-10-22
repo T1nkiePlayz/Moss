@@ -6,6 +6,7 @@
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::{Path, PathBuf}};
+use std::ffi::OsStr;
 
 #[derive(clap::Args)]
 pub struct Update {
@@ -21,6 +22,10 @@ pub struct Update {
     /// Reinstall the release that is already installed without asking
     #[arg(long)]
     reinstall: bool,
+    /// How to get elevated rights for the final copy when the binary's folder is not writable (the CLI uses `sudo`,
+    /// which asks for the password; the panel never elevates).
+    #[arg(skip)]
+    sudo: Option<PathBuf>,
     /// GitHub repository to update from
     #[arg(long, env = "MOSS_REPO", default_value = "T1nkiePlayz/Moss")]
     pub(crate) repo: String,
@@ -49,6 +54,7 @@ pub async fn run(mut a: Update) -> Result<()> {
             None => { println!("No update requested"); return Ok(()); }
         }
     }
+    a.sudo = Some("sudo".into());
     let say = |l: String| println!("{l}");
     let mut out = update(&a, &exe, env!("CARGO_PKG_VERSION"), &say).await?;
     if matches!(out, Outcome::AlreadyInstalled) && !a.check && a.restart_service.is_none() {
@@ -135,7 +141,7 @@ fn writable(p: &Path) -> bool {
 /// Settings for an update started by the controller (repository and mirror from the same environment as the CLI).
 pub(crate) fn server_args(version: Option<String>) -> Update {
     Update {
-        version, check: false, force: false, reinstall: false, request: None, restart_service: None,
+        version, check: false, force: false, reinstall: false, sudo: None, request: None, restart_service: None,
         repo: std::env::var("MOSS_REPO").ok().filter(|r| !r.is_empty()).unwrap_or_else(|| "T1nkiePlayz/Moss".into()),
         release_base: std::env::var("MOSS_RELEASE_BASE").ok().filter(|b| !b.is_empty()),
         skip_cosign: std::env::var("MOSS_SKIP_COSIGN").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes")),
@@ -335,46 +341,76 @@ async fn update(a: &Update, exe: &Path, current: &str, say: Say<'_>) -> Result<O
 
     // Stage next to the executable so the final rename stays on one filesystem (atomic, and safe while this copy runs).
     let dir = exe.parent().context("the executable has no parent directory")?;
-    // leftovers of an update that was interrupted (Ctrl-C skips the cleanup below)
-    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        if e.file_name().to_string_lossy().starts_with(".moss-update-") && e.file_type().is_ok_and(|t| t.is_file()) { let _ = std::fs::remove_file(e.path()); }
-    }
     let staged = dir.join(format!(".moss-update-{}", std::process::id()));
-    let staged_guard = Cleanup(staged.clone());
     let extracted = tmp.0.join("moss");
     extract_binary(&tb, &name, &extracted)?;
-    if let Err(e) = std::fs::copy(&extracted, &staged) {
-        if e.kind() == std::io::ErrorKind::PermissionDenied { bail!("no permission to write to {}; rerun with sudo (sudo {} update)", dir.display(), exe.display()); }
-        return Err(e).with_context(|| format!("cannot write to {}", dir.display()));
+    // Like the install script: everything runs as this user, and only the copy into a folder they cannot write uses
+    // sudo (which asks for the password). The copy is owned by root, so this user cannot change it afterwards.
+    let sudo = a.sudo.as_deref().filter(|_| !writable(dir) && unsafe { libc::geteuid() } != 0);
+    let manual = || format!("no permission to write to {}; rerun with sudo (sudo {} update)", dir.display(), exe.display());
+    let staged_guard = Cleanup(staged.clone(), sudo.map(Path::to_path_buf));
+    // leftovers of an update that was interrupted (Ctrl-C skips the cleanup below)
+    let stale: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".moss-update-") && e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.path()).collect();
+    if let Some(sudo) = sudo {
+        say(format!("{} needs elevated rights; using sudo for the copy only", dir.display()));
+        if !stale.is_empty() {
+            let mut args = vec![OsStr::new("rm"), OsStr::new("-f")];
+            args.extend(stale.iter().map(|p| p.as_os_str()));
+            let _ = elevated(sudo, &args);
+        }
+        let ok = elevated(sudo, &[OsStr::new("install"), OsStr::new("-m"), OsStr::new("0755"), OsStr::new("-o"), OsStr::new("0"), OsStr::new("-g"), OsStr::new("0"), extracted.as_os_str(), staged.as_os_str()]);
+        if !ok { bail!("{}", manual()); }
+    } else {
+        for p in &stale { let _ = std::fs::remove_file(p); }
+        if let Err(e) = std::fs::copy(&extracted, &staged) {
+            if e.kind() == std::io::ErrorKind::PermissionDenied { bail!("{}", manual()); }
+            return Err(e).with_context(|| format!("cannot write to {}", dir.display()));
+        }
+        #[cfg(unix)]
+        { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))?; }
+        #[cfg(target_os = "macos")]
+        { let _ = std::process::Command::new("xattr").args(["-d", "com.apple.quarantine"]).arg(&staged).stderr(std::process::Stdio::null()).status(); }
     }
-    #[cfg(unix)]
-    { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))?; }
     std::fs::File::open(&staged)?.sync_all()?; // on disk before the rename, so a power cut cannot leave an empty `moss`
-    #[cfg(target_os = "macos")]
-    { let _ = std::process::Command::new("xattr").args(["-d", "com.apple.quarantine"]).arg(&staged).stderr(std::process::Stdio::null()).status(); }
     // the new binary must at least start before it replaces a working one
     let out = tokio::process::Command::new(&staged).arg("--version").output().await.context("the downloaded binary does not run")?;
     let reported = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if !out.status.success() || !reported.starts_with("moss ") { bail!("the downloaded binary does not run on this machine; nothing was changed"); }
-    std::fs::rename(&staged, exe).with_context(|| format!("cannot replace {}", exe.display()))?;
+    match sudo {
+        Some(sudo) => if !elevated(sudo, &[OsStr::new("mv"), OsStr::new("-f"), staged.as_os_str(), exe.as_os_str()]) { bail!("cannot replace {}", exe.display()); },
+        None => std::fs::rename(&staged, exe).with_context(|| format!("cannot replace {}", exe.display()))?,
+    }
     std::mem::forget(staged_guard);
     if let Ok(d) = std::fs::File::open(dir) { let _ = d.sync_all(); } // make the rename itself durable
     say(format!("Updated {} to {tag} ({reported})", exe.display()));
     Ok(Outcome::Installed(tag))
 }
 
-/// Removes a path when dropped (the staged binary after a failed update).
-struct Cleanup(PathBuf);
-impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+/// Removes a path when dropped (the staged binary after a failed update), through sudo when it was copied with sudo.
+struct Cleanup(PathBuf, Option<PathBuf>);
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        match &self.1 {
+            Some(sudo) => if self.0.exists() { let _ = elevated(sudo, &[OsStr::new("rm"), OsStr::new("-f"), self.0.as_os_str()]); },
+            None => { let _ = std::fs::remove_file(&self.0); }
+        }
+    }
+}
+
+/// Run a command through sudo on this terminal (sudo asks for the password itself). True when it succeeded.
+fn elevated(sudo: &Path, args: &[&OsStr]) -> bool {
+    std::process::Command::new(sudo).arg("--").args(args).status().is_ok_and(|s| s.success())
+}
 
 /// A private temp directory removed when dropped.
 struct TmpDir(PathBuf);
 impl Drop for TmpDir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
 fn tempdir() -> Result<TmpDir> {
     let p = std::env::temp_dir().join(format!("moss-update-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir(&p)?;
-    #[cfg(unix)]
-    { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700))?; }
+    // private from the moment it exists: what is verified here may later be copied into place as root
+    { use std::os::unix::fs::DirBuilderExt; std::fs::DirBuilder::new().mode(0o700).create(&p)?; }
     Ok(TmpDir(p))
 }
 
@@ -428,7 +464,7 @@ mod tests {
         format!("file://{}", root.display())
     }
 
-    fn args(base: &str) -> Update { Update { version: None, check: false, force: false, reinstall: false, request: None, restart_service: None, repo: "T1nkiePlayz/Moss".into(), release_base: Some(base.into()), skip_cosign: true } }
+    fn args(base: &str) -> Update { Update { version: None, check: false, force: false, reinstall: false, sudo: None, request: None, restart_service: None, repo: "T1nkiePlayz/Moss".into(), release_base: Some(base.into()), skip_cosign: true } }
 
     fn quiet(_: String) {}
 
@@ -493,6 +529,49 @@ mod tests {
         assert_eq!(update(&Update { version: Some("9.9.9".into()), ..args(&base) }, &exe, "9.9.9", &quiet).await.unwrap(), Outcome::AlreadyInstalled, "the installed release is not reinstalled unasked");
         assert_eq!(update(&Update { reinstall: true, ..args(&base) }, &exe, "9.9.9", &quiet).await.unwrap(), Outcome::Installed("v9.9.9".into()));
         assert_eq!(std::fs::read_dir(exe.parent().unwrap()).unwrap().count(), 1, "no staged file left behind");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A stand-in for sudo: logs the command, opens the folder for it and runs it (without the root ownership).
+    fn fake_sudo(root: &Path, bin: &Path, fail: bool) -> PathBuf {
+        let p = root.join(if fail { "sudo-no" } else { "sudo" });
+        let body = if fail { "exit 1".to_string() } else { format!(r#"[ "$1" = -- ] && shift
+chmod u+w '{b}'
+if [ "$1" = install ]; then install -m 0755 "$8" "$9"; else "$@"; fi
+s=$?
+chmod u-w '{b}'
+exit $s"#, b = bin.display()) };
+        std::fs::write(&p, format!("#!/bin/sh\necho \"$*\" >> '{}'\n{body}\n", root.join("sudo.log").display())).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    #[tokio::test]
+    async fn a_folder_this_user_cannot_write_is_updated_through_sudo_for_the_copy_only() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 { return; } // root can write anywhere
+        let (root, exe) = scratch("sudo");
+        let bin = exe.parent().unwrap().to_path_buf();
+        let base = release(&root.join("rel"), "v9.9.9", "#!/bin/sh\necho 'moss 9.9.9'\n", false);
+        std::fs::write(bin.join(".moss-update-1"), "stale").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let err = update(&args(&base), &exe, "0.1.0", &quiet).await.unwrap_err();
+        assert!(format!("{err:#}").contains("rerun with sudo"), "without sudo it says what to run: {err:#}");
+        let refused = Update { sudo: Some(fake_sudo(&root, &bin, true)), ..args(&base) };
+        assert!(format!("{:#}", update(&refused, &exe, "0.1.0", &quiet).await.unwrap_err()).contains("rerun with sudo"));
+        assert_eq!(std::fs::read_to_string(&exe).unwrap(), "old", "a refused password changes nothing");
+
+        let a = Update { sudo: Some(fake_sudo(&root, &bin, false)), ..args(&base) };
+        assert_eq!(update(&a, &exe, "0.1.0", &quiet).await.unwrap(), Outcome::Installed("v9.9.9".into()));
+        assert!(std::fs::read_to_string(&exe).unwrap().contains("moss 9.9.9"));
+        let log = std::fs::read_to_string(root.join("sudo.log")).unwrap();
+        let cmds: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("-- ")).map(|l| l.split(' ').next().unwrap()).collect();
+        assert_eq!(cmds[2..], ["rm", "install", "mv"], "only the cleanup, the copy and the swap are elevated: {log}");
+        assert!(log.contains("install -m 0755 -o 0 -g 0 "), "the copy is owned by root");
+        assert_eq!(std::fs::read_dir(&bin).unwrap().count(), 1, "no staged file left behind");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 

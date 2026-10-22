@@ -27,7 +27,8 @@ and `gh attestation verify`, then copy `moss` somewhere on your `PATH`.
 
 - **Script or by hand:** `moss update` downloads the latest release, verifies it like the install script (checksum,
   plus the cosign signature when `cosign` is installed), checks that it starts, and swaps it in atomically. Use
-  `moss update --check` to only compare versions, and `sudo moss update` when the binary is in a root-owned directory such as `/usr/local/bin`.
+  `moss update --check` to only compare versions. When the binary is in a root-owned directory such as
+  `/usr/local/bin`, it asks for your password and uses `sudo` for the final copy only, like the install script.
 - **Homebrew:** `brew upgrade moss`. `moss update` leaves a Homebrew copy alone unless you pass `--force`.
 
 Then restart the controller (`launchctl kickstart -k gui/$(id -u)/io.moss.controller`, or `brew services restart moss`).

@@ -46,7 +46,7 @@
   });
   // Backups, content and files come from the server-side search, after a short pause in typing.
   let remote = $state<Item[]>([]);
-  let remoteFor = '';
+  let remoteFor = $state('');
   $effect(() => {
     const t = q.trim();
     if (t.length < 2) { remote = []; remoteFor = ''; return; }

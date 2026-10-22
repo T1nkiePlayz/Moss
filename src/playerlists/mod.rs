@@ -212,7 +212,11 @@ async fn apply_files(st: &St, s: &Srv, kind: &str, want: Vec<Item>, have: Vec<St
     let online = read_prop(s, st, "online-mode").is_none_or(|v| v != "false");
     let file = list_file(bedrock, kind);
     let path = s.dir(st).join(file);
-    let existing = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+    let existing = match tokio::fs::read_to_string(&path).await {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("could not read {file}: {e}")),
+    };
     let on_disk = files::names_in(&existing);
     let owned: HashSet<String> = have.iter().map(|n| key(n)).filter(|k| !hand.contains(k)).collect();
     let (mut items, mut adopted): (Vec<Item>, Vec<String>) = (vec![], vec![]);
@@ -314,6 +318,15 @@ mod tests {
         let s2 = sid.clone();
         let (u, p) = st.db.call(move |c| Ok((c.query_row("SELECT uuid FROM player_list_entries WHERE name='Alice'", [], |r| r.get::<_, Option<String>>(0))?, pending(c, &server::get_sync(c, &s2)?.unwrap())?))).await.unwrap();
         assert_eq!((u.as_deref(), p), (Some("069a79f4-44e9-4726-a5be-fca90e38aaf5"), (1, 1)));
+    }
+
+    #[tokio::test]
+    async fn a_whitelist_file_that_cannot_be_read_is_not_rewritten() {
+        let st = state(|_| {}).await;
+        let (sid, _, dir) = setup(&st, "online-mode=false\n").await;
+        std::fs::write(dir.join("whitelist.json"), [0xff, 0xfe, 0x00]).unwrap(); // not UTF-8: read_to_string fails
+        apply(&st, &sid).await;
+        assert_eq!(std::fs::read(dir.join("whitelist.json")).unwrap(), [0xff, 0xfe, 0x00]);
     }
 
     #[tokio::test]

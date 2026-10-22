@@ -56,7 +56,7 @@ async fn resolve(parts: &Parts, st: &St, enforce_mfa: bool) -> Result<User, Auth
         return Ok(user);
     }
     let claims = verify_jwt(st, &addr, presented).await?;
-    let mut user = provision::provision(st, &claims).await?;
+    let mut user = provision::provision(st, &claims, presented).await?;
     user.aal = claims.aal;
     user.token = Some(presented.to_string());
     if enforce_mfa { check_mfa(st, &user.role, user.aal.as_deref())?; }
@@ -90,10 +90,10 @@ impl FromRequestParts<St> for Claimant {
         // the claimant becomes an owner, so the owner-level MFA policy applies
         check_mfa(st, "owner", claims.aal.as_deref())?;
         let email = claims.email.clone().unwrap_or_default().to_lowercase();
-        if email.is_empty() || (st.cfg.require_verified_email && !claims.email_verified()) {
+        if email.is_empty() || (st.cfg.require_verified_email && !super::jwt::email_confirmed(st, presented, &email).await) {
             return Err(ApiError::new(StatusCode::FORBIDDEN, "auth.not_provisioned", "A verified email address is required.").into());
         }
-        match provision::provision(st, &claims).await {
+        match provision::provision(st, &claims, presented).await {
             Ok(u) => Ok(Claimant { id: u.id, email }),
             Err(e) if e.code == "auth.setup_required" => Ok(Claimant { id: claims.sub, email }),
             Err(e) => Err(e.into()),

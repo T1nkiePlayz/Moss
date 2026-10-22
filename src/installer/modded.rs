@@ -44,6 +44,8 @@ pub async fn run_streamed(argv: &[String], dir: &Path, timeout: Duration, token:
         _ = token.cancelled() => None,
     };
     let Some(status) = status else {
+        // process_group(0) above: the installer's own children (a forked JVM, say) go too.
+        if let Some(pid) = child.id() { unsafe { libc::kill(-(pid as i32), libc::SIGKILL); } }
         let _ = child.kill().await;
         for p in pumps { p.abort(); }
         if token.is_cancelled() { bail!("cancelled"); }

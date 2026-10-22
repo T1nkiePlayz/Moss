@@ -9,15 +9,30 @@ use std::time::{Duration, Instant};
 pub struct Claims {
     pub sub: String,
     pub email: Option<String>,
-    #[serde(default)]
-    pub user_metadata: Value,
     /// Authenticator assurance level: `aal1` (password/OAuth) or `aal2` (second factor verified).
     #[serde(default)]
     pub aal: Option<String>,
 }
 
-impl Claims {
-    pub fn email_verified(&self) -> bool { self.user_metadata["email_verified"].as_bool().unwrap_or(false) }
+/// Does a `/auth/v1/user` response prove `email` is confirmed? Pure so it can be tested.
+fn confirmed_in(body: &Value, email: &str) -> bool {
+    !email.is_empty()
+        && body["email_confirmed_at"].as_str().is_some_and(|s| !s.is_empty())
+        && body["email"].as_str().is_some_and(|e| e.to_lowercase() == email)
+}
+
+/// Ask Supabase (not the token, whose `user_metadata` the user can edit) whether `email` is confirmed.
+/// Fails closed on any error.
+pub async fn email_confirmed(st: &St, token: &str, email: &str) -> bool {
+    let url = format!("{}/auth/v1/user", st.cfg.supabase_url.trim_end_matches('/'));
+    let res: anyhow::Result<Value> = async {
+        Ok(st.http.get(url).header("apikey", &st.cfg.supabase_anon_key).bearer_auth(token)
+            .timeout(Duration::from_secs(10)).send().await?.error_for_status()?.json().await?)
+    }.await;
+    match res {
+        Ok(v) => confirmed_in(&v, email),
+        Err(e) => { tracing::warn!("email confirmation check failed: {e:#}"); false }
+    }
 }
 
 const FRESH: Duration = Duration::from_secs(600);
@@ -89,7 +104,15 @@ mod tests {
     fn accepts_valid_and_parses_aal() {
         let c = check(&mint(good(), "s3cret")).unwrap();
         assert_eq!(c.aal.as_deref(), Some("aal2"));
-        assert!(!c.email_verified());
+    }
+    #[test]
+    fn email_confirmation_comes_from_server_response() {
+        let ok = json!({"email": "A@B.c", "email_confirmed_at": "2024-01-01T00:00:00Z", "user_metadata": {"email_verified": true}});
+        assert!(confirmed_in(&ok, "a@b.c"));
+        assert!(!confirmed_in(&json!({"email": "a@b.c", "email_confirmed_at": null, "user_metadata": {"email_verified": true}}), "a@b.c"));
+        assert!(!confirmed_in(&json!({"email": "a@b.c", "user_metadata": {"email_verified": true}}), "a@b.c"));
+        assert!(!confirmed_in(&ok, "other@b.c"));
+        assert!(!confirmed_in(&ok, ""));
     }
     #[test]
     fn missing_aal_is_none() {

@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 const MAX_BODY: u64 = 128 << 20;
 const MAX_QUERY: usize = 2048;
+const OWNER_TTL: Duration = Duration::from_secs(5);
 /// Public map viewers load many tiles, so the budget is far above the status page's own, but still bounded per client.
 const PUBLIC_RATE_LIMIT: u32 = 3000;
 
@@ -30,7 +31,7 @@ pub(super) async fn map_info(State(st): State<St>, user: User, Path(id): Path<St
     let running = server::view(&s, &st)["state"] == "running";
     let others = server::list(&st).await.unwrap_or_default();
     let up = running && maps::port_belongs_to(&s, m.port, &others) && reachable(m.port).await;
-    let (url, exp) = maps::link(&st, &s.id, Scope::User, maps::TOKEN_TTL_SECS);
+    let (url, exp) = maps::link(&st, &s.id, Scope::User(user.id.clone()), maps::TOKEN_TTL_SECS);
     Ok(Json(json!({"available": true, "kind": m.kind, "running": running, "reachable": up, "url": url, "expires_at": exp})))
 }
 
@@ -45,6 +46,46 @@ fn plain(status: StatusCode, msg: &'static str) -> Response {
     r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
     maps::harden(r.headers_mut());
     r
+}
+
+type OwnerCache = std::sync::Mutex<HashMap<(String, u16, Option<i64>), (std::time::Instant, bool)>>;
+
+/// The ownership check scans /proc and lists servers, so it runs off the async workers and its answer is reused for a few seconds.
+async fn port_owned_cached(st: &St, s: &server::Srv, port: u16) -> bool {
+    static CACHE: OnceLock<OwnerCache> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let key = (s.id.clone(), port, s.pid);
+    if let Some((at, v)) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(&key) && at.elapsed() < OWNER_TTL { return *v; }
+    let others = server::list(st).await.unwrap_or_default();
+    let srv = s.clone();
+    let ok = tokio::task::spawn_blocking(move || maps::port_belongs_to(&srv, port, &others)).await.unwrap_or(false);
+    let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
+    c.retain(|_, (at, _)| at.elapsed() < OWNER_TTL);
+    c.insert(key, (std::time::Instant::now(), ok));
+    ok
+}
+
+type HolderCache = std::sync::Mutex<HashMap<(String, String), (std::time::Instant, bool)>>;
+
+/// May the user a link was minted for still view this server? Checked against the live users and grants (so deleting
+/// the user, demoting them or removing their grant ends the link within a few seconds), cached briefly because a map
+/// page loads many tiles.
+async fn holder_may_view(st: &St, uid: &str, server_id: &str) -> bool {
+    static CACHE: OnceLock<HolderCache> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let key = (uid.to_string(), server_id.to_string());
+    if let Some((at, v)) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(&key) && at.elapsed() < OWNER_TTL { return *v; }
+    let holder = if st.cfg.dev() && uid == "dev" {
+        Some(User { id: uid.into(), email: "dev@localhost".into(), role: "owner".into(), token: None, via_token: None, aal: None })
+    } else {
+        let id = uid.to_string();
+        st.db.call(move |c| c.query_row("SELECT id,email,role FROM users WHERE id=?", [id], |r| Ok(User { id: r.get(0)?, email: r.get(1)?, role: r.get(2)?, token: None, via_token: None, aal: None })).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await.ok().flatten()
+    };
+    let ok = match holder { Some(u) => auth::authz(st, &u, server_id, "server.view").await.is_ok(), None => false };
+    let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
+    c.retain(|_, (at, _)| at.elapsed() < OWNER_TTL);
+    c.insert(key, (std::time::Instant::now(), ok));
+    ok
 }
 
 async fn proxy(State(st): State<St>, req: Request) -> Response {
@@ -81,15 +122,17 @@ async fn proxy(State(st): State<St>, req: Request) -> Response {
         maps::harden(r.headers_mut());
         return r;
     };
-    if scope == Scope::Public {
+    match &scope {
+        Scope::User(uid) => if !holder_may_view(&st, uid, id).await { return not_found(); },
+        Scope::Public => {
         if status_pages::limited_for(&st, &req, "map:", PUBLIC_RATE_LIMIT) { let mut r = status_pages::too_many(); maps::harden(r.headers_mut()); return r; }
         // a public link stops working as soon as the owner switches the map off the status page
         if !status_pages::map_is_public(&st, id).await { return not_found(); }
+        }
     }
     let Ok(s) = server::get(&st, id).await else { return not_found() };
     let Some(m) = maps::detect(&st, &s) else { return not_found() };
-    let others = server::list(&st).await.unwrap_or_default();
-    if !maps::port_belongs_to(&s, m.port, &others) { return plain(StatusCode::BAD_GATEWAY, "The map is not being served by this server.") }
+    if !port_owned_cached(&st, &s, m.port).await { return plain(StatusCode::BAD_GATEWAY, "The map is not being served by this server.") }
     let Some(up_path) = maps::normalise_path(rest) else { return plain(StatusCode::BAD_REQUEST, "Bad path.") };
     let query = req.uri().query();
     if query.is_some_and(|q| q.len() > MAX_QUERY) { return plain(StatusCode::URI_TOO_LONG, "Query too long.") }
@@ -137,6 +180,11 @@ mod tests {
         std::fs::write(d.join("webserver.conf"), format!("enabled: true\nport: {port}\n")).unwrap();
     }
 
+    async fn user(st: &St, id: &str, role: &str) {
+        let (i, r) = (id.to_string(), role.to_string());
+        st.db.call(move |c| c.execute("INSERT INTO users(id,email,role,created_at) VALUES (?1,?1||'@x.y',?2,'2026-01-01T00:00:00Z')", [&i, &r])).await.unwrap();
+    }
+
     fn http() -> reqwest::Client { reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).build().unwrap() }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -151,8 +199,9 @@ mod tests {
         let decoy = stub(|_, _| Reply::status(200)).await;
         let port: u16 = upstream.base.rsplit(':').next().unwrap().parse().unwrap();
         server_with_map(&st, "srv1", port).await;
+        user(&st, "u-admin", "admin").await;
         let base = serve(&st).await;
-        let (token, _) = maps::mint(&st, "srv1", Scope::User, 600);
+        let (token, _) = maps::mint(&st, "srv1", Scope::User("u-admin".into()), 600);
         let c = http();
 
         let r = c.get(format!("{base}/map/srv1/{token}/tiles/a.png?x=1")).header("cookie", "moss=secret").header("authorization", "Bearer t").header("range", "bytes=0-3").send().await.unwrap();
@@ -202,11 +251,12 @@ mod tests {
         server_with_map(&st, "srv1", port).await;
         let closed = { let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); l.local_addr().unwrap().port() };
         server_with_map(&st, "srv2", closed).await;
+        user(&st, "u-admin", "admin").await;
         let base = serve(&st).await;
         let c = http();
-        let (good, _) = maps::mint(&st, "srv1", Scope::User, 600);
-        let (other, _) = maps::mint(&st, "srv2", Scope::User, 600);
-        let (expired, _) = maps::mint(&st, "srv1", Scope::User, -1);
+        let (good, _) = maps::mint(&st, "srv1", Scope::User("u-admin".into()), 600);
+        let (other, _) = maps::mint(&st, "srv2", Scope::User("u-admin".into()), 600);
+        let (expired, _) = maps::mint(&st, "srv1", Scope::User("u-admin".into()), -1);
         let (public, _) = maps::mint(&st, "srv1", Scope::Public, 600);
         let tampered = format!("{good}0");
         for (id, t) in [("srv1", other.as_str()), ("srv1", expired.as_str()), ("srv1", "junk"), ("srv1", tampered.as_str()), ("nope", good.as_str())] {
@@ -226,5 +276,27 @@ mod tests {
         let r = c.get(format!("{base}/map/srv2/{other}/")).send().await.unwrap();
         assert_eq!(r.status(), 502);
         assert_eq!(r.headers()["content-security-policy"], "sandbox allow-scripts allow-popups");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_user_link_ends_when_its_holder_loses_access() {
+        let st = crate::testutil::state(|_| {}).await;
+        let upstream = stub(|_, _| Reply::status(200)).await;
+        let port: u16 = upstream.base.rsplit(':').next().unwrap().parse().unwrap();
+        server_with_map(&st, "srv1", port).await;
+        server_with_map(&st, "srv2", port).await;
+        user(&st, "u1", "user").await;
+        st.db.call(|c| c.execute("INSERT INTO grants(server_id,user_id,bundle) VALUES ('srv1','u1','viewer')", [])).await.unwrap();
+        let base = serve(&st).await;
+        let c = http();
+        let (t1, _) = maps::mint(&st, "srv1", Scope::User("u1".into()), 600);
+        let (t2, _) = maps::mint(&st, "srv2", Scope::User("u1".into()), 600);
+        let (ghost, _) = maps::mint(&st, "srv1", Scope::User("nobody".into()), 600);
+        assert_eq!(c.get(format!("{base}/map/srv1/{t1}/x")).send().await.unwrap().status(), 200);
+        assert_eq!(c.get(format!("{base}/map/srv2/{t2}/x")).send().await.unwrap().status(), 404, "no grant on srv2");
+        assert_eq!(c.get(format!("{base}/map/srv1/{ghost}/x")).send().await.unwrap().status(), 404, "unknown holder");
+        st.db.call(|c| c.execute("DELETE FROM grants WHERE user_id='u1'", [])).await.unwrap();
+        tokio::time::sleep(OWNER_TTL + Duration::from_millis(200)).await;
+        assert_eq!(c.get(format!("{base}/map/srv1/{t1}/x")).send().await.unwrap().status(), 404, "grant removed");
     }
 }

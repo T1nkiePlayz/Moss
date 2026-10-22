@@ -15,12 +15,14 @@
   let { route }: { route: Route } = $props();
   const id = $derived(route.params.id);
   const tab = $derived(route.params.tab);
-  const s = $derived(serverById(id));
 
   // Deep link before the list arrives (or a server outside the list): fetch directly.
   let fetched = $state<{ id: string; server?: Server; err?: string } | null>(null);
+  let attempt = $state(0);
+  const s = $derived(serverById(id) ?? (fetched?.id === id ? fetched.server : undefined));
   $effect(() => {
     const want = id;
+    attempt;
     if (serverById(want) || !servers.loaded) return;
     api.server(want).then((server) => (fetched = { id: want, server })).catch((e) => (fetched = { id: want, err: errMsg(e) }));
   });
@@ -64,7 +66,7 @@
 </script>
 
 {#if missing}
-  <States kind="error" title="Server unavailable" text={missing} retry={() => (fetched = null)}><a class="btn" href="#/servers">All servers</a></States>
+  <States kind="error" title="Server unavailable" text={missing} retry={() => { fetched = null; attempt++; }}><a class="btn" href="#/servers">All servers</a></States>
 {:else if !s}
   <States kind="loading" rows={4} />
 {:else}
@@ -95,7 +97,7 @@
 
   <div role="tabpanel" aria-label={tab}>
     {#if tab === 'overview'}
-      <Overview server={s} />
+      {#key s.id}<Overview server={s} />{/key}
     {:else if tabs.some((t) => t.id === tab)}
       {#key tab + s.id}
         <Lazy load={loaders[tab as keyof typeof loaders]} props={{ server: s }} />

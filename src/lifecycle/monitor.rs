@@ -9,10 +9,19 @@ pub fn spawn_background(st: &St) {
     sample(st);
 }
 
+/// Servers whose automatic restart task is still running.
+static PENDING_RESTARTS: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+
+struct Pending(String);
+impl Drop for Pending {
+    fn drop(&mut self) { if let Some(p) = PENDING_RESTARTS.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { p.remove(&self.0); } }
+}
+
 fn supervise(st: &St) {
     let st1 = st.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(1));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut n = 0u64;
         loop {
             tick.tick().await;
@@ -36,10 +45,18 @@ fn supervise(st: &St) {
                 } else if alive && !ready && n.is_multiple_of(3) && started.is_none_or(|t| t.elapsed().as_secs() > 4) {
                     if s.is_mc() || s.runtime == "sim" { probe.push(s); } else { mark_ready(&st1, &s.id); }
                 }
-                if restart_due {
+                // Run the restart on its own task so a slow start does not stall supervising every other server; at most
+                // one per server at a time (a due restart waits for the next tick while one is still pending).
+                if restart_due && PENDING_RESTARTS.lock().unwrap().get_or_insert_with(Default::default).insert(s.id.clone()) {
                     st1.live.lock().unwrap().entry(s.id.clone()).or_default().restart_at = None;
-                    st1.timeline(&s.id, "restart", "automatic restart after crash").await;
-                    if let Err(e) = start(&st1, s, "system").await { set_detail(&st1, &s.id, &format!("automatic restart failed: {}", e.message)); crate::notify::restart_failed(&st1, s, &e.message).await; }
+                    let (st2, s2) = (st1.clone(), s.clone());
+                    tokio::spawn(async move {
+                        let _pending = Pending(s2.id.clone()); // cleared even if the task panics
+                        st2.timeline(&s2.id, "restart", "automatic restart after crash").await;
+                        // Stop pressed while this task was queued (before `starting` was set) cancels the restart
+                        if server::get(&st2, &s2.id).await.is_ok_and(|f| f.desired != "running") { return; }
+                        if let Err(e) = start(&st2, &s2, "system").await { set_detail(&st2, &s2.id, &format!("automatic restart failed: {}", e.message)); crate::notify::restart_failed(&st2, &s2, &e.message).await; }
+                    });
                 }
                 server::note_state(&st1, s);
             }
@@ -57,6 +74,7 @@ fn sample(st: &St) {
     let st2 = st.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(5));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut n = 0u64;
         loop {
             tick.tick().await;

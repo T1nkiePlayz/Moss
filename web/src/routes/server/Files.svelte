@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import States from '../../components/States.svelte';
   import PromptModal from '../../components/PromptModal.svelte';
@@ -34,12 +35,15 @@
   const join = (a: string, b: string) => (a ? a + '/' + b : b);
   const crumbs = $derived(path.split('/').filter(Boolean).map((p, i, a) => ({ p, to: a.slice(0, i + 1).join('/') })));
 
+  let loadSeq = 0;
   async function load() {
+    const seq = ++loadSeq;
     loading = true; err = '';
-    try { listing = await api.files(s.id, path); } catch (e) { err = errMsg(e); }
-    loading = false;
+    try { const l = await api.files(s.id, path); if (seq === loadSeq) listing = l; } catch (e) { if (seq === loadSeq) err = errMsg(e); }
+    if (seq === loadSeq) loading = false;
   }
-  $effect(() => { s.id; path; load(); });
+  const sid = $derived(s.id);
+  $effect(() => { sid; path; untrack(load); });
 
   async function openFile(e: FileEntry) {
     const p = join(path, e.name);

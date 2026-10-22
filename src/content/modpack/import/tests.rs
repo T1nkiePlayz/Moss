@@ -47,12 +47,25 @@ fn replace_mode_swaps_the_content_dir_and_rolls_back_on_failure() {
     let aside = root.join(".moss/modpack-prev");
     let pack = write_zip(&stage, &[("overrides/config/a.toml", b"cfg")]);
     place(&root, "mods", &pack, &scan_entries(&pack), &[staged(&stage, "new.jar", "new")], true, &aside).unwrap();
-    assert!(!root.join("mods/old.jar").exists() && root.join("mods/new.jar").exists() && !aside.exists());
+    assert!(!root.join("mods/old.jar").exists() && root.join("mods/new.jar").exists() && aside.exists(), "the caller deletes aside after recording");
+    let _ = std::fs::remove_dir_all(&aside);
     // failure after the swap: a file path that is a directory on the server
     std::fs::create_dir_all(root.join("mods/blocked.jar")).unwrap();
     let bad = [staged(&stage, "extra.jar", "x"), ("mods/blocked.jar".to_string(), stage.join("extra.jar.bin"))];
     assert!(place(&root, "mods", &pack, &[], &bad, true, &aside).is_err());
     assert!(root.join("mods/new.jar").exists() && !root.join("mods/extra.jar").exists(), "the previous directory is restored");
+    for d in [root, stage] { let _ = std::fs::remove_dir_all(d); }
+}
+
+#[test]
+fn merge_mode_restores_overwritten_files_on_failure() {
+    let (root, stage) = (tmpdir(), tmpdir());
+    std::fs::create_dir_all(root.join("mods/blocked.jar")).unwrap();
+    std::fs::write(root.join("mods/a.jar"), "original").unwrap();
+    let pack = write_zip(&stage, &[("modrinth.index.json", b"{}")]);
+    let files = [staged(&stage, "a.jar", "replacement"), ("mods/blocked.jar".to_string(), stage.join("a.jar.bin"))];
+    assert!(place(&root, "mods", &pack, &[], &files, false, &root.join(".moss/modpack-prev")).is_err());
+    assert_eq!(std::fs::read_to_string(root.join("mods/a.jar")).unwrap(), "original", "the overwritten file comes back");
     for d in [root, stage] { let _ = std::fs::remove_dir_all(d); }
 }
 

@@ -29,17 +29,20 @@ pub(super) async fn download_one(ctx: OpCtx, token: Option<String>, f: PackFile,
     Err(last)
 }
 
+/// On success `aside` is left in place: the caller deletes it once the install is recorded.
 /// Replace mode sets the content directory aside first. Files and overrides are then written; on failure the
 /// files created here are removed and the original directory is put back. (Overrides that replaced existing files
 /// cannot be restored individually: that is what the pre-change backup is for.)
 fn place(root: &FsPath, content_dir: &str, pack: &FsPath, overrides: &[OverrideEntry], files: &[(String, PathBuf)], replace: bool, aside: &FsPath) -> Result<usize> {
     let dir = safe_join(root, content_dir).map_err(|e| anyhow!(e.message))?;
     let stashed = replace && dir.exists();
+    let _ = std::fs::remove_dir_all(aside);
     if stashed {
-        let _ = std::fs::remove_dir_all(aside);
         if let Some(p) = aside.parent() { std::fs::create_dir_all(p)?; }
         std::fs::rename(&dir, aside)?;
     }
+    let displaced = aside.join("displaced");
+    let mut moved: Vec<(PathBuf, PathBuf)> = vec![];
     let mut created: Vec<PathBuf> = vec![];
     let res = (|| -> Result<usize> {
         for (rel, tmp) in files {
@@ -47,6 +50,12 @@ fn place(root: &FsPath, content_dir: &str, pack: &FsPath, overrides: &[OverrideE
             if target.is_dir() { bail!("{rel} is a directory on the server"); }
             if let Some(p) = target.parent() { std::fs::create_dir_all(p)?; }
             let target = safe_join(root, rel).map_err(|e| anyhow!(e.message))?;
+            if !stashed && target.is_file() {
+                let keep = displaced.join(rel);
+                if let Some(p) = keep.parent() { std::fs::create_dir_all(p)?; }
+                std::fs::rename(&target, &keep)?;
+                moved.push((target.clone(), keep));
+            }
             if std::fs::rename(tmp, &target).is_err() { std::fs::copy(tmp, &target)?; }
             created.push(target);
         }
@@ -54,9 +63,11 @@ fn place(root: &FsPath, content_dir: &str, pack: &FsPath, overrides: &[OverrideE
         Ok(zipsafe::extract(&mut z, overrides, root)?.len())
     })();
     match res {
-        Ok(n) => { if stashed { let _ = std::fs::remove_dir_all(aside); } Ok(n) }
+        Ok(n) => Ok(n),
         Err(e) => {
             for p in created { let _ = std::fs::remove_file(p); }
+            for (target, keep) in moved { let _ = std::fs::rename(keep, target); }
+            if !stashed { let _ = std::fs::remove_dir_all(aside); }
             if stashed { let _ = std::fs::remove_dir_all(&dir); let _ = std::fs::rename(aside, &dir); }
             Err(e)
         }
@@ -111,11 +122,16 @@ pub(super) async fn import(ctx: OpCtx, s: Srv, c: Compat, entry: store::Entry, m
         ctx.stage("Placing files and overrides");
         let placed: Vec<(String, PathBuf)> = fetched.iter().map(|f| (f.file.path.clone(), f.path.clone())).collect();
         let (root, cdir, ppath, ov, aside) = (s.dir(&st), c.dir.clone(), entry.path.clone(), sc.overrides.clone(), s.moss_dir(&st).join("modpack-prev"));
-        let wrote = tokio::task::spawn_blocking(move || place(&root, &cdir, &ppath, &ov, &placed, replace, &aside)).await??;
+        let aside2 = aside.clone();
+        let wrote = tokio::task::spawn_blocking(move || place(&root, &cdir, &ppath, &ov, &placed, replace, &aside2)).await??;
         ctx.log(format!("Installed {} files and {wrote} override files.", fetched.len()));
         let (root, rels) = (s.dir(&st), sc.overrides.iter().map(|o| o.rel.clone()).collect::<Vec<_>>());
         let sums = tokio::task::spawn_blocking(move || diff::sha256_paths(&root, &rels)).await?;
-        record(&st, &s, &c, &pack, &mode, &fetched, entry.source.as_ref(), &sums).await?;
+        if let Err(e) = record(&st, &s, &c, &pack, &mode, &fetched, entry.source.as_ref(), &sums).await {
+            ctx.log(format!("Recording the install failed; the previous content remains in {}.", aside.display()));
+            return Err(e);
+        }
+        let _ = tokio::fs::remove_dir_all(&aside).await;
         Ok(fetched.len())
     }.await;
     let _ = tokio::fs::remove_dir_all(&tmp).await;

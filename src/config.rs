@@ -25,7 +25,7 @@ pub struct Config {
     /// Comma separated emails that become owner on first sign-in.
     #[arg(long, env = "MOSS_OWNER_EMAILS", default_value = "")]
     pub owner_emails: String,
-    /// Require Supabase `email_verified` before an account can be matched to an owner/invite.
+    /// Require a confirmed email (checked with Supabase `/auth/v1/user`) before an account can be matched to an owner/invite.
     #[arg(long, env = "MOSS_REQUIRE_VERIFIED_EMAIL", default_value_t = true, action = clap::ArgAction::Set)]
     pub require_verified_email: bool,
     /// Your own CurseForge API key for direct access (secret; keep it in .env.local). Without it, Moss uses the project's `curseforge` edge function.

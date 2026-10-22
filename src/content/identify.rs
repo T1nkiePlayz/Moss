@@ -110,6 +110,7 @@ async fn run_locked(ctx: OpCtx, s: Srv, c: Compat, token: Option<String>, actor:
 
 /// SHA-256 of each remaining file, then one Hangar hash lookup per file (Hangar has no batch endpoint).
 async fn hangar_lookup(st: &St, c: &Compat, rest: &[&Hashed], ctx: &OpCtx) -> Result<Vec<Found>> {
+    if rest.len() > 100 { ctx.log(format!("Hangar lookup checked 100 files; {} more were skipped.", rest.len() - 100)); }
     let jobs: Vec<(String, String, PathBuf)> = rest.iter().take(100).map(|h| (h.filename.clone(), h.sha512.clone(), h.path.clone())).collect();
     let sums: Vec<(String, String, String)> = tokio::task::spawn_blocking(move || jobs.into_iter().filter_map(|(f, s512, p)| {
         let mut file = std::fs::File::open(p).ok()?;
@@ -136,11 +137,16 @@ async fn cf_lookup(st: &St, token: Option<&str>, rest: &[&Hashed], ctx: &OpCtx) 
         matches.extend(cf::fingerprint_matches(st, token, &chunk.iter().map(|(_, fp)| *fp).collect::<Vec<_>>()).await?);
     }
     let ids: Vec<u64> = { let mut v: Vec<u64> = matches.iter().map(|m| m.mod_id).collect(); v.sort(); v.dedup(); v };
-    let names = if ids.is_empty() { Default::default() } else { cf::mod_names(st, token, &ids).await.unwrap_or_default() };
+    let mut names: std::collections::HashMap<u64, String> = Default::default();
+    for chunk in ids.chunks(50) {
+        match cf::mod_names(st, token, chunk).await { Ok(n) => names.extend(n), Err(e) => ctx.log(format!("CurseForge project names unavailable for {} projects: {e:#}", chunk.len())) }
+    }
+    let by_fp: std::collections::HashMap<u32, &_> = matches.iter().map(|m| (m.fingerprint, m)).collect();
+    let sha_of: std::collections::HashMap<&str, &str> = rest.iter().map(|h| (h.filename.as_str(), h.sha512.as_str())).collect();
     let mut out = vec![];
     for (filename, fp) in &fps {
-        let Some(m) = matches.iter().find(|m| m.fingerprint == *fp) else { continue };
-        let sha512 = rest.iter().find(|h| h.filename == *filename).map(|h| h.sha512.clone()).unwrap_or_default();
+        let Some(m) = by_fp.get(fp) else { continue };
+        let sha512 = sha_of.get(filename.as_str()).map(|s| s.to_string()).unwrap_or_default();
         out.push(Found { filename: filename.clone(), sha512, provider: "curseforge", project_id: m.mod_id.to_string(), version_id: m.file_id.to_string(), title: names.get(&m.mod_id).cloned().unwrap_or_else(|| m.file_name.clone()), version_number: m.display_name.clone() });
     }
     Ok(out)

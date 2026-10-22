@@ -52,7 +52,22 @@ impl Moss {
         Self { child: cmd.spawn().expect("spawn moss"), base: format!("http://127.0.0.1:{port}/api/v1"), dir: dir.to_path_buf() }
     }
 }
-impl Drop for Moss { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
+impl Drop for Moss { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); reap_servers(&self.dir); let _ = std::fs::remove_dir_all(&self.dir); } }
+
+/// Game servers outlive the controller by design, so a test harness kills them itself: the process group of every
+/// `servers/*/.moss/pid` under `data`. Only a host process that is a Moss wrapper shell (`moss-run`) leading its own
+/// group is signalled (a container's pid file holds a namespaced pid, which must never become `kill(-1)`).
+pub fn reap_servers(data: &std::path::Path) {
+    let Ok(rd) = std::fs::read_dir(data.join("servers")) else { return };
+    for e in rd.flatten() {
+        let Some(pid) = std::fs::read_to_string(e.path().join(".moss/pid")).ok().and_then(|p| p.trim().parse::<i32>().ok()) else { continue };
+        let ours = pid > 1 && std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| c.split(|b| *b == 0).any(|a| a == b"moss-run"))
+            && unsafe { libc::getpgid(pid) } == pid
+            // a stale pid file may name a reused pid: only a wrapper running inside this data dir is ours
+            && std::fs::read_link(format!("/proc/{pid}/cwd")).is_ok_and(|c| data.canonicalize().is_ok_and(|d| c.starts_with(d)));
+        if ours { unsafe { libc::kill(-pid, libc::SIGKILL); } }
+    }
+}
 
 pub async fn wait_op(c: &reqwest::Client, base: &str, id: &str) -> Value {
     until("operation to finish", 90, || async { let o: Value = c.get(format!("{base}/operations/{id}")).send().await.ok()?.json().await.ok()?; matches!(o["state"].as_str()?, "completed" | "failed" | "cancelled").then_some(o) }).await

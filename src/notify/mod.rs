@@ -15,7 +15,10 @@ pub fn row_json(r: &rusqlite::Row) -> rusqlite::Result<Value> {
     Ok(json!({"id": r.get::<_, String>(0)?, "time": r.get::<_, String>(1)?, "kind": r.get::<_, String>(2)?, "severity": r.get::<_, String>(3)?,
         "title": r.get::<_, String>(4)?, "body": r.get::<_, String>(5)?, "server_id": r.get::<_, Option<String>>(6)?, "read": r.get::<_, bool>(7)?}))
 }
-pub const SEL: &str = "SELECT id,time,kind,severity,title,body,server_id,read FROM notifications";
+/// Rows with `read` as seen by the user bound to `?1` (read state is per user, in `notification_reads`).
+pub const SEL: &str = "SELECT n.id,n.time,n.kind,n.severity,n.title,n.body,n.server_id,EXISTS(SELECT 1 FROM notification_reads r WHERE r.user_id=?1 AND r.notification_id=n.id) FROM notifications n";
+/// Filter for `SEL`: only rows the user bound to `?1` has not read.
+pub const UNREAD: &str = "WHERE NOT EXISTS(SELECT 1 FROM notification_reads r WHERE r.user_id=?1 AND r.notification_id=n.id)";
 
 /// Insert unless the same kind + server was already recorded within the de-dup window. True when inserted.
 fn insert_if_new(c: &Connection, n: &Value, now: chrono::DateTime<chrono::Utc>) -> rusqlite::Result<bool> {

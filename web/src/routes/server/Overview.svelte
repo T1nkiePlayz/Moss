@@ -17,6 +17,7 @@ import { apiOps } from '../../lib/api-ops';
 
   let { server: s }: { server: Server } = $props();
   const id = $derived(s.id);
+  const hasConsole = $derived(s.capabilities.includes('console'));
 
   let events = $state<TimelineEvent[] | null>(null);
   let findings = $state<Finding[]>([]);
@@ -29,7 +30,7 @@ import { apiOps } from '../../lib/api-ops';
     const sid = id;
     events = null; fLoaded = false;
     const stop = poll(async () => {
-      if (s.capabilities.includes('console')) api.backlog(sid, 8).then((b) => (tail = b.lines.slice(-8))).catch(() => {});
+      if (hasConsole) api.backlog(sid, 8).then((b) => (tail = b.lines.slice(-8))).catch(() => {});
     }, 5000);
     api.timeline(sid).then((e) => (events = e)).catch(() => (events = []));
     api.health(sid).then((f) => (findings = f)).catch(() => {}).finally(() => (fLoaded = true));

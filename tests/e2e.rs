@@ -1,6 +1,7 @@
 //! End to end: drives the real binary over HTTP with the simulated game server.
 //! Covers the promises Moss is built on: servers survive a SIGKILLed controller and are re-attached,
 //! the console works, and a backup can be created and verified.
+mod suite;
 use serde_json::{Value, json};
 use std::{net::TcpListener, process::{Child, Command, Stdio}, time::{Duration, Instant}};
 
@@ -17,7 +18,7 @@ impl Moss {
     }
     fn sigkill(&mut self) { self.child.kill().unwrap(); self.child.wait().unwrap(); }
 }
-impl Drop for Moss { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
+impl Drop for Moss { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); suite::reap_servers(&self.dir); } }
 
 async fn until<F: FnMut() -> Fut, Fut: std::future::Future<Output = Option<T>>, T>(what: &str, secs: u64, mut f: F) -> T {
     let end = Instant::now() + Duration::from_secs(secs);

@@ -66,11 +66,11 @@ fn maven(range: &str, v: &Ver) -> Option<bool> {
 }
 
 fn semver(range: &str, v: &Ver) -> Option<bool> {
-    let mut any_known = false;
+    let (mut any_known, mut any_unknown) = (false, false);
     for alt in range.split("||") {
-        if let Some(ok) = all_of(alt, v) { any_known = true; if ok { return Some(true); } }
+        match all_of(alt, v) { Some(true) => return Some(true), Some(false) => any_known = true, None => any_unknown = true }
     }
-    any_known.then_some(false)
+    (any_known && !any_unknown).then_some(false)
 }
 
 fn all_of(alt: &str, v: &Ver) -> Option<bool> {
@@ -119,4 +119,16 @@ fn comparator(t: &str, v: &Ver) -> Option<bool> {
         }
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::satisfies;
+
+    #[test]
+    fn or_range_with_unparsable_alternative_is_unknown_when_nothing_matches() {
+        assert_eq!(satisfies(">=2.0 || foo", "1.0"), None);
+        assert_eq!(satisfies(">=2.0 || foo", "3.0"), Some(true));
+        assert_eq!(satisfies(">=2.0 || <1.0", "1.5"), Some(false));
+    }
 }

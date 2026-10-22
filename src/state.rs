@@ -41,6 +41,8 @@ pub struct Live {
     pub exiting: bool,
     /// A start is in progress; stops two quick Start clicks (or an autostart racing a click) from launching twice.
     pub starting: bool,
+    /// Bumped by every Stop/Kill, so a start finishing concurrently can tell its "running" write lost the race.
+    pub stop_gen: u64,
 }
 
 #[derive(Clone, Copy, serde::Serialize)]
@@ -136,8 +138,9 @@ impl Inner {
         v.ok().flatten().unwrap_or_else(|| default.to_string())
     }
 
-    pub async fn set_setting(&self, key: &str, value: &str) {
+    pub async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
         let (k, v) = (key.to_string(), value.to_string());
-        let _ = self.db.call(move |c| c.execute("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", [k, v])).await;
+        self.db.call(move |c| c.execute("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", [k, v])).await?;
+        Ok(())
     }
 }

@@ -113,6 +113,10 @@ pub async fn delete(State(st): State<St>, user: User, Path(bid): Path<String>) -
     if st.db.call(move |c| c.query_row("SELECT locked FROM backups WHERE id=?", [b], |r| r.get::<_, bool>(0))).await? {
         return Err(ApiError::conflict("backup.locked", "this backup is locked; unlock it before deleting"));
     }
+    let b = bid.clone();
+    if st.db.call(move |c| c.query_row("SELECT remote='uploading' FROM backups WHERE id=?", [b], |r| r.get::<_, bool>(0))).await? {
+        return Err(ApiError::conflict("backup.uploading", "this backup is still being copied to the remote destination; try again when the upload finishes"));
+    }
     remote::jobs::delete_remote(&st, &bid).await.map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "backup.remote_delete_failed", format!("could not delete the remote copy, so nothing was deleted: {e:#}")))?;
     remove_backup(&st, &sid, &bid).await?;
     st.audit(&user.actor(), "backup.delete", &bid, "", Some(&sid)).await;

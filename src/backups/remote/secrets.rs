@@ -12,8 +12,13 @@ static LOCK: Mutex<()> = Mutex::new(());
 
 pub fn file(data_dir: &Path) -> PathBuf { data_dir.join("backup-secrets.json") }
 
-fn read(data_dir: &Path) -> BTreeMap<String, Creds> {
-    std::fs::read_to_string(file(data_dir)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+/// A missing file is an empty map; an unreadable or corrupt one is an error so `set` never overwrites other credentials.
+fn read(data_dir: &Path) -> Result<BTreeMap<String, Creds>> {
+    match std::fs::read_to_string(file(data_dir)) {
+        Ok(s) => serde_json::from_str(&s).map_err(|e| anyhow::anyhow!("backup-secrets.json is corrupt: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn write(data_dir: &Path, m: &BTreeMap<String, Creds>) -> Result<()> {
@@ -28,19 +33,27 @@ fn write(data_dir: &Path, m: &BTreeMap<String, Creds>) -> Result<()> {
     Ok(())
 }
 
-pub fn get(data_dir: &Path, id: &str) -> Option<Creds> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); read(data_dir).remove(id) }
+pub fn get(data_dir: &Path, id: &str) -> Option<Creds> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); read(data_dir).ok().and_then(|mut m| m.remove(id)) }
 pub fn is_set(data_dir: &Path, id: &str) -> bool { get(data_dir, id).is_some_and(|c| !c.access_key.is_empty() && !c.secret_key.is_empty()) }
-pub fn set(data_dir: &Path, id: &str, c: Creds) -> Result<()> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); let mut m = read(data_dir); m.insert(id.into(), c); write(data_dir, &m) }
-pub fn remove(data_dir: &Path, id: &str) -> Result<()> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); let mut m = read(data_dir); if m.remove(id).is_some() { write(data_dir, &m)?; } Ok(()) }
+pub fn set(data_dir: &Path, id: &str, c: Creds) -> Result<()> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); let mut m = read(data_dir)?; m.insert(id.into(), c); write(data_dir, &m) }
+pub fn remove(data_dir: &Path, id: &str) -> Result<()> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); let mut m = read(data_dir)?; if m.remove(id).is_some() { write(data_dir, &m)?; } Ok(()) }
 /// Every secret value, for redaction.
 pub fn all_values(data_dir: &Path) -> Vec<String> {
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    read(data_dir).into_values().flat_map(|c| [c.access_key, c.secret_key]).filter(|s| !s.is_empty()).collect()
+    read(data_dir).unwrap_or_default().into_values().flat_map(|c| [c.access_key, c.secret_key]).filter(|s| !s.is_empty()).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn corrupt_file_is_not_overwritten() {
+        let d = std::env::temp_dir().join(format!("moss-sec-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(file(&d), "{not json").unwrap();
+        assert!(set(&d, "a", Creds::default()).is_err());
+        assert_eq!(std::fs::read_to_string(file(&d)).unwrap(), "{not json");
+    }
     #[test]
     fn stored_privately_and_removable() {
         let d = std::env::temp_dir().join(format!("moss-sec-{}", uuid::Uuid::new_v4()));

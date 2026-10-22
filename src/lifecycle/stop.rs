@@ -70,15 +70,19 @@ pub async fn halt(st: &St, s: &Srv) {
 }
 
 pub async fn stop(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
-    server::set_desired(st, &s.id, "stopped").await;
-    let alive = st.live.lock().unwrap().get(&s.id).is_some_and(|l| l.alive);
-    {
+    // desired is written after the generation bump, so a concurrent finish_start either sees the bump or is overwritten
+    let alive = {
         let mut live = st.live.lock().unwrap();
         let l = live.entry(s.id.clone()).or_default();
+        l.stop_gen += 1;
+        let alive = l.alive;
+        super::request_stop_if_starting(l, &s.id, false); // a start under way: finish_start stops the new process
         l.restart_at = None;
         if !alive { l.crashed = false; l.detail = None; }
         else { l.stopping = true; }
-    }
+        alive
+    };
+    server::set_desired(st, &s.id, "stopped").await;
     st.audit(actor, "server.stop", &s.name, "", Some(&s.id)).await;
     if alive {
         let (st2, s2) = (st.clone(), s.clone());
@@ -93,6 +97,7 @@ pub async fn stop(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
 }
 
 pub async fn kill(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
+    { let mut live = st.live.lock().unwrap(); let l = live.entry(s.id.clone()).or_default(); l.stop_gen += 1; super::request_stop_if_starting(l, &s.id, true); }
     server::set_desired(st, &s.id, "stopped").await;
     if s.in_container && process_alive(s) {
         st.live.lock().unwrap().entry(s.id.clone()).or_default().stopping = true;
@@ -106,6 +111,25 @@ pub async fn kill(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     tokio::time::sleep(Duration::from_millis(300)).await;
     handle_exit(st, &s.id).await;
     Ok(())
+}
+
+/// A start finished after Stop or Kill was pressed (`stopping` is already set): stop or kill the new process.
+pub(super) async fn abort_started(st: &St, s: &Srv, kill: bool) {
+    if kill {
+        if s.in_container {
+            ctr::kill_container(st, s).await;
+            crate::container::set_alive(&crate::container::container_name(&s.id), false);
+        } else if let Some(p) = s.pid { kill_group(p, libc::SIGKILL); }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        handle_exit(st, &s.id).await;
+    } else {
+        let (st2, s2) = (st.clone(), s.clone());
+        tokio::spawn(async move {
+            stop_and_wait(&st2, &s2, Duration::from_secs(if s2.is_proxy() { 30 } else { 90 })).await;
+            handle_exit(&st2, &s2.id).await;
+        });
+    }
+    if let Ok(fresh) = server::get(st, &s.id).await { server::note_state(st, &fresh); }
 }
 
 pub async fn restart(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {

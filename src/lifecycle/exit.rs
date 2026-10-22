@@ -3,6 +3,14 @@ use super::process_alive;
 use crate::{server, state::St};
 use std::time::{Duration, Instant};
 
+/// The wrapper's exit code; a link or anything but a small regular file is ignored (the game can write `.moss`).
+fn read_exit_code(path: &std::path::Path) -> Option<i32> {
+    use std::io::Read;
+    let f = super::open_moss_file(path, std::fs::OpenOptions::new().read(true), false).ok()?;
+    let mut c = String::new();
+    f.take(64).read_to_string(&mut c).ok()?;
+    c.trim().parse().ok()
+}
 
 /// Book-keeping after a process is gone: clean stop vs crash, restart policy with backoff and a crash-loop breaker.
 pub async fn handle_exit(st: &St, id: &str) {
@@ -20,7 +28,7 @@ pub async fn handle_exit(st: &St, id: &str) {
         crate::container::forget_alive(&crate::container::container_name(id));
         r
     } else {
-        (std::fs::read_to_string(s.moss_dir(st).join("exit")).ok().and_then(|c| c.trim().parse::<i32>().ok()), super::finish_cgroup(id))
+        (read_exit_code(&s.moss_dir(st).join("exit")), super::finish_cgroup(id))
     };
     if oom { crate::console::push(&crate::console::hub(st, id), "\x1b[31m[moss] the server was killed by the memory limit\x1b[0m".into()); }
     server::save_pid(st, id, None, None, Some(code.map_or("unknown (killed)".into(), |c| c.to_string()))).await;

@@ -35,7 +35,7 @@ pub fn push(h: &Hub, line: String) {
 }
 
 pub fn read_tail(path: &FsPath, max_bytes: u64) -> Vec<String> {
-    let Ok(mut f) = std::fs::File::open(path) else { return vec![] };
+    let Ok(mut f) = crate::lifecycle::open_moss_file(path, std::fs::OpenOptions::new().read(true), false) else { return vec![] };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let start = len.saturating_sub(max_bytes);
     let _ = f.seek(SeekFrom::Start(start));
@@ -78,6 +78,20 @@ pub fn audit_command_detail(mode: &str, cmd: &str) -> Option<String> {
     }
 }
 
+/// Read up to 256 KiB of the log from `off`. `ino` is the inode the offset belongs to: a new file (the log is replaced at
+/// every start) or a shorter one restarts from 0. Links and non-regular files are refused (the game can write `.moss`).
+/// Returns (new offset, inode, bytes).
+pub(crate) fn read_chunk(log: &FsPath, off: u64, ino: Option<u64>) -> (u64, Option<u64>, Vec<u8>) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(mut f) = crate::lifecycle::open_moss_file(log, std::fs::OpenOptions::new().read(true), false) else { return (off, ino, Vec::new()) };
+    let Ok(m) = f.metadata() else { return (off, ino, Vec::new()) };
+    let off = if m.len() < off || ino.is_some_and(|i| i != m.ino()) { 0 } else { off }; // log replaced, truncated or rotated
+    let _ = f.seek(SeekFrom::Start(off));
+    let mut buf = Vec::new();
+    let _ = f.take(256 * 1024).read_to_end(&mut buf);
+    (off + buf.len() as u64, Some(m.ino()), buf)
+}
+
 /// Tail the log from `offset` until the process is gone and the file is drained. Calls `on_line` for readiness detection.
 pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool) {
     let h = prime(st, &id, &log);
@@ -86,24 +100,18 @@ pub fn start_tailer(st: &St, id: String, log: std::path::PathBuf, from_end: bool
     tokio::spawn(async move {
         let mut from_end = from_end;
         'run: loop {
-            let mut off = if from_end { std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0) } else { 0 };
+            let (mut off, mut ino) = if from_end {
+                std::fs::symlink_metadata(&log).ok().filter(|m| m.is_file()).map_or((0, None), |m| { use std::os::unix::fs::MetadataExt; (m.len(), Some(m.ino())) })
+            } else { (0, None) };
             let mut split = lines::LineSplitter::default();
             let mut idle_after_exit = 0;
             let mut idle_polls = 0u32;
             loop {
-                let (new_off, chunk) = tokio::task::spawn_blocking({
-                    let (log, off) = (log.clone(), off);
-                    move || {
-                        let Ok(mut f) = std::fs::File::open(&log) else { return (off, Vec::new()) };
-                        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-                        let off = if len < off { 0 } else { off }; // log truncated/rotated
-                        let _ = f.seek(SeekFrom::Start(off));
-                        let mut buf = Vec::new();
-                        let _ = f.take(256 * 1024).read_to_end(&mut buf);
-                        (off + buf.len() as u64, buf)
-                    }
-                }).await.unwrap_or((off, Vec::new()));
-                off = new_off;
+                let (new_off, new_ino, chunk) = tokio::task::spawn_blocking({
+                    let log = log.clone();
+                    move || read_chunk(&log, off, ino)
+                }).await.unwrap_or((off, ino, Vec::new()));
+                (off, ino) = (new_off, new_ino);
                 if !chunk.is_empty() {
                     idle_after_exit = 0;
                     idle_polls = 0;
@@ -246,5 +254,28 @@ mod tests {
         assert!(audit_command_detail("off", "say hi").is_none());
         // an unknown stored value behaves like the safe default
         assert_eq!(audit_command_detail("garbage", "login pw").unwrap(), "[redacted: login]");
+    }
+
+    #[test]
+    fn tailer_restarts_from_zero_when_the_log_is_replaced_and_refuses_links() {
+        let d = std::env::temp_dir().join(format!("moss-tail-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        let log = d.join("console.log");
+        std::fs::write(&log, "old run line one\nold run line two\n").unwrap();
+        let (off, ino, buf) = super::read_chunk(&log, 0, None);
+        assert_eq!(buf.len() as u64, off);
+        // a new start: the old log is rotated and a longer new one written, its first line must not be skipped
+        std::fs::rename(&log, d.join("console.log.1")).unwrap();
+        std::fs::write(&log, "Done (1.2s)! For help\nand a much longer second line than before\n").unwrap();
+        let (_, ino2, buf) = super::read_chunk(&log, off, ino);
+        assert_ne!(ino, ino2);
+        assert!(String::from_utf8_lossy(&buf).starts_with("Done (1.2s)!"));
+        // a link to a host file reads nothing
+        std::fs::remove_file(&log).unwrap();
+        std::fs::write(d.join("host"), "secret\n").unwrap();
+        std::os::unix::fs::symlink(d.join("host"), &log).unwrap();
+        assert!(super::read_chunk(&log, 0, None).2.is_empty());
+        assert!(super::read_tail(&log, 1024).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

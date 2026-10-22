@@ -23,16 +23,31 @@ export * from './feedback.svelte';
 export const servers = $state<{ list: Server[]; loaded: boolean; error: string; live: boolean }>({ list: [], loaded: false, error: '', live: false });
 export const serverById = (id: string) => servers.list.find((s) => s.id === id);
 
+/** Copy changed fields of `src` onto the existing proxy so unchanged fields (notably `id`) don't
+ *  re-trigger effects in open tabs. Nested values are compared structurally. */
+function patch<T extends object>(dst: T, src: T) {
+  const d = dst as Record<string, unknown>, s = src as Record<string, unknown>;
+  for (const k of Object.keys(d)) if (!(k in s)) delete d[k];
+  for (const [k, v] of Object.entries(s)) {
+    const cur = d[k];
+    if (cur === v) continue;
+    if (v && typeof v === 'object' && cur && typeof cur === 'object' && JSON.stringify(cur) === JSON.stringify(v)) continue;
+    d[k] = v;
+  }
+}
+
 export async function refreshServers() {
   try {
-    servers.list = await api.servers();
+    const next = await api.servers();
+    const byId = new Map(servers.list.map((x) => [x.id, x]));
+    servers.list = next.map((n) => { const o = byId.get(n.id); if (o) { patch(o, n); return o; } return n; });
     servers.error = '';
   } catch (e) { servers.error = errMsg(e); }
   servers.loaded = true;
 }
 function upsertServer(s: Server) {
   const i = servers.list.findIndex((x) => x.id === s.id);
-  if (i >= 0) servers.list[i] = s; else servers.list.push(s);
+  if (i >= 0) patch(servers.list[i], s); else servers.list.push(s);
 }
 
 // ---------- operations ----------
@@ -45,7 +60,7 @@ const seenTerminal = new Set<string>();
 function upsertOp(o: Operation) {
   const i = ops.list.findIndex((x) => x.id === o.id);
   const prev = i >= 0 ? ops.list[i] : null;
-  if (i >= 0) ops.list[i] = o; else ops.list.unshift(o);
+  if (i >= 0) ops.list[i] = o; else { ops.list.unshift(o); if (ops.list.length > 200) ops.list.length = 200; }
   const terminal = o.state !== 'queued' && o.state !== 'running';
   if (terminal && !seenTerminal.has(o.id) && (prev || true)) {
     seenTerminal.add(o.id);

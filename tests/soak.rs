@@ -14,6 +14,7 @@
 //! Invariants: no orphaned or ghost game processes, no operations stuck in queued/running, every backup verifies, the
 //! database passes `PRAGMA integrity_check`, controller memory and file descriptors stay bounded, the controller
 //! answers /healthz quickly all the time, and the controller log contains no panics.
+mod suite;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{Value, json};
 use std::{
@@ -53,9 +54,10 @@ impl Moss {
     fn base(&self) -> String { format!("http://127.0.0.1:{}/api/v1", self.port) }
     fn pid(&self) -> u32 { self.child.id() }
     fn sigkill(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); }
-    fn restart(&mut self) { self.sigkill(); *self = Self::start(&self.dir, &self.log, self.port, self.modrinth); }
+    // The old value must not run Drop: that would kill the game servers the new controller is meant to re-attach.
+    fn restart(&mut self) { self.sigkill(); let new = Self::start(&self.dir, &self.log, self.port, self.modrinth); std::mem::forget(std::mem::replace(self, new)); }
 }
-impl Drop for Moss { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
+impl Drop for Moss { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); suite::reap_servers(&self.dir); } }
 
 /// Kills any game process we started when the test ends, so a failure never leaves processes behind.
 struct Reaper { ports: BTreeSet<u16> }

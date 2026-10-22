@@ -356,6 +356,20 @@ const hits: A.Hit[] = [
 
 const cfHits: A.Hit[] = [['cf-worldguard', 'WorldGuard', 'sk89q', 'Protect areas of your world with regions.', 5400000, ['admin-tools']], ['cf-jei', 'Just Enough Items', 'mezz', 'View items and recipes.', 90000000, ['utility']], ['cf-dynmap', 'Dynmap', 'mikeprimm', 'Live web map.', 3000000, ['map-information']]].map(([project_id, title, author, description, downloads, categories]) => ({ project_id: project_id as string, slug: project_id as string, title: title as string, description: description as string, author: author as string, icon_url: null, downloads: downloads as number, follows: 0, categories: categories as string[], updated: ago(3 * DAY), client_side: null, server_side: null }));
 
+// Survives the post-update reload so the new version shows afterwards (sessionStorage is per tab).
+let mockUpdateDone = (() => { try { return sessionStorage.getItem('moss.mock.updated') === '1'; } catch { return false; } })();
+let mockVersion = mockUpdateDone ? '0.1.2-mock' : '0.1.0-mock';
+const mockUpdateInfo = (): A.UpdateInfo => ({ current: mockVersion, latest: mockUpdateDone ? null : 'v0.1.2', available: !mockUpdateDone, checked_at: now(), method: 'self', reason: null, command: null, release_url: 'https://github.com/T1nkiePlayz/Moss/releases/tag/v0.1.2' });
+function handleSystemUpdate(method: string, p: string): unknown {
+  if (p === '/system/update' && method === 'GET') return mockUpdateInfo();
+  if (p === '/system/update/check' && method === 'POST') return mockUpdateInfo();
+  if (p === '/system/update' && method === 'POST') {
+    if (mockUpdateDone) throw new ApiError(409, 'update.none', 'Moss is already up to date.');
+    return { operation: startOp('moss.update', 'Updating Moss to v0.1.2', null, ['Downloading', 'Verifying checksum', 'Installing'], { done: () => { setTimeout(() => { mockUpdateDone = true; mockVersion = '0.1.2-mock'; try { sessionStorage.setItem('moss.mock.updated', '1'); } catch { /* ignore */ } }, 4000); } }) };
+  }
+  return NOPE;
+}
+
 async function handleBase(method: string, rawPath: string, body: unknown): Promise<unknown> {
   await sleep(50 + Math.random() * 120);
   const u = new URL(rawPath, 'http://x');
@@ -369,7 +383,7 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
   if (p === '/auth/config') return { mode: 'dev', owner_claimed: true };
   if (p === '/me') return { id: users[0].id, email: users[0].email, role: 'owner', permissions: ['server.view', 'server.power', 'server.console.read', 'server.console.write', 'files.read', 'files.write', 'content.manage', 'backup.manage', 'config.write', 'server.delete', 'admin.users', 'admin.settings'] };
   if (p === '/ticket') return { ticket: 'mock' };
-  if (p === '/status') return { version: '0.1.0-mock', uptime_s: 9 * 86400 + 4000, auth_mode: 'dev', host: { cpu_pct: 24 + Math.random() * 12, mem_total: 16e9, mem_used: 7.4e9 + Math.random() * 3e8, disk_total: 500e9, disk_free: 312e9, load1: 0.84, hostname: 'moss-host' }, counts: { servers: servers.length, running: servers.filter((s) => s.state === 'running').length, players: servers.reduce((n, s) => n + (s.players?.online ?? 0), 0) } };
+  if (p === '/status') return { version: mockVersion, uptime_s: 9 * 86400 + 4000, auth_mode: 'dev', host: { cpu_pct: 24 + Math.random() * 12, mem_total: 16e9, mem_used: 7.4e9 + Math.random() * 3e8, disk_total: 500e9, disk_free: 312e9, load1: 0.84, hostname: 'moss-host' }, counts: { servers: servers.length, running: servers.filter((s) => s.state === 'running').length, players: servers.reduce((n, s) => n + (s.players?.online ?? 0), 0) } };
   if (p === '/runtimes') return runtimes;
   if (M(/^\/runtimes\/([^/]+)\/versions$/)) return gameVersions[m![1]] ?? versionsFor(m![1]);
   if (p === '/modpacks/inspect') return inspectModpack(body);
@@ -798,8 +812,10 @@ const op2 = (kind: string, title: string, sid: string, stages: string[], done: (
 
 /** The mock router: WP-F2 routes first, then the base routes; fixtures are normalised to the contract on every call. */
 export async function handle(method: string, rawPath: string, body: unknown): Promise<unknown> {
-  normalize();
   const u = new URL(rawPath, 'http://x');
+  // Fixed delay (no Math.random) so the banner's fetch does not shift the seeded random sequence the visual tests rely on.
+  if (u.pathname.startsWith('/system/update')) { await sleep(80); return handleSystemUpdate(method, u.pathname); }
+  normalize();
   const x = await handleX(method, u.pathname, u.searchParams, (body ?? {}) as Record<string, any>);
   if (x !== NOPE) { await sleep(60 + Math.random() * 100); return x; }
   const og = await handleOpsGlobal({ uid, now, servers, backups, content, fs, call: (m, pp, bb) => handleBase(m, pp, bb), log }, method, u.pathname, u.searchParams, (body instanceof FormData ? {} : (body ?? {})) as Record<string, any>, body);

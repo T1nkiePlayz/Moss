@@ -160,6 +160,9 @@ sudo install -d -m 0750 -o root -g moss /etc/moss
 sudo install -m 0640 -o root -g moss .env /etc/moss/moss.env   # settings file for the unit; sign-in is built in, add options from moss.env.example if you like
 sudo install -m 0644 moss.service /etc/systemd/system/moss.service
 sudo systemctl enable --now moss
+# optional: let administrators install updates from the panel (see Updating)
+sudo install -m 0644 moss-update.path moss-update.service /etc/systemd/system/
+sudo systemctl enable --now moss-update.path
 ```
 
 The unit sets `Delegate=yes` so Moss can enforce per-server resource limits (needs systemd 254+). An Arch `PKGBUILD` lives in [`packaging/aur`](packaging/aur).
@@ -177,6 +180,14 @@ moss update --check                                   # show the installed and t
 sudo moss update && sudo systemctl restart moss       # a root-owned /usr/local/bin/moss needs sudo
 moss update --version v0.1.1                          # a specific release (also to go back)
 ```
+
+**From the panel.** Moss looks for a new release a minute after it starts and every 6 hours after that. When it finds one, administrators get a notification and a short banner at the bottom of the panel, which hides itself after 15 seconds. **Settings → Updates** installs it with the same checks as `moss update` and then restarts Moss; the panel reconnects by itself. How it installs depends on the setup:
+
+- Moss can write its own binary (a copy in your home folder, a LaunchAgent on macOS): it replaces the binary and restarts in place.
+- The systemd unit above stops Moss from writing `/usr/local/bin`. The optional `moss-update.path` and `moss-update.service` units fill that gap. Moss leaves the requested version in `/var/lib/moss/update-request`, and a root service reads it. That service only accepts a release newer than the installed one. It verifies the release, installs it and restarts `moss.service` (logs: `journalctl -u moss-update`).
+- Package-managed copies, and setups without write access or the helper, show the command to run on the host instead.
+
+The panel only moves forward; going back is `moss update --version` on the host. Set `MOSS_UPDATE_CHECK=false` to turn the check off.
 
 Copies installed by Homebrew, Nix or a system package (for example the AUR) are left to that package manager unless you pass `--force`. Going back to an older release works only until a newer Moss has upgraded the database: an older Moss refuses a newer database rather than touching it (see [docs/recovery.md](docs/recovery.md)).
 

@@ -60,6 +60,7 @@ pub(super) async fn events(State(st): State<St>, headers: axum::http::HeaderMap,
             Ok(e) => e,
             Err(_lagged) => return Some(Ok(sse::Event::default().event("resync").data("{}"))),
         };
+        if e.kind == "update" && !admin { return None; }
         if e.kind == "notification" && !admin && crate::notify::rules::is_admin_only(e.data["kind"].as_str().unwrap_or_default()) { return None; }
         let sid = e.data.get("server_id").and_then(|v| v.as_str()).or_else(|| (e.kind == "server").then(|| e.data["id"].as_str()).flatten()).map(String::from);
         if let Some(v) = &vis && !sid.as_ref().is_some_and(|s| v.contains(s)) { return None; }

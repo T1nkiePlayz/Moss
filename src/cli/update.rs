@@ -20,20 +20,121 @@ pub struct Update {
     force: bool,
     /// GitHub repository to update from
     #[arg(long, env = "MOSS_REPO", default_value = "T1nkiePlayz/Moss")]
-    repo: String,
+    pub(crate) repo: String,
     /// Alternative download root laid out as <base>/<tag>/<asset> plus <base>/LATEST (mirrors and tests; https:// or file://)
     #[arg(long, env = "MOSS_RELEASE_BASE", hide = true)]
     release_base: Option<String>,
+    /// Read the version to install from this file and delete it (used by the root `moss-update` systemd helper; the
+    /// panel writes the file). The file must be a regular file, not a link.
+    #[arg(long, value_name = "FILE")]
+    request: Option<PathBuf>,
+    /// After installing, restart this systemd unit (`systemctl try-restart`), e.g. moss.service
+    #[arg(long, value_name = "UNIT")]
+    restart_service: Option<String>,
     /// Skip the optional cosign signature check
     #[arg(long, env = "MOSS_SKIP_COSIGN", value_parser = clap::builder::BoolishValueParser::new(), default_value_t = false)]
     skip_cosign: bool,
 }
 
-pub async fn run(a: Update) -> Result<()> {
+pub async fn run(mut a: Update) -> Result<()> {
     let exe = std::env::current_exe().context("cannot find this executable")?;
     let exe = exe.canonicalize().unwrap_or(exe); // a symlink (e.g. /usr/local/bin/moss -> …) is replaced at its target
-    update(&a, &exe, env!("CARGO_PKG_VERSION")).await.map(|_| ())
+    if let Some(req) = a.request.take() {
+        match read_request(&req)? {
+            Some(v) if newer(&v, env!("CARGO_PKG_VERSION")) => a.version = Some(v),
+            Some(v) => { println!("Ignoring the request for {v}: v{} is installed and requests only move forward", env!("CARGO_PKG_VERSION")); return Ok(()); }
+            None => { println!("No update requested"); return Ok(()); }
+        }
+    }
+    let say = |l: String| println!("{l}");
+    let out = update(&a, &exe, env!("CARGO_PKG_VERSION"), &say).await?;
+    if !matches!(out, Outcome::Installed(_)) { return Ok(()); }
+    if let Some(unit) = &a.restart_service {
+        let ok = std::process::Command::new("systemctl").args(["try-restart", unit]).status().is_ok_and(|s| s.success());
+        if !ok { bail!("installed, but restarting {unit} failed; restart it by hand"); }
+        println!("Restarted {unit}");
+        return Ok(());
+    }
+    println!();
+    println!("Restart the controller to use it. Game servers keep running while it restarts.");
+    if cfg!(target_os = "linux") { println!("  systemd:   sudo systemctl restart moss"); }
+    else { println!("  launchd:   launchctl kickstart -k gui/$(id -u)/io.moss.controller"); }
+    println!("  by hand:   stop `moss serve` and start it again");
+    Ok(())
 }
+
+/// The panel's update request: a tag in a small regular file in the data directory, which a less privileged user
+/// (Moss) wrote and root reads. It is opened without following links, size-capped, validated and removed.
+fn read_request(p: &Path) -> Result<Option<String>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let f = match std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(p) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => { discard(p); bail!("cannot read the update request {}: {e}", p.display()); }
+    };
+    discard(p); // one request, one attempt; whatever it is, so the path unit does not fire again
+    if !f.metadata()?.is_file() { bail!("the update request is not a regular file"); }
+    let mut s = String::new();
+    f.take(64).read_to_string(&mut s)?;
+    let v = s.trim();
+    if v.is_empty() { return Ok(None); }
+    // never echo the contents: root reads this file and the error goes to the journal
+    normalise_tag(v).map(Some).map_err(|_| anyhow::anyhow!("the update request does not name a release"))
+}
+
+fn discard(p: &Path) { if std::fs::remove_file(p).is_err() { let _ = std::fs::remove_dir(p); } }
+
+/// How this binary can be updated from the panel.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Method { SelfUpdate, Helper, Manual { reason: String, command: String } }
+
+/// The path of the systemd helper that installs panel-requested updates as root.
+/// Present once `systemctl enable moss-update.path` has run.
+pub(crate) const HELPER_UNIT: &str = "/etc/systemd/system/paths.target.wants/moss-update.path";
+pub(crate) const HELPER_DATA_DIR: &str = "/var/lib/moss";
+
+pub(crate) fn method(exe: &Path, data_dir: &Path) -> Method {
+    let dir = exe.parent().unwrap_or(Path::new("/"));
+    if let Some(m) = managed_by(exe) { return Method::Manual { reason: format!("This copy of Moss is managed by {m}."), command: String::new() }; }
+    if writable(dir) && writable(exe) { return Method::SelfUpdate; }
+    if Path::new(HELPER_UNIT).exists() && data_dir.canonicalize().is_ok_and(|d| d == Path::new(HELPER_DATA_DIR)) { return Method::Helper; }
+    let under_systemd = std::env::var_os("INVOCATION_ID").is_some();
+    Method::Manual {
+        reason: format!("Moss cannot replace {} itself (no write access). Run the update on the host, or install the moss-update helper (see the README, Updating).", exe.display()),
+        command: if under_systemd { format!("sudo {} update && sudo systemctl restart moss", exe.display()) } else { format!("sudo {} update", exe.display()) },
+    }
+}
+
+fn writable(p: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(p.as_os_str().as_bytes()) else { return false };
+    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+}
+
+/// Settings for an update started by the controller (repository and mirror from the same environment as the CLI).
+pub(crate) fn server_args(version: Option<String>) -> Update {
+    Update {
+        version, check: false, force: false, request: None, restart_service: None,
+        repo: std::env::var("MOSS_REPO").ok().filter(|r| !r.is_empty()).unwrap_or_else(|| "T1nkiePlayz/Moss".into()),
+        release_base: std::env::var("MOSS_RELEASE_BASE").ok().filter(|b| !b.is_empty()),
+        skip_cosign: std::env::var("MOSS_SKIP_COSIGN").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes")),
+    }
+}
+
+/// The newest published release tag.
+pub(crate) async fn latest(a: &Update) -> Result<String> {
+    let tmp = tempdir()?;
+    let src = Source { base: a.release_base.as_deref(), repo: &a.repo, http: client(a.release_base.as_deref()), tmp: &tmp.0 };
+    normalise_tag(&src.latest().await?)
+}
+
+/// Install release `a.version` (or the latest) over `exe`. Ok(Some(tag)) when installed, Ok(None) when already current.
+pub(crate) async fn install(a: &Update, exe: &Path, say: Say<'_>) -> Result<Option<String>> {
+    Ok(match update(a, exe, env!("CARGO_PKG_VERSION"), say).await? { Outcome::Installed(t) => Some(t), _ => None })
+}
+
+pub(crate) fn is_newer(candidate: &str, current: &str) -> bool { newer(candidate, current) }
+pub(crate) fn valid_tag(v: &str) -> Result<String> { normalise_tag(v) }
 
 #[derive(Debug, PartialEq)]
 enum Outcome { UpToDate, Available(String), Installed(String) }
@@ -162,46 +263,49 @@ fn extract_binary(tarball: &Path, dir: &str, out: &Path) -> Result<()> {
     bail!("the tarball does not contain {}", want.display())
 }
 
-async fn cosign_check(src: &Source<'_>, tag: &str, repo: &str, sums: &Path, skip: bool) -> Result<()> {
-    if skip { println!("Skipping the signature check (MOSS_SKIP_COSIGN)"); return Ok(()); }
+/// Progress lines: printed by the CLI, written to the operation log by the panel.
+pub(crate) type Say<'a> = &'a (dyn Fn(String) + Send + Sync);
+
+async fn cosign_check(src: &Source<'_>, tag: &str, repo: &str, sums: &Path, skip: bool, say: Say<'_>) -> Result<()> {
+    if skip { say("Skipping the signature check (MOSS_SKIP_COSIGN)".into()); return Ok(()); }
     if std::process::Command::new("cosign").arg("version").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_err() {
-        println!("cosign is not installed; skipping the optional signature check (the checksum is still verified)");
+        say("cosign is not installed; skipping the optional signature check (the checksum is still verified)".into());
         return Ok(());
     }
-    let Ok(bundle) = src.get(tag, "SHA256SUMS.txt.sigstore.json").await else { println!("No signature bundle in this release; relying on the checksum only"); return Ok(()) };
+    let Ok(bundle) = src.get(tag, "SHA256SUMS.txt.sigstore.json").await else { say("No signature bundle in this release; relying on the checksum only".into()); return Ok(()) };
     let repo_re = regex::escape(repo);
     let ok = tokio::process::Command::new("cosign").arg("verify-blob").arg("--bundle").arg(&bundle)
         .arg("--certificate-identity-regexp").arg(format!(r"^https://github\.com/{repo_re}/\.github/workflows/release\.yml@refs/(tags/v.+|heads/.+)$"))
         .arg("--certificate-oidc-issuer").arg("https://token.actions.githubusercontent.com").arg(sums)
         .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().await?.success();
     if !ok { bail!("the signature on SHA256SUMS.txt did not verify; nothing was changed (run cosign verify-blob by hand to see why)"); }
-    println!("Signature OK (cosign, signed by the {repo} release workflow)");
+    say(format!("Signature OK (cosign, signed by the {repo} release workflow)"));
     Ok(())
 }
 
-async fn update(a: &Update, exe: &Path, current: &str) -> Result<Outcome> {
+async fn update(a: &Update, exe: &Path, current: &str, say: Say<'_>) -> Result<Outcome> {
     let (os, arch) = platform()?;
     let tmp = tempdir()?;
     let src = Source { base: a.release_base.as_deref(), repo: &a.repo, http: client(a.release_base.as_deref()), tmp: &tmp.0 };
     let tag = match &a.version { Some(v) => normalise_tag(v)?, None => normalise_tag(&src.latest().await?)? };
     let pinned = a.version.is_some();
-    println!("Installed: v{current}   {}: {tag}", if pinned { "Requested" } else { "Latest" });
+    say(format!("Installed: v{current}   {}: {tag}", if pinned { "Requested" } else { "Latest" }));
     let wanted = pinned || newer(&tag, current);
-    if a.check { return Ok(if newer(&tag, current) { println!("An update is available: run `moss update`"); Outcome::Available(tag) } else { println!("Moss is up to date"); Outcome::UpToDate }); }
-    if !wanted && !a.force { println!("Moss is up to date"); return Ok(Outcome::UpToDate); }
-    if pinned && newer(current, &tag) { println!("Note: {tag} is older than this Moss. An older Moss refuses a database that a newer one has already upgraded; keep a copy of the data directory."); }
+    if a.check { return Ok(if newer(&tag, current) { say("An update is available: run `moss update`".into()); Outcome::Available(tag) } else { say("Moss is up to date".into()); Outcome::UpToDate }); }
+    if !wanted && !a.force { say("Moss is up to date".into()); return Ok(Outcome::UpToDate); }
+    if pinned && newer(current, &tag) { say(format!("Note: {tag} is older than this Moss. An older Moss refuses a database that a newer one has already upgraded; keep a copy of the data directory.")); }
     if let Some(m) = managed_by(exe) && !a.force { bail!("{} looks managed by {m}, or pass --force to replace it anyway", exe.display()); }
 
     let name = format!("moss-{tag}-{os}-{arch}");
     let tarball = format!("{name}.tar.gz");
-    println!("Downloading Moss {tag} for {os}-{arch}");
+    say(format!("Downloading Moss {tag} for {os}-{arch}"));
     let tb = src.get(&tag, &tarball).await?;
     let sums = src.get(&tag, "SHA256SUMS.txt").await?;
-    cosign_check(&src, &tag, &a.repo, &sums, a.skip_cosign).await?;
+    cosign_check(&src, &tag, &a.repo, &sums, a.skip_cosign, say).await?;
     let want = checksum_for(&std::fs::read_to_string(&sums)?, &tarball).with_context(|| format!("SHA256SUMS.txt has no entry for {tarball}"))?;
     let have = sha256_file(&tb)?;
     if want != have { bail!("checksum mismatch for {tarball} (expected {want}, got {have}); nothing was changed"); }
-    println!("Checksum OK ({have})");
+    say(format!("Checksum OK ({have})"));
 
     // Stage next to the executable so the final rename stays on one filesystem (atomic, and safe while this copy runs).
     let dir = exe.parent().context("the executable has no parent directory")?;
@@ -229,12 +333,7 @@ async fn update(a: &Update, exe: &Path, current: &str) -> Result<Outcome> {
     std::fs::rename(&staged, exe).with_context(|| format!("cannot replace {}", exe.display()))?;
     std::mem::forget(staged_guard);
     if let Ok(d) = std::fs::File::open(dir) { let _ = d.sync_all(); } // make the rename itself durable
-    println!("Updated {} to {tag} ({reported})", exe.display());
-    println!();
-    println!("Restart the controller to use it. Game servers keep running while it restarts.");
-    if cfg!(target_os = "linux") { println!("  systemd:   sudo systemctl restart moss"); }
-    else { println!("  launchd:   launchctl kickstart -k gui/$(id -u)/io.moss.controller"); }
-    println!("  by hand:   stop `moss serve` and start it again");
+    say(format!("Updated {} to {tag} ({reported})", exe.display()));
     Ok(Outcome::Installed(tag))
 }
 
@@ -303,7 +402,45 @@ mod tests {
         format!("file://{}", root.display())
     }
 
-    fn args(base: &str) -> Update { Update { version: None, check: false, force: false, repo: "T1nkiePlayz/Moss".into(), release_base: Some(base.into()), skip_cosign: true } }
+    fn args(base: &str) -> Update { Update { version: None, check: false, force: false, request: None, restart_service: None, repo: "T1nkiePlayz/Moss".into(), release_base: Some(base.into()), skip_cosign: true } }
+
+    fn quiet(_: String) {}
+
+    #[test]
+    fn requests_are_read_once_and_never_through_a_link() {
+        let d = std::env::temp_dir().join(format!("moss-update-req-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        let req = d.join("update-request");
+        std::fs::write(&req, "0.1.2\n").unwrap();
+        assert_eq!(read_request(&req).unwrap().as_deref(), Some("v0.1.2"));
+        assert!(!req.exists(), "consumed");
+        assert_eq!(read_request(&req).unwrap(), None);
+        std::fs::write(&req, "v1;reboot").unwrap();
+        assert!(read_request(&req).is_err());
+        let secret = d.join("secret");
+        std::fs::write(&secret, "v9.9.9").unwrap();
+        std::os::unix::fs::symlink(&secret, &req).unwrap();
+        assert!(read_request(&req).is_err(), "a link is refused");
+        assert!(secret.exists() && !req.exists());
+        std::fs::create_dir(&req).unwrap();
+        assert!(read_request(&req).is_err());
+        assert!(!req.exists(), "a directory is removed too, so the path unit does not loop");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_update_method_follows_write_access() {
+        let d = std::env::temp_dir().join(format!("moss-update-m-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        let exe = d.join("moss");
+        std::fs::write(&exe, "x").unwrap();
+        assert_eq!(method(&exe, &d), Method::SelfUpdate);
+        assert!(matches!(method(Path::new("/opt/homebrew/Cellar/moss/1/bin/moss"), &d), Method::Manual { .. }));
+        if unsafe { libc::geteuid() } != 0 {
+            assert!(matches!(method(Path::new("/proc/version"), &d), Method::Manual { .. } | Method::Helper));
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     fn scratch(tag: &str) -> (PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!("moss-update-test-{tag}-{}", uuid::Uuid::new_v4()));
@@ -319,13 +456,13 @@ mod tests {
         let (root, exe) = scratch("ok");
         std::fs::write(exe.with_file_name(".moss-update-1"), "stale").unwrap();
         let base = release(&root.join("rel"), "v9.9.9", "#!/bin/sh\necho 'moss 9.9.9'\n", false);
-        assert_eq!(update(&Update { check: true, ..args(&base) }, &exe, "0.1.0").await.unwrap(), Outcome::Available("v9.9.9".into()));
+        assert_eq!(update(&Update { check: true, ..args(&base) }, &exe, "0.1.0", &quiet).await.unwrap(), Outcome::Available("v9.9.9".into()));
         assert_eq!(std::fs::read_to_string(&exe).unwrap(), "old", "--check changes nothing");
-        assert_eq!(update(&args(&base), &exe, "0.1.0").await.unwrap(), Outcome::Installed("v9.9.9".into()));
+        assert_eq!(update(&args(&base), &exe, "0.1.0", &quiet).await.unwrap(), Outcome::Installed("v9.9.9".into()));
         assert!(std::fs::read_to_string(&exe).unwrap().contains("moss 9.9.9"));
         #[cfg(unix)]
         { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(&exe).unwrap().permissions().mode() & 0o777, 0o755); }
-        assert_eq!(update(&args(&base), &exe, "9.9.9").await.unwrap(), Outcome::UpToDate);
+        assert_eq!(update(&args(&base), &exe, "9.9.9", &quiet).await.unwrap(), Outcome::UpToDate);
         assert_eq!(std::fs::read_dir(exe.parent().unwrap()).unwrap().count(), 1, "no staged file left behind");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -334,11 +471,11 @@ mod tests {
     async fn a_bad_checksum_or_a_binary_that_does_not_run_changes_nothing() {
         let (root, exe) = scratch("bad");
         let base = release(&root.join("rel"), "v9.9.9", "#!/bin/sh\necho 'moss 9.9.9'\n", true);
-        let e = update(&args(&base), &exe, "0.1.0").await.unwrap_err();
+        let e = update(&args(&base), &exe, "0.1.0", &quiet).await.unwrap_err();
         assert!(format!("{e:#}").contains("checksum mismatch"), "{e:#}");
         assert_eq!(std::fs::read_to_string(&exe).unwrap(), "old");
         let base = release(&root.join("rel2"), "v9.9.9", "#!/bin/sh\nexit 1\n", false);
-        assert!(update(&args(&base), &exe, "0.1.0").await.is_err());
+        assert!(update(&args(&base), &exe, "0.1.0", &quiet).await.is_err());
         assert_eq!(std::fs::read_to_string(&exe).unwrap(), "old");
         assert_eq!(std::fs::read_dir(exe.parent().unwrap()).unwrap().count(), 1, "the staged binary is removed");
         let _ = std::fs::remove_dir_all(&root);
@@ -349,7 +486,7 @@ mod tests {
         let (root, exe) = scratch("pin");
         let base = release(&root.join("rel"), "v0.0.1", "#!/bin/sh\necho 'moss 0.0.1'\n", false);
         let a = Update { version: Some("0.0.1".into()), ..args(&base) };
-        assert_eq!(update(&a, &exe, "0.2.0").await.unwrap(), Outcome::Installed("v0.0.1".into()));
+        assert_eq!(update(&a, &exe, "0.2.0", &quiet).await.unwrap(), Outcome::Installed("v0.0.1".into()));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

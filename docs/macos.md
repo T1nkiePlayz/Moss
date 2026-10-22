@@ -33,6 +33,10 @@ and `gh attestation verify`, then copy `moss` somewhere on your `PATH`.
 Then restart the controller (`launchctl kickstart -k gui/$(id -u)/io.moss.controller`, or `brew services restart moss`).
 Game servers keep running.
 
+- **From the panel:** **Settings → Updates** installs a newer release and restarts Moss in place when Moss can write
+  its own binary (for example a copy in your home folder run as a LaunchAgent). A root-owned binary or a Homebrew copy
+  shows the command to run instead.
+
 ### Gatekeeper
 
 Files downloaded with `curl` or the install script are not quarantined. A tarball downloaded in a browser is, and the

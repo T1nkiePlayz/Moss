@@ -68,6 +68,7 @@ import { apiOps } from '../lib/api-ops';
   const loadHooks = () => import('../components/settings/Webhooks.svelte');
   const loadLists = () => import('../components/settings/PlayerLists.svelte');
   const loadStatus = () => import('../components/settings/StatusPages.svelte');
+  const loadUpdates = () => import('../components/settings/Updates.svelte');
   const loadBundle = () => import('../components/settings/SupportBundle.svelte');
 </script>
 
@@ -118,6 +119,7 @@ import { apiOps } from '../lib/api-ops';
   </section>
 
   <Lazy load={loadTheme} />
+  {#if isAdmin()}<Lazy load={loadUpdates} />{/if}
   {#if isAdmin()}<Lazy load={loadBlueprints} />{/if}
 
   <section class="card" aria-labelledby="in">

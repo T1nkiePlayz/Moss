@@ -26,6 +26,7 @@ mod backup_destinations;
 mod container;
 pub(crate) mod game_mods;
 mod game_update;
+mod system_update;
 mod java;
 mod limits;
 mod map_proxy;
@@ -207,6 +208,8 @@ pub fn router(st: St) -> Router {
         .route("/status-pages/{id}", patch(status_pages_patch).delete(status_pages_delete))
         .route("/public/status/{slug}", get(public_status_json))
         .route("/settings", get(settings_get).put(settings_put))
+        .route("/system/update", get(system_update::status).post(system_update::start))
+        .route("/system/update/check", post(system_update::check))
         .route("/events", get(events))
         .fallback(|| async { ApiError::not_found("endpoint") });
     Router::new()

@@ -31,6 +31,7 @@ pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     // held until the process exits; `moss recover` uses it to tell that a controller is running
     let lock = crate::lock::try_acquire(&cfg.data_dir)?.ok_or_else(|| anyhow::anyhow!("another Moss controller is already using {}", cfg.data_dir.display()))?;
     std::mem::forget(lock);
+    crate::selfupdate::capture_launch();
     let st = build_state(cfg.clone()).await?;
     ops::recover(&st).await?;
     {
@@ -51,6 +52,7 @@ pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     crate::webhooks::spawn_background(&st);
     crate::analytics::spawn_background(&st).await;
     crate::workflows::spawn_background(&st);
+    crate::selfupdate::spawn_background(&st);
     let addr = format!("{}:{}", cfg.bind, cfg.port);
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}"))?;
     if cfg.dev() { tracing::warn!("AUTH DISABLED (dev mode) — anyone who can reach {addr} has full control"); }

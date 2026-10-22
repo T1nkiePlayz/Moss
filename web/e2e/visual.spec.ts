@@ -28,6 +28,7 @@ async function prepare(page: Page, theme: Theme) {
     const si = window.setInterval, st = window.setTimeout;
     window.setInterval = ((f: TimerHandler, ms?: number, ...a: unknown[]) => (ms && ms >= 1000 ? 0 : si(f, ms, ...a))) as typeof si;
     window.setTimeout = ((f: TimerHandler, ms?: number, ...a: unknown[]) => (ms && ms >= 5000 ? 0 : st(f, ms, ...a))) as typeof st;
+    sessionStorage.setItem('moss.update.seen.v0.1.2', '1'); // the update banner is covered by update.spec.ts; keep it out of the baselines
     localStorage.setItem('moss.prefs', JSON.stringify({ theme }));
     document.addEventListener('DOMContentLoaded', () => { const el = document.createElement('style'); el.textContent = css; document.head.append(el); });
   }, { css: FONT_CSS, theme });

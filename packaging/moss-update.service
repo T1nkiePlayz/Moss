@@ -1,0 +1,21 @@
+[Unit]
+Description=Install a Moss update requested from the panel
+Documentation=https://github.com/T1nkiePlayz/Moss#updating
+After=network-online.target
+Wants=network-online.target
+
+# Reads (and deletes) the request, accepts only a newer release, verifies it like `moss update` does, swaps the binary
+# and restarts moss.service. Game servers keep running across the restart.
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/moss update --request /var/lib/moss/update-request --restart-service moss.service
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/usr/local/bin /var/lib/moss
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes

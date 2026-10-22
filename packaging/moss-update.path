@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch for Moss updates requested from the panel
+Documentation=https://github.com/T1nkiePlayz/Moss#updating
+
+# Moss runs as an unprivileged user and cannot replace /usr/local/bin/moss. When an administrator clicks Update in the
+# panel, Moss writes the wanted version to this file and moss-update.service installs it as root.
+[Path]
+PathExists=/var/lib/moss/update-request
+Unit=moss-update.service
+
+[Install]
+WantedBy=paths.target

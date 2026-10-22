@@ -42,7 +42,7 @@ MOSS_AUTH=dev moss serve          # no sign-in, loopback only: for trying it out
 moss doctor                       # checks data directory, port, Java and sign-in settings
 ```
 
-For real use, sign-in works out of the box: the release includes the sign-in settings in `.env` (the launchd steps below copy it). Open the panel, sign in, and enter the setup token Moss wrote to `<data dir>/setup-token` to become the owner. To pin the owner by e-mail instead, add `MOSS_OWNER_EMAILS=you@example.com` to that file.
+For real use, sign-in works out of the box: the sign-in settings are built into Moss, so `moss serve` needs no config file. Open the panel, sign in, and enter the setup token Moss wrote to `<data dir>/setup-token` to become the owner. To pin the owner by e-mail instead, add `MOSS_OWNER_EMAILS=you@example.com` to `.env.local` in the folder you run Moss from (or to `moss.env` in the launchd steps below).
 
 ### launchd
 

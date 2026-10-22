@@ -3,12 +3,25 @@
 use super::*;
 use crate::notify::{self, rules};
 
+/// Newest `limit` rows the caller may see. Rows are read in batches and filtered as they come, so hidden newer rows
+/// (other servers, host-level kinds) cannot push visible older ones out of the window.
 async fn visible_rows(st: &St, user: &User, unread_only: bool, limit: i64) -> ApiResult<Vec<Value>> {
+    const BATCH: i64 = 500;
+    const SCAN_CAP: i64 = 50_000;
     let vis = auth::visible_servers(st, user).await?;
-    let sql = format!("{} {} ORDER BY time DESC LIMIT ?", notify::SEL, if unread_only { "WHERE read=0" } else { "" });
-    let rows: Vec<Value> = st.db.call(move |c| { let mut q = c.prepare(&sql)?; q.query_map([limit], notify::row_json)?.collect() }).await?;
     let admin = user.is_admin();
-    Ok(rows.into_iter().filter(|n| rules::visible_to(n["kind"].as_str().unwrap_or(""), n["server_id"].as_str(), admin, vis.as_deref())).collect())
+    let sql = format!("{} {} ORDER BY time DESC, id DESC LIMIT ? OFFSET ?", notify::SEL, if unread_only { "WHERE read=0" } else { "" });
+    let (mut out, mut offset) = (Vec::<Value>::new(), 0i64);
+    while (out.len() as i64) < limit && offset < SCAN_CAP {
+        let sql = sql.clone();
+        let rows: Vec<Value> = st.db.call(move |c| { let mut q = c.prepare(&sql)?; q.query_map([BATCH, offset], notify::row_json)?.collect() }).await?;
+        let n = rows.len() as i64;
+        out.extend(rows.into_iter().filter(|n| rules::visible_to(n["kind"].as_str().unwrap_or(""), n["server_id"].as_str(), admin, vis.as_deref())));
+        if n < BATCH { break; }
+        offset += BATCH;
+    }
+    out.truncate(limit as usize);
+    Ok(out)
 }
 
 pub(super) async fn notifications_list(State(st): State<St>, user: User, Query(q): Q) -> ApiResult<Json<Value>> {

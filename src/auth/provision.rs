@@ -14,19 +14,21 @@ static EPOCH: AtomicU64 = AtomicU64::new(0);
 
 enum Found { User(User), SetupPending, No }
 
-pub async fn provision(st: &St, c: &Claims) -> ApiResult<User> {
+pub async fn provision(st: &St, c: &Claims, token: &str) -> ApiResult<User> {
     if let Some((t, u)) = st.users.lock().unwrap_or_else(|p| p.into_inner()).get(&c.sub)
         && t.elapsed() < CACHE_TTL { return Ok(u.clone()); }
     let epoch = EPOCH.load(Ordering::SeqCst);
     let email = c.email.clone().unwrap_or_default().to_lowercase();
-    let verified = c.email_verified();
     let owners = st.cfg.owner_email_list();
-    let require_verified = st.cfg.require_verified_email;
     let sub = c.sub.clone();
-    let found = st.db.call(move |db| {
-        let by_id = db.query_row("SELECT id,email,role FROM users WHERE id=?", [&sub], |r| Ok(User { id: r.get(0)?, email: r.get(1)?, role: r.get(2)?, token: None, via_token: None, aal: None }));
-        if let Ok(u) = by_id { return Ok(Found::User(u)); }
-        if email.is_empty() || (require_verified && !verified) { return Ok(Found::No); }
+    let lookup = |db: &rusqlite::Connection, sub: &str| db.query_row("SELECT id,email,role FROM users WHERE id=?", [sub], |r| Ok(User { id: r.get(0)?, email: r.get(1)?, role: r.get(2)?, token: None, via_token: None, aal: None })).ok();
+    let known = { let sub = sub.clone(); st.db.call(move |db| Ok(lookup(db, &sub))).await? };
+    let found = if let Some(u) = known { Found::User(u) } else {
+    if email.is_empty() { return Err(not_provisioned()); }
+    // unlinked identity: never trust token claims for verification, ask Supabase (outside any db call)
+    if st.cfg.require_verified_email && !super::jwt::email_confirmed(st, token, &email).await { return Err(not_provisioned()); }
+    st.db.call(move |db| {
+        if let Some(u) = lookup(db, &sub) { return Ok(Found::User(u)); }
         // invited (pre-created, unlinked) account?
         if let Ok((old_id, role)) = db.query_row("SELECT id,role FROM users WHERE email=? AND linked=0", [&email], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
             // grants cascade on user delete, so free the unique email, add the real row, move grants, then drop the placeholder
@@ -44,15 +46,19 @@ pub async fn provision(st: &St, c: &Claims) -> ApiResult<User> {
         }
         if setup::pending_db(db, !owners.is_empty())? { return Ok(Found::SetupPending); }
         Ok(Found::No)
-    }).await?;
+    }).await? };
     match found {
         Found::User(u) => {
             if EPOCH.load(Ordering::SeqCst) == epoch { st.users.lock().unwrap_or_else(|p| p.into_inner()).insert(c.sub.clone(), (Instant::now(), u.clone())); }
             Ok(u)
         }
         Found::SetupPending => Err(ApiError::new(StatusCode::FORBIDDEN, "auth.setup_required", "This Moss instance has no owner yet. Enter the setup token from the host to claim it.")),
-        Found::No => Err(ApiError::new(StatusCode::FORBIDDEN, "auth.not_provisioned", "This account has not been invited to this Moss instance (or its email is not verified yet).")),
+        Found::No => Err(not_provisioned()),
     }
+}
+
+fn not_provisioned() -> ApiError {
+    ApiError::new(StatusCode::FORBIDDEN, "auth.not_provisioned", "This account has not been invited to this Moss instance (or its email is not verified yet).")
 }
 
 /// Forget one user's cached identity (role change, removal).

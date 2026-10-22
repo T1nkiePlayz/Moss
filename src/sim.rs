@@ -25,12 +25,24 @@ impl Behavior {
     }
 }
 
+/// The working directory (the server directory) or the `.moss` directory no longer exists.
+fn dir_gone(moss_dir: Option<&std::path::Path>) -> bool { std::env::current_dir().is_err() || moss_dir.is_some_and(|d| !d.is_dir()) }
+
 /// Fake Minecraft server: prints realistic logs, answers status pings, handles a few console commands.
 pub async fn run(port: u16) -> anyhow::Result<()> {
     use tokio::io::AsyncBufReadExt;
     let t = chrono::Local::now;
     let log = |lvl: &str, m: &str| println!("[{}] [Server thread/{lvl}]: {m}", t().format("%H:%M:%S"));
     let b = Behavior::read();
+    // Its console FIFO is opened read-write, so stdin never reaches EOF: a server directory deleted under a running sim
+    // (a finished test, a removed server) is what ends it instead.
+    let moss_dir = std::env::var_os("MOSS_DIR").map(std::path::PathBuf::from);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if dir_gone(moss_dir.as_deref()) { std::process::exit(0); }
+        }
+    });
     log("INFO", "Starting minecraft server version sim-1.0");
     log("INFO", &format!("Starting Minecraft server on *:{port}"));
     if !b.never_ready { tokio::spawn(mcping::serve_sim(port)); }
@@ -76,5 +88,14 @@ mod tests {
         assert_eq!((b.crash_after, b.error_lines, b.warn_lines), (Some(3), 5, 1000));
         let d = Behavior::parse("");
         assert!(!d.never_ready && !d.fatal && d.crash_after.is_none());
+    }
+
+    #[test]
+    fn a_missing_moss_dir_counts_as_gone() {
+        let d = std::env::temp_dir().join(format!("moss-sim-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert!(!dir_gone(Some(&d)));
+        std::fs::remove_dir_all(&d).unwrap();
+        assert!(dir_gone(Some(&d)));
     }
 }

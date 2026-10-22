@@ -159,7 +159,7 @@ pub fn servers_list(c: &Connection, data_dir: &Path) -> Result<String> {
 }
 
 pub fn backup_verify(c: &Connection, data_dir: &Path, id: &str) -> Result<String> {
-    let mut q = c.prepare("SELECT id,server_id,sha256,status FROM backups WHERE (id=?1 OR ?1='all') AND status='ok' ORDER BY created_at")?;
+    let mut q = c.prepare("SELECT id,server_id,sha256,status FROM backups WHERE (id=?1 OR ?1='all') AND status='ok' AND local_present=1 ORDER BY created_at")?;
     let rows: Vec<(String, String, String, String)> = q.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_, _>>()?;
     if rows.is_empty() { bail!("no completed backup with id `{id}` (use `moss recover servers list` and the Backups page to find ids)"); }
     let (mut out, mut bad) = (String::new(), 0);

@@ -30,16 +30,16 @@ pub(super) async fn settings_put(State(st): State<St>, user: User, Json(v): Json
     if let Some(n) = v["default_memory_mb"].as_i64() && (256..=262144).contains(&n) {
         let cur = st.setting("default_memory_mb", "2048").await.parse::<i64>().unwrap_or(2048);
         if n != cur && let Some(msg) = crate::platform::memory_over(n, crate::platform::host_memory_mb()) { return Err(ApiError::bad("validation", "default memory out of range").field("default_memory_mb", &msg)); }
-        st.set_setting("default_memory_mb", &n.to_string()).await;
+        st.set_setting("default_memory_mb", &n.to_string()).await?;
     }
-    if let Some(n) = v["backup_keep"].as_i64() { st.set_setting("backup_keep", &n.clamp(1, 365).to_string()).await; }
-    if let Some(b) = v["backup_before_change"].as_bool() { st.set_setting("backup_before_change", &b.to_string()).await; }
-    if let Some(s) = v["modrinth_contact"].as_str() { st.set_setting("modrinth_contact", &s.chars().take(200).collect::<String>()).await; }
-    if let Some(s) = v["public_base_url"].as_str() { st.set_setting("public_base_url", &s.chars().take(200).collect::<String>()).await; }
-    if let Some(u) = &webhook { st.set_setting("notify_webhook_url", u).await; }
-    if let Some(e) = &events { st.set_setting("notify_events", &serde_json::to_string(e).unwrap_or_default()).await; }
-    if let Some(a) = audit { st.set_setting("audit_console_commands", a).await; }
-    if let Some(m) = &message { st.set_setting("access_message", m).await; }
+    if let Some(n) = v["backup_keep"].as_i64() { st.set_setting("backup_keep", &n.clamp(1, 365).to_string()).await?; }
+    if let Some(b) = v["backup_before_change"].as_bool() { st.set_setting("backup_before_change", &b.to_string()).await?; }
+    if let Some(s) = v["modrinth_contact"].as_str() { st.set_setting("modrinth_contact", &s.chars().take(200).collect::<String>()).await?; }
+    if let Some(s) = v["public_base_url"].as_str() { st.set_setting("public_base_url", &s.chars().take(200).collect::<String>()).await?; }
+    if let Some(u) = &webhook { st.set_setting("notify_webhook_url", u).await?; }
+    if let Some(e) = &events { st.set_setting("notify_events", &serde_json::to_string(e).unwrap_or_default()).await?; }
+    if let Some(a) = audit { st.set_setting("audit_console_commands", a).await?; }
+    if let Some(m) = &message { st.set_setting("access_message", m).await?; }
     st.audit(&user.actor(), "settings.update", "instance", "", None).await;
     Ok(Json(settings_json(&st, true).await))
 }

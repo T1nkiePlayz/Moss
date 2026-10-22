@@ -79,10 +79,39 @@ pub async fn read(State(st): State<St>, user: User, Path(id): Path<String>, Quer
     Ok(Json(r))
 }
 
+/// A fresh, unpredictable sibling of `path` for staging a write (same directory, so the final rename is atomic).
+fn temp_sibling(path: &FsPath, tag: &str) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    path.with_file_name(format!(".{name}.{tag}-{}", uuid::Uuid::new_v4().simple()))
+}
+
+/// Replace `path` atomically. The data goes into a new random temp file (`create_new` = O_EXCL, which also refuses an
+/// existing symlink) and is renamed over `path`, so a link at `path` is replaced rather than written through.
 pub fn atomic_write(path: &FsPath, data: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension(format!("moss-tmp-{}", std::process::id()));
-    std::fs::write(&tmp, data)?;
-    std::fs::rename(&tmp, path)
+    use std::io::Write;
+    let tmp = temp_sibling(path, "moss-tmp");
+    let res = (|| {
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if res.is_err() { let _ = std::fs::remove_file(&tmp); }
+    res
+}
+
+/// Read a regular file inside a server directory without following a symlink at the final component (O_NOFOLLOW).
+pub fn read_nofollow(path: &FsPath, max: u64) -> std::io::Result<Option<String>> {
+    use std::{io::Read, os::unix::fs::OpenOptionsExt};
+    let f = match std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if !f.metadata()?.file_type().is_file() { return Ok(None); }
+    let mut s = String::new();
+    f.take(max).read_to_string(&mut s)?;
+    Ok(Some(s))
 }
 
 #[derive(Deserialize)] pub struct WriteReq { path: String, content: String }
@@ -141,8 +170,8 @@ pub async fn upload(State(st): State<St>, user: User, Path(id): Path<String>, Qu
         let name = FsPath::new(&name).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         if name.is_empty() || (is_root(&rel) && name.eq_ignore_ascii_case(".moss")) { continue; }
         let target = safe_join(&dir, &name)?;
-        let tmp = target.with_extension("moss-upload");
-        let mut out = tokio::fs::File::create(&tmp).await?;
+        let tmp = temp_sibling(&target, "moss-upload");
+        let mut out = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).await?;
         use tokio::io::AsyncWriteExt;
         let res: ApiResult<()> = async {
             while let Some(chunk) = f.chunk().await.map_err(|e| ApiError::bad("upload.invalid", e.to_string()))? { out.write_all(&chunk).await?; }
@@ -186,7 +215,9 @@ fn parse_props(raw: &str) -> Vec<Value> {
 pub async fn props_get(State(st): State<St>, user: User, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let s = server_for(&st, &user, &id, "files.read").await?;
     if !s.capabilities().contains(&"properties") { return Err(ApiError::bad("capability.unsupported", "this runtime has no server.properties")); }
-    let raw = tokio::fs::read_to_string(s.dir(&st).join("server.properties")).await.unwrap_or_default();
+    let p = safe_join(&s.dir(&st), "server.properties")?;
+    // A symlinked server.properties reads as empty rather than exposing whatever it points at.
+    let raw = tokio::task::spawn_blocking(move || read_nofollow(&p, MAX_TEXT)).await.map_err(|e| anyhow::anyhow!(e))?.ok().flatten().unwrap_or_default();
     Ok(Json(json!({"raw": raw, "entries": parse_props(&raw)})))
 }
 
@@ -201,7 +232,7 @@ pub async fn props_put(State(st): State<St>, user: User, Path(id): Path<String>,
         if crate::games::clashes_with_span(p, s.port_span(), &id, &crate::server::list_all(&st).await?) { return Err(ApiError::conflict("port.taken", "server-port is assigned to another Moss server")); }
     }
     let undo_id = undo::snapshot(&st, &s, "Edit server.properties", &["server.properties".into()]).await?;
-    let (p, raw) = (s.dir(&st).join("server.properties"), r.raw.clone());
+    let (p, raw) = (safe_join(&s.dir(&st), "server.properties")?, r.raw.clone());
     tokio::task::spawn_blocking(move || atomic_write(&p, raw.as_bytes())).await.map_err(|e| anyhow::anyhow!(e))??;
     if let Some(p) = port.filter(|p| *p != s.port) {
         let i = id.clone();
@@ -251,6 +282,34 @@ mod tests {
         std::os::unix::fs::symlink("/etc", root.join("evil")).unwrap();
         assert!(safe_join(&root, "evil/passwd").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn atomic_write_replaces_symlink_not_target() {
+        let d = std::env::temp_dir().join(format!("moss-aw-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        let secret = d.join("secret"); std::fs::write(&secret, "keep").unwrap();
+        let link = d.join("server.properties"); std::os::unix::fs::symlink(&secret, &link).unwrap();
+        atomic_write(&link, b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "keep");
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "new");
+        assert!(!std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        // a.yml and a.json no longer share a temp name, and nothing is left behind
+        atomic_write(&d.join("a.yml"), b"1").unwrap(); atomic_write(&d.join("a.json"), b"2").unwrap();
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 4);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn read_nofollow_refuses_symlink() {
+        let d = std::env::temp_dir().join(format!("moss-rn-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("secret"), "s3cret").unwrap();
+        assert_eq!(read_nofollow(&d.join("none"), 100).unwrap(), None);
+        assert_eq!(read_nofollow(&d.join("secret"), 100).unwrap().as_deref(), Some("s3cret"));
+        std::os::unix::fs::symlink(d.join("secret"), d.join("link")).unwrap();
+        assert!(read_nofollow(&d.join("link"), 100).is_err());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -8,6 +8,8 @@ use serde_json::{Map, Value, json};
 const FORMAT: &str = "moss-blueprint";
 pub mod share;
 
+/// Upper bound for a schedule's backup retention count.
+const KEEP_MAX: i64 = 365;
 const MAX_JSON: usize = 256 * 1024;
 
 /// Property keys that are never saved or applied: network binding, world identity, and anything that looks like a secret.
@@ -59,7 +61,8 @@ pub fn sanitize(v: &Value) -> ApiResult<Value> {
         let mut m = Map::new();
         m.insert("kind".into(), json!(kind));
         for f in ["command", "daily_at", "tz"] { if let Some(s) = sc[f].as_str() { if s.len() > 200 || s.contains(['\n', '\r']) { return Err(bad("schedules", "invalid schedule text")); } m.insert(f.into(), json!(s)); } }
-        for f in ["every_minutes", "keep"] { if let Some(n) = sc[f].as_i64() { m.insert(f.into(), json!(n)); } }
+        if let Some(n) = sc["every_minutes"].as_i64() { m.insert("every_minutes".into(), json!(n.clamp(5, 525_600))); }
+        if let Some(n) = sc["keep"].as_i64() { m.insert("keep".into(), json!(n.clamp(1, KEEP_MAX))); }
         m.insert("enabled".into(), json!(sc["enabled"].as_bool().unwrap_or(true)));
         scheds.push(Value::Object(m));
         if scheds.len() > 20 { return Err(bad("schedules", "at most 20 schedules")); }

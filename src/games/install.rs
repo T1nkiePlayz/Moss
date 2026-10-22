@@ -217,7 +217,8 @@ fn steamcmd_args(sh: &Path, install_dir: &Path, app: u32) -> Vec<String> {
 async fn ensure_steamcmd(ctx: &OpCtx, st: &St) -> Result<PathBuf> {
     let root = st.cfg.data_dir.join("steamcmd");
     let sh = root.join("steamcmd.sh");
-    if sh.exists() { return Ok(sh); }
+    let done = root.join(".moss-installed");
+    if sh.exists() && done.exists() { return Ok(sh); }
     tokio::fs::create_dir_all(root.join("home")).await?;
     ctx.stage("Downloading SteamCMD");
     let tgz = root.join("steamcmd_linux.tar.gz");
@@ -230,6 +231,7 @@ async fn ensure_steamcmd(ctx: &OpCtx, st: &St) -> Result<PathBuf> {
     }).await??;
     if !sh.exists() { bail!("the SteamCMD archive did not contain steamcmd.sh"); }
     set_mode(&sh, 0o755);
+    tokio::fs::write(&done, b"ok").await?;
     Ok(sh)
 }
 

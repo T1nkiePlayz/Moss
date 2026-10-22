@@ -41,6 +41,7 @@ pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, 
             ctx.stage("Taking a safety backup of the current state");
             pre_change_forced(&st, &s, "restore", &ctx).await?;
             let _g = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
+            if crate::lifecycle::busy(&st, &server::get(&st, &s.id).await.map_err(|e| anyhow!(e.message))?) { return Err(anyhow!("the server was started in the meantime; stop it and restore again")); }
             ctx.stage("Extracting to a staging directory");
             let stage = st.cfg.servers_dir().join(format!(".restore-{}", uuid::Uuid::now_v7()));
             let (p3, stage2, tok, only2) = (p.clone(), stage.clone(), ctx.token.clone(), only.clone());
@@ -54,7 +55,9 @@ pub async fn restore(State(st): State<St>, user: User, Path(bid): Path<String>, 
                 r?;
             } else {
                 let (stage2, dir2, kept2) = (stage.clone(), dir.clone(), kept.clone());
-                tokio::task::spawn_blocking(move || swap_full(&stage2, &dir2, &kept2)).await??;
+                let r = tokio::task::spawn_blocking(move || swap_full(&stage2, &dir2, &kept2)).await;
+                if !matches!(r, Ok(Ok(_))) { let _ = tokio::fs::remove_dir_all(&stage).await; }
+                r??;
             }
             ctx.log(format!("previous contents kept at {}", kept.display()));
             st.audit(&actor, "backup.restore", &s.name, &only.as_ref().map_or("in place".to_string(), |o| format!("in place: {}", o.join(", "))), Some(&s.id)).await;

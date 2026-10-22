@@ -25,11 +25,23 @@ pub(super) async fn activity(State(st): State<St>, user: User, Query(q): Q) -> A
     let vis = auth::visible_servers(&st, &user).await?;
     let sid = q.get("server_id").cloned();
     if let Some(s) = &sid { authz(&st, &user, s, "server.view").await?; }
-    let rows: Vec<(Value, Option<String>)> = st.db.call(move |c| {
-        let mut s = c.prepare("SELECT id,time,actor,action,target,detail,server_id FROM activity WHERE (?1 IS NULL OR server_id=?1) ORDER BY id DESC LIMIT ?2")?;
-        s.query_map(rusqlite::params![sid, limit * 4], |r| Ok((json!({"id": r.get::<_, i64>(0)?, "time": r.get::<_, String>(1)?, "actor": r.get::<_, String>(2)?, "action": r.get::<_, String>(3)?, "target": r.get::<_, String>(4)?, "detail": r.get::<_, String>(5)?}), r.get::<_, Option<String>>(6)?)))?.collect()
-    }).await?;
-    Ok(Json(Value::Array(rows.into_iter().filter(|(_, s)| vis.as_ref().is_none_or(|v| s.as_ref().is_some_and(|s| v.contains(s)))).map(|(v, _)| v).take(limit as usize).collect())))
+    // Page through newest-first, filtering as we go, so hidden newer rows cannot starve visible older ones.
+    const BATCH: i64 = 500;
+    const SCAN_CAP: i64 = 50_000;
+    let (mut out, mut offset) = (Vec::<Value>::new(), 0i64);
+    while (out.len() as i64) < limit && offset < SCAN_CAP {
+        let sid = sid.clone();
+        let rows: Vec<(Value, Option<String>)> = st.db.call(move |c| {
+            let mut s = c.prepare("SELECT id,time,actor,action,target,detail,server_id FROM activity WHERE (?1 IS NULL OR server_id=?1) ORDER BY id DESC LIMIT ?2 OFFSET ?3")?;
+            s.query_map(rusqlite::params![sid, BATCH, offset], |r| Ok((json!({"id": r.get::<_, i64>(0)?, "time": r.get::<_, String>(1)?, "actor": r.get::<_, String>(2)?, "action": r.get::<_, String>(3)?, "target": r.get::<_, String>(4)?, "detail": r.get::<_, String>(5)?}), r.get::<_, Option<String>>(6)?)))?.collect()
+        }).await?;
+        let n = rows.len() as i64;
+        out.extend(rows.into_iter().filter(|(_, s)| vis.as_ref().is_none_or(|v| s.as_ref().is_some_and(|s| v.contains(s)))).map(|(v, _)| v));
+        if n < BATCH { break; }
+        offset += BATCH;
+    }
+    out.truncate(limit as usize);
+    Ok(Json(Value::Array(out)))
 }
 
 /// Server-sent events. A subscriber that fell behind the broadcast buffer gets `resync` (it must refetch its lists).

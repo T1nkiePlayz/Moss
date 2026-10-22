@@ -81,7 +81,14 @@ fn ingest_samples(h: &mut Hist, id: &str, samples: &[Sample]) {
 }
 
 fn ingest(st: &St) {
-    let snap: Vec<(String, Vec<Sample>)> = st.stats.lock().unwrap().iter().map(|(k, q)| (k.clone(), q.iter().copied().collect())).collect();
+    // Copy only the samples newer than each server's watermark (walking back from the newest), not the whole ring.
+    let marks = hist().watermark.clone();
+    let snap: Vec<(String, Vec<Sample>)> = st.stats.lock().unwrap().iter().map(|(k, q)| {
+        let mark = marks.get(k).copied().unwrap_or(0);
+        let mut v: Vec<Sample> = q.iter().rev().take_while(|s| s.t > mark).copied().collect();
+        v.reverse();
+        (k.clone(), v)
+    }).collect();
     let mut h = hist();
     for (id, s) in snap { ingest_samples(&mut h, &id, &s); }
 }

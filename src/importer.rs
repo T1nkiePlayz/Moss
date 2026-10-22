@@ -220,9 +220,11 @@ fn extract_limited(archive: &Path, dest: &Path, token: &tokio_util::sync::Cancel
             if let Some(p) = out.parent() { std::fs::create_dir_all(p)?; }
             // count what is really written: the size in the header is attacker-controlled
             let room = max_bytes - total;
+            let mode = f.unix_mode();
             let n = std::io::copy(&mut f.by_ref().take(room.saturating_add(1)), &mut std::fs::File::create(&out)?)?;
             total = total.saturating_add(n);
             if total > max_bytes { bail!("The archive expands beyond the size limit."); }
+            set_exec(&out, mode)?;
         }
         Ok(())
     } else if magic == [0x28, 0xB5, 0x2F, 0xFD] {
@@ -231,6 +233,16 @@ fn extract_limited(archive: &Path, dest: &Path, token: &tokio_util::sync::Cancel
         bail!("Only .zip and .tar.zst files can be imported.")
     }
 }
+
+/// Keeps the executable bit of a zip entry (scripts must stay runnable). Only 0o755 is ever set: no setuid/setgid.
+#[cfg(unix)]
+fn set_exec(path: &Path, mode: Option<u32>) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if mode.is_some_and(|m| m & 0o111 != 0) { std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755 & 0o777))?; }
+    Ok(())
+}
+#[cfg(not(unix))]
+fn set_exec(_: &Path, _: Option<u32>) -> std::io::Result<()> { Ok(()) }
 
 /// An archive must not bring its own controller metadata (`.moss`), like the folder import which never copies it.
 fn strip_reserved(root: &Path) {
@@ -443,6 +455,22 @@ mod tests {
     use std::io::Write;
 
     fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("moss-imp-{n}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    #[cfg(unix)]
+    #[test]
+    fn zip_extraction_keeps_exec_bit_without_setuid() {
+        use std::os::unix::fs::PermissionsExt;
+        let (src, dest) = (tmp("exec-src"), tmp("exec-dst"));
+        let zp = src.join("a.zip");
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&zp).unwrap());
+        z.start_file("run.sh", zip::write::SimpleFileOptions::default().unix_permissions(0o4751)).unwrap(); z.write_all(b"#!/bin/sh").unwrap();
+        z.start_file("data.txt", zip::write::SimpleFileOptions::default().unix_permissions(0o644)).unwrap(); z.write_all(b"x").unwrap();
+        z.finish().unwrap();
+        extract(&zp, &dest, &tokio_util::sync::CancellationToken::new()).unwrap();
+        assert_eq!(std::fs::metadata(dest.join("run.sh")).unwrap().permissions().mode() & 0o7777, 0o755);
+        assert_eq!(std::fs::metadata(dest.join("data.txt")).unwrap().permissions().mode() & 0o111, 0);
+        for d in [src, dest] { let _ = std::fs::remove_dir_all(d); }
+    }
+
     fn jar(path: &Path, files: &[(&str, &str)]) {
         let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
         for (n, c) in files { z.start_file(*n, zip::write::SimpleFileOptions::default()).unwrap(); z.write_all(c.as_bytes()).unwrap(); }

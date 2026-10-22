@@ -115,6 +115,7 @@ pub async fn ensure_local(ctx: &OpCtx, st: &St, backup_id: &str) -> Result<PathB
 /// Delete the remote object of a stored backup (the destination being gone counts as done).
 pub async fn delete_remote(st: &St, backup_id: &str) -> Result<()> {
     let r = row(st, backup_id).await?;
+    if r.remote == "uploading" { bail!("backup is being uploaded; wait for the upload to finish"); }
     if r.remote != "stored" { return Ok(()); }
     let Some(d) = (match &r.dest { Some(id) => dest::get(st, id).await?, None => None }) else { return Ok(()) };
     let store = dest::open(st, &d).await?;

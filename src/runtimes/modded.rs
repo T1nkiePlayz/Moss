@@ -157,6 +157,7 @@ pub fn parse_side_hash(text: &str) -> Option<Hash> {
 }
 
 async fn side_hash(st: &St, url: &str) -> Option<Hash> {
+    if !reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(download::host_allowed)).unwrap_or(false) { return None; }
     for ext in ["sha256", "sha1"] {
         if let Ok(r) = st.http.get(format!("{url}.{ext}")).send().await && r.status().is_success()
             && let Some(h) = parse_side_hash(&r.text().await.unwrap_or_default()) { return Some(h); }
@@ -183,6 +184,10 @@ pub async fn resolve(st: &St, runtime: &str, game: &str, loader: Option<&str>) -
         _ => installer_url(runtime, game, &lv).ok_or_else(|| anyhow!("unknown runtime"))?,
     };
     let hash = side_hash(st, &url).await;
+    if hash.is_none() {
+        if runtime == "quilt" { tracing::warn!("no upstream checksum for the Quilt installer; it will be run unverified"); }
+        else { bail!("could not fetch a checksum for the {runtime} installer; refusing to run it unverified"); }
+    }
     let java_major = if runtime == "forge" && legacy_forge_game(game) { LEGACY_JAVA } else { java_for_game(st, game).await };
     Ok(Resolved { url, hash, java_major, loader_version: Some(lv) })
 }

@@ -199,7 +199,11 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     if let Some((network, extra)) = net { apply_network(&st, &user, &s, network, extra).await?; }
     if p.accept_eula == Some(true) && s.eula_at.is_none() {
         st.audit(&user.actor(), "eula.accept", &s.name, "Minecraft EULA accepted", Some(&id)).await;
-        if s.installed { let _ = tokio::fs::write(s.dir(&st).join("eula.txt"), "# Accepted via Moss by the server owner (https://aka.ms/MinecraftEULA)\neula=true\n").await; }
+        if s.installed {
+            // Replace via temp file + rename so a planted eula.txt link is never written through.
+            let p = s.dir(&st).join("eula.txt");
+            let _ = tokio::task::spawn_blocking(move || crate::files::atomic_write(&p, b"# Accepted via Moss by the server owner (https://aka.ms/MinecraftEULA)\neula=true\n")).await;
+        }
     }
     if let Some(port) = p.port.filter(|port| *port != s.port) { crate::files::patch_port(&st, &s, port).await; }
     st.audit(&user.actor(), "server.update", &s.name, "settings changed", Some(&id)).await;
@@ -282,6 +286,8 @@ pub(super) async fn server_delete(State(st): State<St>, user: User, Path(id): Pa
     let s = server::get(&st, &id).await?;
     if lifecycle::process_alive(&s) { return Err(ApiError::conflict("server.running", "stop the server before deleting it")); }
     let guard = st.lock_for(&id).try_lock_owned().map_err(|_| ApiError::conflict("server.locked", "another operation is changing this server"))?;
+    let s = server::get(&st, &id).await?; // re-read: a start may have saved a new pid before the lock was taken
+    if lifecycle::busy(&st, &s) { return Err(ApiError::conflict("server.running", "stop the server before deleting it")); }
     crate::content::staging_discard_all_for(&st, &id).await;
     let dir = s.dir(&st);
     if q.delete_data {

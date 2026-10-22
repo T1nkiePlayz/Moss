@@ -1,7 +1,7 @@
 //! Starting a server detached and talking to its console.
 use super::command::build_command;
 use crate::{error::{ApiError, ApiResult}, platform, server::{self, Srv}, state::St};
-use std::{os::unix::fs::OpenOptionsExt, time::Instant};
+use std::time::Instant;
 
 // When MOSS_CGROUP is set the wrapper shell moves itself into that cgroup first, so the game and everything it forks
 // start inside the limits (no window in which they run unconfined).
@@ -13,6 +13,7 @@ pub async fn start(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
         let l = live.entry(s.id.clone()).or_default();
         if l.alive || l.starting { return Err(ApiError::conflict("server.running", "server is already running")); }
         l.starting = true;
+        super::take_stop_request(&s.id); // a leftover from a start that failed
     }
     let r = start_inner(st, s, actor).await;
     if let Some(l) = st.live.lock().unwrap().get_mut(&s.id) { l.starting = false; }
@@ -63,14 +64,23 @@ async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     let (dir, mdir) = (s.dir(st), s.moss_dir(st));
     tokio::fs::create_dir_all(&mdir).await?;
     let fifo = mdir.join("console.fifo");
-    if !fifo.exists() {
+    // lstat: the game can write `.moss`, so anything but a real FIFO here (a link to a host file, say) is replaced.
+    let is_fifo = tokio::fs::symlink_metadata(&fifo).await.map(|m| { use std::os::unix::fs::FileTypeExt; m.file_type().is_fifo() });
+    if is_fifo.as_ref().is_ok_and(|f| !f) { let _ = tokio::fs::remove_file(&fifo).await; }
+    if !is_fifo.unwrap_or(false) {
         let c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).unwrap();
         if unsafe { libc::mkfifo(c.as_ptr(), 0o600) } != 0 { return Err(std::io::Error::last_os_error().into()); }
     }
     let _ = tokio::fs::remove_file(mdir.join("exit")).await;
     let log = mdir.join("console.log");
-    if tokio::fs::metadata(&log).await.map(|m| m.len() > 0).unwrap_or(false) { let _ = tokio::fs::rename(&log, mdir.join("console.log.1")).await; }
-    tokio::fs::write(&log, format!("[moss] starting {} ({} {})\n", s.name, s.runtime, s.game_version)).await?;
+    if tokio::fs::symlink_metadata(&log).await.is_ok_and(|m| m.is_file() && m.len() > 0) { let _ = tokio::fs::rename(&log, mdir.join("console.log.1")).await; }
+    // Whatever is left (an empty log, or a link or FIFO the game planted) goes; create_new never follows a link.
+    let _ = tokio::fs::remove_file(&log).await;
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut f = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&log).await?;
+        f.write_all(format!("[moss] starting {} ({} {})\n", s.name, s.runtime, s.game_version).as_bytes()).await?;
+    }
 
     let ctr = s.isolation == "container";
     let (pid, pstart) = if ctr {
@@ -100,16 +110,30 @@ fn spawn_process(st: &St, s: &Srv, argv: &[String], dir: &std::path::Path, mdir:
 }
 
 async fn finish_start(st: &St, s: &Srv, actor: &str, log: std::path::PathBuf) -> ApiResult<()> {
-    {
+    let (stop_req, stop_gen) = {
         let mut live = st.live.lock().unwrap();
         let l = live.entry(s.id.clone()).or_default();
         l.alive = true; l.ready = false; l.stopping = false; l.crashed = false; l.detail = None;
         l.started = Some(Instant::now()); l.restart_at = None; l.players = None; l.cpu_prev = None;
+        // Taken under the same lock in which Stop/Kill saw `starting`, so a request is either seen here or Stop saw `alive`.
+        let r = super::take_stop_request(&s.id);
+        if r.is_some() { l.stopping = true; }
+        (r, l.stop_gen)
+    };
+    if stop_req.is_none() {
+        server::set_desired(st, &s.id, "running").await;
+        // a Stop that saw `alive` between the lock above and this write must still win
+        if st.live.lock().unwrap().get(&s.id).is_some_and(|l| l.stop_gen != stop_gen) { server::set_desired(st, &s.id, "stopped").await; }
     }
-    server::set_desired(st, &s.id, "running").await;
     st.timeline(&s.id, "start", actor).await;
     st.audit(actor, "server.start", &s.name, "", Some(&s.id)).await;
     crate::console::start_tailer(st, s.id.clone(), log, false);
+    if let Some(kill) = stop_req {
+        // Stop or Kill was pressed while this start was under way: that wish wins (desired is already "stopped").
+        let fresh = server::get(st, &s.id).await?;
+        super::stop::abort_started(st, &fresh, kill).await;
+        return Ok(());
+    }
     let fresh = server::get(st, &s.id).await?;
     server::note_state(st, &fresh);
     Ok(())
@@ -138,7 +162,7 @@ pub async fn send_command(st: &St, s: &Srv, cmd: &str) -> ApiResult<()> {
     let line = format!("{cmd}\n");
     tokio::task::spawn_blocking(move || {
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().write(true).custom_flags(libc::O_NONBLOCK).open(fifo)?;
+        let mut f = super::open_moss_file(&fifo, std::fs::OpenOptions::new().write(true), true)?;
         f.write_all(line.as_bytes())
     }).await.map_err(|e| anyhow::anyhow!(e))?.map_err(|e| if e.kind() == std::io::ErrorKind::WouldBlock { ApiError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "console.busy", "the server is not reading its console fast enough; try again in a moment") } else { ApiError::conflict("server.not_running", "console is not accepting input") })?;
     crate::console::push(&crate::console::hub(st, &s.id), format!("\x1b[36m> {cmd}\x1b[0m"));

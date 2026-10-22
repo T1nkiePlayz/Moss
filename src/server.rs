@@ -164,12 +164,13 @@ pub fn state_of(s: &Srv, st: &Inner) -> (String, Option<String>) {
 
 pub fn view(s: &Srv, st: &Inner) -> Value {
     let (state, detail) = state_of(s, st);
+    let has_map = crate::maps::detect(st, s).is_some(); // may read the disk: not under the global `live` lock
     let live = st.live.lock().unwrap();
     let l = live.get(&s.id);
     let uptime = l.filter(|l| l.alive).and_then(|l| l.started).map(|t| t.elapsed().as_secs());
     let players = l.and_then(|l| l.players.as_ref()).filter(|_| state == "running").map(|p| json!({"online": p.online, "max": p.max, "sample": p.sample}));
     let mut capabilities = s.capabilities();
-    if crate::maps::detect(st, s).is_some() { capabilities.push("map"); }
+    if has_map { capabilities.push("map"); }
     json!({
         "id": s.id, "name": s.name, "runtime": s.runtime, "game_version": s.game_version, "loader_version": s.loader_version,
         "java_major": s.java_major, "port": s.port, "memory_mb": s.memory_mb, "flags_profile": s.flags_profile, "autostart": s.autostart,

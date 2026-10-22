@@ -31,8 +31,13 @@ pub(super) async fn build_plan_cf(st: &St, token: Option<&str>, s: &Srv, c: &Com
     let installed = db_items(st, &s.id).await?;
     let mut steps: Vec<Step> = vec![];
     let mut queue: Vec<(String, Option<String>)> = vec![(project_id.to_string(), version_id.map(String::from))];
+    let mut capped = false;
     while let Some((pid, vid)) = queue.pop() {
-        if steps.iter().any(|x| x.project_id == pid) || steps.len() >= 12 { continue; }
+        if steps.iter().any(|x| x.project_id == pid) { continue; }
+        if steps.len() >= 12 {
+            if !capped { capped = true; warnings.push("This install pulls in more than 12 items; the remaining dependencies were not planned. Install them separately.".into()); }
+            continue;
+        }
         let m = cf::get(st, token, &format!("/v1/mods/{pid}"), &[]).await?;
         let m = &m["data"];
         let title = m["name"].as_str().unwrap_or("project").to_string();
@@ -84,8 +89,13 @@ pub(super) async fn build_plan_mr(st: &St, s: &Srv, c: &Compat, project_id: &str
     let installed = db_items(st, &s.id).await?;
     let mut steps: Vec<Step> = vec![];
     let mut queue: Vec<(String, Option<String>)> = vec![(project_id.to_string(), version_id.map(String::from))];
+    let mut capped = false;
     while let Some((pid, vid)) = queue.pop() {
-        if steps.iter().any(|x| x.project_id == pid) || steps.len() >= 12 { continue; }
+        if steps.iter().any(|x| x.project_id == pid) { continue; }
+        if steps.len() >= 12 {
+            if !capped { capped = true; warnings.push("This install pulls in more than 12 items; the remaining dependencies were not planned. Install them separately.".into()); }
+            continue;
+        }
         let proj = mr(st, &format!("/project/{pid}"), &[]).await?;
         let pid_real = proj["id"].as_str().unwrap_or(&pid).to_string();
         let version = match vid {

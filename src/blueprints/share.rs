@@ -92,6 +92,9 @@ pub fn decode(code: &str) -> ApiResult<Value> {
     let v: Value = serde_json::from_slice(&json).map_err(|_| bad("it does not contain a blueprint"))?;
     let bp = sanitize(&v)?;
     strict_check(&bp)?;
+    let mut bp = bp;
+    // a code from someone else never carries console commands that would later run on a server
+    if let Some(a) = bp["schedules"].as_array_mut() { a.retain(|s| s["kind"].as_str() != Some("command")); }
     Ok(bp)
 }
 
@@ -130,6 +133,17 @@ mod tests {
         raw.extend_from_slice(&checksum(&p));
         raw.extend_from_slice(&p);
         format!("moss1_{}", URL_SAFE_NO_PAD.encode(raw))
+    }
+
+    #[test]
+    fn imported_codes_drop_command_schedules() {
+        let mut d = doc();
+        d["schedules"] = json!([{"kind": "command", "command": "say hi", "every_minutes": 60}, {"kind": "backup", "daily_at": "04:00", "tz": "UTC", "every_minutes": 1, "keep": 99999}]);
+        let back = decode(&encode(&d).unwrap()).unwrap();
+        let sc = back["schedules"].as_array().unwrap();
+        assert_eq!(sc.len(), 1);
+        assert_eq!(sc[0]["kind"], "backup");
+        assert_eq!((sc[0]["every_minutes"].as_i64(), sc[0]["keep"].as_i64()), (Some(5), Some(365)));
     }
 
     #[test]

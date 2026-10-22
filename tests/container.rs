@@ -2,10 +2,11 @@
 //! drives the real binary over HTTP through enable, image pull, start, console, SIGKILLed-controller re-attach,
 //! graceful stop, crash and "died while the controller was down", and asserts the exact `run` argv the engine saw.
 //! No container runtime or Java exists in CI here, so this proves Moss's own logic only.
+mod suite;
 use serde_json::{Value, json};
 use std::{net::TcpListener, path::{Path, PathBuf}, process::{Child, Command, Stdio}, time::{Duration, Instant}};
 
-struct Moss { child: Child, base: String, port: u16 }
+struct Moss { child: Child, base: String, port: u16, dir: PathBuf }
 
 fn free_port() -> u16 { TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port() }
 
@@ -14,11 +15,25 @@ impl Moss {
         let child = Command::new(env!("CARGO_BIN_EXE_moss")).arg("serve")
             .env("MOSS_AUTH", "dev").env("MOSS_DEV_RUNTIMES", "true").env("MOSS_PORT", port.to_string()).env("MOSS_DATA_DIR", dir).env("MOSS_CONTAINER_ENGINE", engine)
             .env("RUST_LOG", "moss=warn").stdout(Stdio::null()).stderr(Stdio::null()).spawn().expect("spawn moss");
-        Self { child, base: format!("http://127.0.0.1:{port}/api/v1"), port }
+        Self { child, base: format!("http://127.0.0.1:{port}/api/v1"), port, dir: dir.to_path_buf() }
     }
     fn sigkill(&mut self) { self.child.kill().unwrap(); self.child.wait().unwrap(); }
 }
-impl Drop for Moss { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
+impl Drop for Moss { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); suite::reap_servers(&self.dir); reap_stub(&self.dir); } }
+
+/// The stub engine runs each "container" as a detached session; kill those started for this data dir's test. A pid is
+/// only signalled when its environment still names that container's state dir (a stale pid may have been reused).
+fn reap_stub(data: &Path) {
+    let Some(Ok(rd)) = data.parent().map(|r| std::fs::read_dir(r.join("stub-state/c"))) else { return };
+    for e in rd.flatten() {
+        let Some(pid) = std::fs::read_to_string(e.path().join("pid")).ok().and_then(|p| p.trim().parse::<i32>().ok()) else { continue };
+        let want = format!("D={}", e.path().display());
+        let ours = pid > 1 && std::fs::read(format!("/proc/{pid}/environ")).is_ok_and(|env| env.split(|b| *b == 0).any(|v| v == want.as_bytes()));
+        // the pid file holds the shell that execs the game; its group is led by the stub's setsid wrapper
+        let pgid = unsafe { libc::getpgid(pid) };
+        if ours && pgid > 1 && pgid != unsafe { libc::getpgrp() } { unsafe { libc::kill(-pgid, libc::SIGKILL); } }
+    }
+}
 
 async fn until<F: FnMut() -> Fut, Fut: std::future::Future<Output = Option<T>>, T>(what: &str, secs: u64, mut f: F) -> T {
     let end = Instant::now() + Duration::from_secs(secs);

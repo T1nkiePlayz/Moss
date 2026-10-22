@@ -107,11 +107,17 @@ async fn flush_game(st: &St, s: &Srv, f: &crate::games::Flush) -> bool {
 async fn prune(st: &St, sid: &str, kind: &str, keep: i64) {
     let keep = if keep > 0 { keep } else { st.setting("backup_keep", "7").await.parse().unwrap_or(7) }.max(1);
     let (s2, k2) = (sid.to_string(), kind.to_string());
-    let victims: Vec<String> = st.db.call(move |c| {
-        let mut q = c.prepare("SELECT id FROM backups WHERE server_id=?1 AND kind=?3 AND locked=0 AND local_present=1 AND status IN ('ok','failed') AND id <> COALESCE((SELECT id FROM backups WHERE server_id=?1 AND status='ok' ORDER BY created_at DESC LIMIT 1), '') ORDER BY created_at DESC LIMIT -1 OFFSET ?2")?;
-        q.query_map(rusqlite::params![s2, keep, k2], |r| r.get(0))?.collect()
-    }).await.unwrap_or_default();
+    let victims: Vec<String> = st.db.call(move |c| prune_victims(c, &s2, &k2, keep)).await.unwrap_or_default();
     for v in victims { retire_local(st, sid, &v).await; }
+}
+
+/// The ok backups beyond the newest `keep` ok ones, plus failed rows beyond the newest few (failed rows never count toward `keep`).
+fn prune_victims(c: &rusqlite::Connection, sid: &str, kind: &str, keep: i64) -> rusqlite::Result<Vec<String>> {
+    let mut q = c.prepare("SELECT id FROM (SELECT id, locked FROM backups WHERE server_id=?1 AND kind=?3 AND local_present=1 AND status='ok' ORDER BY created_at DESC LIMIT -1 OFFSET ?2) WHERE locked=0 AND id <> COALESCE((SELECT id FROM backups WHERE server_id=?1 AND status='ok' ORDER BY created_at DESC LIMIT 1), '')")?;
+    let mut v: Vec<String> = q.query_map(rusqlite::params![sid, keep, kind], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let mut f = c.prepare("SELECT id FROM backups WHERE server_id=?1 AND kind=?3 AND locked=0 AND local_present=1 AND status='failed' ORDER BY created_at DESC LIMIT -1 OFFSET ?2")?;
+    v.extend(f.query_map(rusqlite::params![sid, 3, kind], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?);
+    Ok(v)
 }
 
 /// Retention for local copies: a backup that is safely on a remote destination only loses its local file.
@@ -125,8 +131,29 @@ async fn retire_local(st: &St, sid: &str, id: &str) {
 pub async fn remove_backup(st: &St, sid: &str, id: &str) -> Result<()> {
     let i = id.to_string();
     if st.db.call(move |c| c.query_row("SELECT locked FROM backups WHERE id=?", [i], |r| r.get::<_, bool>(0))).await.unwrap_or(false) { bail!("backup is locked"); }
+    let i = id.to_string();
+    if st.db.call(move |c| c.query_row("SELECT remote='uploading' FROM backups WHERE id=?", [i], |r| r.get::<_, bool>(0))).await.unwrap_or(false) { bail!("backup is being uploaded; wait for the upload to finish"); }
     let _ = tokio::fs::remove_file(archive_path(st, sid, id)).await;
     let i = id.to_string();
     st.db.call(move |c| c.execute("DELETE FROM backups WHERE id=?", [i])).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_rows_do_not_push_ok_backups_out_of_the_keep_window() {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_tests(&c);
+        c.execute("INSERT INTO servers(id,name,runtime,game_version,port,created_at) VALUES ('s','s','vanilla','1.21',25565,'t')", []).ok();
+        let ins = |id: &str, at: &str, status: &str| c.execute("INSERT INTO backups(id,server_id,created_at,status,kind) VALUES (?,'s',?,?,'scheduled')", rusqlite::params![id, at, status]).unwrap();
+        ins("ok1", "2024-01-01", "ok"); ins("ok2", "2024-01-02", "ok"); ins("ok3", "2024-01-03", "ok");
+        for i in 0..5 { ins(&format!("f{i}"), &format!("2024-01-1{i}"), "failed"); }
+        let v = prune_victims(&c, "s", "scheduled", 2).unwrap();
+        assert!(v.contains(&"ok1".to_string()), "oldest ok beyond keep=2 goes");
+        assert!(!v.contains(&"ok2".to_string()) && !v.contains(&"ok3".to_string()), "newest 2 ok are kept");
+        assert_eq!(v.iter().filter(|x| x.starts_with('f')).count(), 2, "failed rows beyond the newest 3 go");
+    }
 }

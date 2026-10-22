@@ -111,17 +111,18 @@ pub async fn resync(st: &St, s: &Srv) {
 
 pub async fn remove(State(st): State<St>, user: User, Path((id, item)): Path<(String, String)>) -> ApiResult<(StatusCode, Json<Value>)> {
     let (s, c) = compat_for(&st, &user, &id, "content.manage").await?;
-    let (filename, row_id) = if let Some(f) = item.strip_prefix("manual:") { (content_filename(f, c.ext).map_err(|e| ApiError::bad("validation", e.to_string()))?, None) } else {
+    let (filename, row_id, row_dir) = if let Some(f) = item.strip_prefix("manual:") { (content_filename(f, c.ext).map_err(|e| ApiError::bad("validation", e.to_string()))?, None, c.dir.clone()) } else {
         let (i, sid) = (item.clone(), id.clone());
         let f: Option<(String, String)> = st.db.call(move |db| db.query_row("SELECT filename,dir FROM content_items WHERE id=? AND server_id=?", [i, sid], |r| Ok((r.get(0)?, r.get(1)?))).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await?;
-        (f.ok_or_else(|| ApiError::not_found("content item"))?.0, Some(item.clone()))
+        let (f, d) = f.ok_or_else(|| ApiError::not_found("content item"))?;
+        (f, Some(item.clone()), d)
     };
     let actor = user.actor();
     let op = ops::spawn_op(&st, "content.remove", format!("Remove {filename}"), Some(&id), false, move |ctx| async move {
         let st = ctx.st.clone();
         let _g = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
         ctx.stage("Snapshotting for undo");
-        let rel = format!("{}/{}", c.dir, filename);
+        let rel = format!("{row_dir}/{filename}");
         undo::snapshot(&st, &s, &format!("Remove {filename}"), std::slice::from_ref(&rel)).await.map_err(|e| anyhow!(e.message))?;
         ctx.stage("Removing file (plugin data and configuration are kept)");
         let p = safe_join(&s.dir(&st), &rel).map_err(|e| anyhow!(e.message))?;

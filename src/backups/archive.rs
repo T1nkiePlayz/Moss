@@ -13,14 +13,14 @@ impl<W: Write> Write for HashW<W> {
     fn flush(&mut self) -> std::io::Result<()> { self.inner.flush() }
 }
 
-/// Reads exactly `len` bytes, zero-padding if the file shrinks while being archived (tar needs a fixed length).
+/// Reads exactly `len` bytes; errors if the file shrinks while being archived (tar needs a fixed length).
 struct Fixed { f: std::io::Take<std::fs::File>, left: u64 }
 impl Read for Fixed {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.left == 0 { return Ok(0); }
         let want = buf.len().min(self.left as usize);
         let n = self.f.read(&mut buf[..want])?;
-        let n = if n == 0 { buf[..want].fill(0); want } else { n };
+        if n == 0 { return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "a file shrank while it was being backed up; try again")); }
         self.left -= n as u64;
         Ok(n)
     }
@@ -147,6 +147,16 @@ pub fn extract_archive_limited(path: &FsPath, dest: &FsPath, token: &tokio_util:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shrinking_file_is_an_error_not_zero_padding() {
+        let p = std::env::temp_dir().join(format!("moss-shrink-{}", std::process::id()));
+        std::fs::write(&p, b"12345").unwrap();
+        let mut r = Fixed { f: std::fs::File::open(&p).unwrap().take(10), left: 10 };
+        let mut out = vec![];
+        assert!(r.read_to_end(&mut out).is_err());
+        let _ = std::fs::remove_file(&p);
+    }
 
     #[test]
     fn entry_paths_must_be_plain_relative() {

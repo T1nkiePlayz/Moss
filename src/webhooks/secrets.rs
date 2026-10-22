@@ -7,8 +7,14 @@ static LOCK: Mutex<()> = Mutex::new(());
 
 pub fn file(data_dir: &Path) -> PathBuf { data_dir.join("webhook-secrets.json") }
 
-fn read(data_dir: &Path) -> BTreeMap<String, String> {
-    std::fs::read_to_string(file(data_dir)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+/// A missing file is an empty store; an unreadable or corrupt one is an error, so a later `set` can never overwrite
+/// (and so wipe) secrets it failed to read.
+fn read(data_dir: &Path) -> Result<BTreeMap<String, String>> {
+    match std::fs::read_to_string(file(data_dir)) {
+        Ok(s) => Ok(serde_json::from_str(&s)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn write(data_dir: &Path, m: &BTreeMap<String, String>) -> Result<()> {
@@ -26,11 +32,11 @@ fn write(data_dir: &Path, m: &BTreeMap<String, String>) -> Result<()> {
 /// A fresh random secret from the OS RNG, e.g. `whsec_Qx…` (48 alphanumeric characters, about 285 bits).
 pub fn generate() -> String { format!("whsec_{}", crate::auth::secret::random_string(48)) }
 
-pub fn get(data_dir: &Path, id: &str) -> Option<String> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); read(data_dir).remove(id) }
-pub fn set(data_dir: &Path, id: &str, secret: &str) -> Result<()> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); let mut m = read(data_dir); m.insert(id.into(), secret.into()); write(data_dir, &m) }
-pub fn remove(data_dir: &Path, id: &str) -> Result<()> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); let mut m = read(data_dir); if m.remove(id).is_some() { write(data_dir, &m)?; } Ok(()) }
+pub fn get(data_dir: &Path, id: &str) -> Option<String> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); read(data_dir).ok().and_then(|mut m| m.remove(id)) }
+pub fn set(data_dir: &Path, id: &str, secret: &str) -> Result<()> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); let mut m = read(data_dir)?; m.insert(id.into(), secret.into()); write(data_dir, &m) }
+pub fn remove(data_dir: &Path, id: &str) -> Result<()> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); let mut m = read(data_dir)?; if m.remove(id).is_some() { write(data_dir, &m)?; } Ok(()) }
 /// Every secret, for redaction in the support bundle.
-pub fn all_values(data_dir: &Path) -> Vec<String> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); read(data_dir).into_values().filter(|s| !s.is_empty()).collect() }
+pub fn all_values(data_dir: &Path) -> Vec<String> { let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner()); read(data_dir).unwrap_or_default().into_values().filter(|s| !s.is_empty()).collect() }
 
 #[cfg(test)]
 mod tests {
@@ -49,6 +55,20 @@ mod tests {
         remove(&d, "a").unwrap();
         assert!(get(&d, "a").is_none() && get(&d, "b").is_some());
         assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "no temp files left behind");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn corrupt_file_is_an_error_and_is_not_overwritten() {
+        let d = std::env::temp_dir().join(format!("moss-whsec-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(file(&d), "{not json").unwrap();
+        assert!(set(&d, "a", "x").is_err());
+        assert!(remove(&d, "a").is_err());
+        assert_eq!(std::fs::read_to_string(file(&d)).unwrap(), "{not json");
+        assert!(get(&d, "a").is_none());
+        std::fs::remove_file(file(&d)).unwrap();
+        set(&d, "a", "x").unwrap(); // missing file is just empty
         let _ = std::fs::remove_dir_all(&d);
     }
 }

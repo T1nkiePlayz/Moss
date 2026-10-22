@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 const MAX_BODY: u64 = 128 << 20;
 const MAX_QUERY: usize = 2048;
+const OWNER_TTL: Duration = Duration::from_secs(5);
 /// Public map viewers load many tiles, so the budget is far above the status page's own, but still bounded per client.
 const PUBLIC_RATE_LIMIT: u32 = 3000;
 
@@ -45,6 +46,23 @@ fn plain(status: StatusCode, msg: &'static str) -> Response {
     r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
     maps::harden(r.headers_mut());
     r
+}
+
+type OwnerCache = std::sync::Mutex<HashMap<(String, u16, Option<i64>), (std::time::Instant, bool)>>;
+
+/// The ownership check scans /proc and lists servers, so it runs off the async workers and its answer is reused for a few seconds.
+async fn port_owned_cached(st: &St, s: &server::Srv, port: u16) -> bool {
+    static CACHE: OnceLock<OwnerCache> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let key = (s.id.clone(), port, s.pid);
+    if let Some((at, v)) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(&key) && at.elapsed() < OWNER_TTL { return *v; }
+    let others = server::list(st).await.unwrap_or_default();
+    let srv = s.clone();
+    let ok = tokio::task::spawn_blocking(move || maps::port_belongs_to(&srv, port, &others)).await.unwrap_or(false);
+    let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
+    c.retain(|_, (at, _)| at.elapsed() < OWNER_TTL);
+    c.insert(key, (std::time::Instant::now(), ok));
+    ok
 }
 
 async fn proxy(State(st): State<St>, req: Request) -> Response {
@@ -88,8 +106,7 @@ async fn proxy(State(st): State<St>, req: Request) -> Response {
     }
     let Ok(s) = server::get(&st, id).await else { return not_found() };
     let Some(m) = maps::detect(&st, &s) else { return not_found() };
-    let others = server::list(&st).await.unwrap_or_default();
-    if !maps::port_belongs_to(&s, m.port, &others) { return plain(StatusCode::BAD_GATEWAY, "The map is not being served by this server.") }
+    if !port_owned_cached(&st, &s, m.port).await { return plain(StatusCode::BAD_GATEWAY, "The map is not being served by this server.") }
     let Some(up_path) = maps::normalise_path(rest) else { return plain(StatusCode::BAD_REQUEST, "Bad path.") };
     let query = req.uri().query();
     if query.is_some_and(|q| q.len() > MAX_QUERY) { return plain(StatusCode::URI_TOO_LONG, "Query too long.") }

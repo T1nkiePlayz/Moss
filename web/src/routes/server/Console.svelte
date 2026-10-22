@@ -60,8 +60,9 @@
   }
   function jump() { stick = true; unseen = 0; toBottom(); }
 
+  const sid = $derived(s.id);
   $effect(() => {
-    const id = s.id;
+    const id = sid;
     let sock: ConsoleSocket | null = null;
     let dead = false;
     let tries = 0;

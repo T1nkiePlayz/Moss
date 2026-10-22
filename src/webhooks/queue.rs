@@ -100,6 +100,7 @@ async fn run_one(st: St, d: Due, opts: Opts) {
         Err(e) => tracing::warn!("webhooks: could not record a delivery result: {e:#}"),
     }
     in_flight(|s| s.remove(&d.id));
+    wake(); // recompute the next wake time now that this row is no longer in flight
     if !o.ok { tracing::debug!("webhook delivery {} failed (attempt {})", d.id, d.attempts + 1); }
 }
 
@@ -166,7 +167,10 @@ pub fn spawn(st: &St) {
         let opts = Opts { allow_private: st.cfg.allow_private_webhooks, allow_http: false };
         loop {
             process_due(&st, opts, false).await;
-            let wait = st.db.call(|c| c.query_row("SELECT MIN(d.next_at) FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id=d.endpoint_id WHERE d.state='pending' AND e.enabled=1", [], |r| r.get::<_, Option<i64>>(0))).await.ok().flatten();
+            // Rows being delivered right now stay 'pending' until recorded, and test rows are not picked up here; neither
+            // may set the wake time (their next_at is already due, which would make the loop spin every 250 ms).
+            let due: Vec<(String, i64)> = st.db.call(|c| c.prepare("SELECT d.id, d.next_at FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id=d.endpoint_id WHERE d.state='pending' AND d.test=0 AND e.enabled=1 ORDER BY d.next_at LIMIT 64")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).await.unwrap_or_default();
+            let wait = in_flight(|s| due.into_iter().find(|(id, _)| !s.contains(id)).map(|(_, t)| t));
             let sleep = wait.map_or(30_000, |t| (t - now_ms()).clamp(250, 30_000)) as u64;
             tokio::select! { _ = WAKE.notified() => {}, _ = tokio::time::sleep(Duration::from_millis(sleep)) => {} }
         }

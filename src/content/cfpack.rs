@@ -64,6 +64,10 @@ pub fn classify(refs: &[CfRef], files: &[Value]) -> (Vec<PackFile>, Vec<Unavaila
             continue;
         }
         let is_jar = name.to_ascii_lowercase().ends_with(".jar");
+        if !is_jar && !cf::client_only(f) {
+            gone.push(Unavailable { name: name.into(), reason: "not a .jar file, so it was not installed; add it manually if it is needed".into(), url: page });
+            continue;
+        }
         let server = if cf::client_only(f) || !is_jar { Side::Unsupported } else if r.required { Side::Required } else { Side::Optional };
         let sha1 = f["hashes"].as_array().into_iter().flatten().find(|h| h["algo"] == 1).and_then(|h| h["value"].as_str()).map(String::from);
         ok.push(PackFile { path: format!("mods/{name}"), urls: f["downloadUrl"].as_str().map(|u| vec![u.to_string()]).unwrap_or_default(), sha1, sha512: None, size: f["fileLength"].as_u64().unwrap_or(0), server,

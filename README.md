@@ -60,13 +60,13 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 | **Game updates** | Checks Steam build ids, Factorio, Terraria and Bedrock releases; one click (or a `game_update` schedule) updates with a backup first and keeps your configs and worlds. |
 | **Game config editors** | Form editors for `server.cfg`, `serverconfig.txt`, `server-settings.json`, `PalWorldSettings.ini`, Zomboid's server ini and `moss-game.cfg`, with a raw view. |
 | **Shared player lists** | Allow and ban lists defined once and applied to every subscribed Minecraft Java and Bedrock server; ban lists also reach games with an admin channel while they run, see [docs/player-lists.md](docs/player-lists.md). |
-| **Live maps** | A web map plugin (BlueMap, Dynmap, squaremap, Pl3xMap) shown in a Map tab and, if you choose, on the public status page, through a sandboxed proxy, see [docs/maps.md](docs/maps.md). |
+| **Live maps** | A web map plugin (BlueMap, Dynmap, squaremap, Pl3xMap) shown in a Map tab and, if you choose, on the public status page, through a sandboxed proxy; a map link stops working as soon as its holder loses access, see [docs/maps.md](docs/maps.md). |
 | **Installable app and push** | The panel installs as an app and sends Web Push notifications (crashes, backups, players joining) to phones and desktops, see [docs/push.md](docs/push.md). |
 | **Command palette** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> reaches every page, server and action. |
 
 ## Features
 
-**Servers** · Vanilla, Paper, Purpur, Folia, Fabric, Quilt, Forge, NeoForge and Velocity from official metadata, plus [other games](#other-games), checksum-verified where upstream publishes one · start, graceful stop, restart, force stop with escalation · crash detection with backoff and a crash-loop breaker · autostart · per-server memory, flags profile and port · **import an existing server** from a folder, zip or tar.zst · **blueprints** to create new servers from a saved recipe, shareable as a copy-and-paste code · EULA acceptance is an explicit, audited step.
+**Servers** · Vanilla, Paper, Purpur, Folia, Fabric, Quilt, Forge, NeoForge and Velocity from official metadata, plus [other games](#other-games), checksum-verified where upstream publishes one · start, graceful stop, restart, force stop with escalation · crash detection with backoff and a crash-loop breaker · autostart · per-server memory (capped at this machine's RAM), flags profile and port · **import an existing server** from a folder, zip or tar.zst (drag and drop; its plugins and mods are identified right away) · **blueprints** to create new servers from a saved recipe, shareable as a copy-and-paste code · EULA acceptance is an explicit, audited step: accept when creating or importing, or *skip for now* and accept later from the server page (the server will not start until you do) · install and import logs stay on the server's **Setup** tab.
 
 **Isolation and limits** · optional **container mode** (Docker or Podman): one mounted folder, no capabilities, read-only root, memory/CPU/process limits, Java provided by the image · on Linux, cgroup limits without containers · servers survive controller restarts in both modes.
 
@@ -76,13 +76,13 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 **Content (Modrinth, CurseForge and Hangar)** · search filtered by runtime, loader and game version · dependency resolution · inventory read from the jars · enable/disable · identify unknown files by hash · compatibility panel · update-all with a reviewed plan and pinning · **staged updates on a test copy** with health-gated promotion.
 
-**Modpacks** · import `.mrpack` and CurseForge packs into a new or existing server, export `.mrpack`, **update to a newer pack version with a diff**, pin a pack version.
+**Modpacks** · **search Modrinth and CurseForge packs** right from *New server → From modpack* (or paste a link, or upload) · import `.mrpack` and CurseForge packs into a new or existing server, export `.mrpack`, **update to a newer pack version with a diff**, pin a pack version.
 
 **Version upgrades** · plan and run a Minecraft/loader upgrade with per-mod verdicts, backup and rollback; optionally try it on a copy first.
 
-**Backups** · manual and scheduled, checksummed `tar.zst`, verify, lock, world-aware listing, restore as a new server, in place or per world · **restore preview, or restore to a staging folder and promote after comparing** · **remote destinations**: a folder (for example a NAS mount) or any S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, MinIO), with upload retries, checksums and remote retention.
+**Backups** · manual and scheduled, checksummed `tar.zst`, verify, lock, world-aware listing, restore as a new server, in place or per world · busy servers are never backed up into a torn file: small files are snapshotted whole and a backup restarts if a large file is cut short · **restore preview, or restore to a staging folder and promote after comparing** · **remote destinations**: a folder (for example a NAS mount) or any S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, MinIO), with upload retries, checksums and remote retention.
 
-**Schedules, operations, notifications** · backup, start, stop, restart and console-command schedules in an IANA time zone (daylight-saving aware) · every long job is a persisted, cancellable operation · in-app inbox plus optional Discord or generic webhook (HTTPS, SSRF-safe) · **signed event webhooks** (HMAC-SHA256, retries, auto-disable on repeated failure) for your own automation, see [docs/webhooks.md](docs/webhooks.md).
+**Schedules, operations, notifications** · backup, start, stop, restart and console-command schedules in an IANA time zone (daylight-saving aware) · every long job is a persisted, cancellable operation · in-app inbox (read state is per user) plus optional Discord or generic webhook (HTTPS, SSRF-safe) · **signed event webhooks** (HMAC-SHA256, retries, auto-disable on repeated failure) for your own automation, see [docs/webhooks.md](docs/webhooks.md).
 
 **Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · support bundle with secrets redacted.
 
@@ -289,7 +289,7 @@ Moss is designed so that signing in is not the only line of defence. Read this s
 
 - **Loopback by default.** Dev auth mode refuses any other bind. A TLS reverse proxy is required for remote access.
 - **Authorisation on every call.** REST, WebSocket console, SSE stream, downloads and undo/restore go through the same per-server permission check. Servers you cannot see return *not found*.
-- **Invite-only, setup token, MFA.** A valid Supabase token is not enough; the account must be the owner or invited, with a verified email. Ownership of a fresh instance is claimed with a one-time token, not by being first. `MOSS_REQUIRE_MFA` can demand an MFA session for admins or everyone.
+- **Invite-only, setup token, MFA.** A valid Supabase token is not enough; the account must be the owner or invited, with an email that Supabase itself confirms (Moss asks Supabase directly rather than trusting what is in the token). Ownership of a fresh instance is claimed with a one-time token, not by being first. `MOSS_REQUIRE_MFA` can demand an MFA session for admins or everyone.
 - **API tokens.** Personal tokens (`moss_pat_…`) are stored as SHA-256, shown once, scoped read or full, expire, and can never manage tokens or users.
 - **Throttling.** Repeated invalid credentials from one address are rejected with 429.
 - **Files confined to the server.** Path normalisation plus a symlink check on every component; `.moss/` is unreachable; uploads are never served inline.
@@ -322,7 +322,7 @@ macOS binaries are built in CI and are ad-hoc signed, not notarised; see [docs/m
 
 ## Current limitations
 
-- Container mode has only been tested against a stand-in for Docker and Podman. Game-only networking (no outbound access) needs Docker; Podman is refused rather than weakened. Game containers have not been run against real games yet.
+- Container mode has only been tested against a stand-in for Docker and Podman (including tests that a game cannot swap Moss's console files for links to host files). Game-only networking (no outbound access) needs Docker; Podman is refused rather than weakened. Game containers have not been run against real games yet.
 - The desktop app source is in `desktop/` but has not been built or run yet; there are no desktop downloads.
 - Release checksums are signed with cosign, but no signed release has been published yet.
 - Moss has had an internal security review only; an external one is still to come.

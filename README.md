@@ -406,7 +406,7 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 - [ ] World tools: reset or regenerate a world, swap worlds, pre-generate chunks (Chunky), each with an automatic safety backup.
 - [ ] A public join page with the address and a one-click client modpack download, built on the status pages.
 - [ ] Multi-node, first step: add another Moss as a read-only peer in the servers list.
-- [ ] Typed SDKs (TypeScript and Python) generated from [docs/openapi.frozen.json](docs/openapi.frozen.json).
+- [x] Typed SDKs for TypeScript and Python, generated from [docs/openapi.frozen.json](docs/openapi.frozen.json), live in [sdk/](sdk/typescript).
 
 **Language and docs**
 - [ ] Extract panel strings into a catalog (English only) as the first step of M9, then add a community translation workflow.
@@ -428,6 +428,7 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 | [docs/desktop.md](docs/desktop.md) | The desktop app |
 | [docs/architecture.md](docs/architecture.md) · [docs/adr](docs/adr) | How it works and why |
 | [docs/api.md](docs/api.md) · [docs/openapi.json](docs/openapi.json) | HTTP API reference |
+| [sdk/typescript](sdk/typescript) · [sdk/python](sdk/python) | Typed API clients generated from the frozen OpenAPI document |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing and releasing |
 | [ACCESSIBILITY.md](ACCESSIBILITY.md) | Accessibility target, settings, testing, known limits and how to report a problem |
 

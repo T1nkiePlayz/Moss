@@ -1,0 +1,33 @@
+{
+  "name": "@moss/client",
+  "version": "0.1.0",
+  "description": "Typed TypeScript client for the Moss game server controller API, generated from docs/openapi.frozen.json",
+  "license": "GPL-3.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "generate": "openapi-typescript ../../docs/openapi.frozen.json -o src/schema.ts --root-types --alphabetize && node scripts/add-header.mjs",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "npm run typecheck && vitest run"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

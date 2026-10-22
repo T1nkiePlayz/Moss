@@ -5,7 +5,7 @@ import { handlePlayerLists, NONE as NOT_PLAYERLISTS } from './mock-playerlists';
 import { handleWebhooks, NONE as NOT_WEBHOOK } from './mock-webhooks';
 import { handleWorkflows, NONE as NOT_WORKFLOW } from './mock-workflows';
 import { handleRemote, NONE as NOT_REMOTE, seedRemote } from './mock-remote';
-import { extraRuntimes, handleContent, hangarHits, inspectModpack, itemsFromPack, NONE, seedContent, versionsFor } from './mock-content';
+import { extraRuntimes, handleContent, hangarHits, inspectModpack, itemsFromPack, NONE, searchModpacks, seedContent, versionsFor } from './mock-content';
 import { handleOps, handleOpsGlobal, revertConfig } from './mock-ops';
 import { handleGameMods, NONE as NOT_GAMEMODS } from './mock-gamemods';
 import { nextDailyRun, offsetName } from './tz';
@@ -373,6 +373,7 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
   if (p === '/runtimes') return runtimes;
   if (M(/^\/runtimes\/([^/]+)\/versions$/)) return gameVersions[m![1]] ?? versionsFor(m![1]);
   if (p === '/modpacks/inspect') return inspectModpack(body);
+  if (p === '/modpacks/search') return searchModpacks(qs);
   if (p === '/java' && method === 'GET') return { installs: javaInstalls };
   if (p === '/java/install') return op('java.install', `Installing Java ${b.major}`, null, ['Resolving build', 'Downloading JDK', 'Verifying checksum', 'Extracting'], { done: () => javaInstalls.push({ major: b.major, path: `/var/lib/moss/java/${b.major}`, managed: true, version: `${b.major}.0.1` }) });
   if (p === '/health') return health();
@@ -395,7 +396,7 @@ async function handleBase(method: string, rawPath: string, body: unknown): Promi
     const r = (qs.get('provider') === 'curseforge' ? cfHits : qs.get('provider') === 'hangar' ? hangarHits : hits).filter((h) => !qq || (h.title + h.description).toLowerCase().includes(qq));
     return { hits: r.slice(+(qs.get('offset') ?? 0), +(qs.get('offset') ?? 0) + +(qs.get('limit') ?? 20)), total: r.length, compat: { kind: s.content_kind, loader: s.runtime, game_version: s.game_version } };
   }
-  if (p === '/content/providers') { const rt = sv(qs.get('server_id')!).runtime; return { providers: [{ id: 'modrinth', name: 'Modrinth', available: true, supported: true, reason: null }, { id: 'hangar', name: 'Hangar', available: true, supported: ['paper', 'purpur', 'folia', 'velocity'].includes(rt), reason: ['paper', 'purpur', 'folia', 'velocity'].includes(rt) ? null : 'Hangar only has plugins for Paper, Purpur, Folia and Velocity.' }, { id: 'curseforge', name: 'CurseForge', available: true, supported: rt !== 'velocity', reason: rt === 'velocity' ? 'CurseForge has no proxy plugins' : null }] }; }
+  if (p === '/content/providers') { const rt = qs.get('server_id') ? sv(qs.get('server_id')!).runtime : 'paper'; return { providers: [{ id: 'modrinth', name: 'Modrinth', available: true, supported: true, reason: null }, { id: 'hangar', name: 'Hangar', available: true, supported: ['paper', 'purpur', 'folia', 'velocity'].includes(rt), reason: ['paper', 'purpur', 'folia', 'velocity'].includes(rt) ? null : 'Hangar only has plugins for Paper, Purpur, Folia and Velocity.' }, { id: 'curseforge', name: 'CurseForge', available: true, supported: rt !== 'velocity', reason: rt === 'velocity' ? 'CurseForge has no proxy plugins' : null }] }; }
   if (M(/^\/content\/projects\/([^/]+)$/)) return V(decodeURIComponent(m![1]), qs.get('provider') === 'curseforge', qs.get('provider') === 'hangar');
 
   if (p === '/servers') {

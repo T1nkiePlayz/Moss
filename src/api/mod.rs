@@ -132,6 +132,7 @@ pub fn router(st: St) -> Router {
         .route("/servers/{id}/staging/{run}", get(content::staging_get).delete(content::staging_discard))
         .route("/servers/{id}/staging/{run}/log", get(content::staging_log))
         .route("/servers/{id}/staging/{run}/promote", post(content::staging_promote))
+        .route("/modpacks/search", get(content::modpack_search))
         .route("/modpacks/inspect", post(content::modpack_inspect).layer(big()))
         .route("/servers/{id}/modpacks", get(content::modpack_list).post(content::modpack_import).layer(big()))
         .route("/servers/{id}/modpacks/{install}", patch(content::modpack_pin))

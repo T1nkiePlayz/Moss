@@ -4,12 +4,14 @@
   import { api, ApiError, errMsg, type ModpackInspect, type ProviderId } from '../../lib/api';
   import { inspectModpackFile, type Upload } from '../../lib/upload';
   import { modpackFileProblem, parseModpackRef } from '../../lib/content';
-  import { bytes } from '../../lib/format';
+  import { bytes, compact } from '../../lib/format';
+  import { apiExtra, type ModpackHit } from '../../lib/api-extra';
 
   // Upload a .mrpack/.zip (with progress, abortable) or look a pack up on Modrinth/CurseForge, then show what it contains.
   let { onresult }: { onresult: (m: ModpackInspect | null) => void } = $props();
 
-  let tab = $state<'file' | ProviderId>('file');
+  type Tab = 'search' | 'file' | ProviderId;
+  let tab = $state<Tab>('search');
   let ref = $state('');
   let busy = $state<'' | 'upload' | 'inspect'>('');
   let loaded = $state(0), total = $state(0);
@@ -19,6 +21,33 @@
   let up: Upload<ModpackInspect> | null = null;
   let input = $state<HTMLInputElement>();
 
+  // Search tab: debounced catalogue search; CurseForge is offered only when the instance (and session) can use it.
+  let sp = $state<ProviderId>('modrinth'), sq = $state('');
+  let hits = $state<ModpackHit[]>([]), nextOff = $state<number | null>(null), searching = $state(false), cfOk = $state(false), picked = $state('');
+  let seq = 0;
+  $effect(() => { void apiExtra.providerList().then((r) => { cfOk = !!r.providers.find((p) => p.id === 'curseforge')?.available; }).catch(() => {}); });
+  async function runSearch(more = false) {
+    const my = ++seq;
+    searching = true; if (!more) err = '';
+    try {
+      const r = await apiExtra.searchModpacks(sp, sq.trim(), more ? (nextOff ?? 0) : 0);
+      if (my !== seq) return;
+      const seen = new Set(more ? hits.map((h) => h.project_id) : []);
+      hits = more ? [...hits, ...r.items.filter((h) => !seen.has(h.project_id))] : r.items; nextOff = r.next_offset;
+    } catch (e) { if (my === seq) { err = errMsg(e); if (!more) { hits = []; nextOff = null; } } }
+    if (my === seq) searching = false;
+  }
+  $effect(() => {
+    if (tab !== 'search') return;
+    void sp; void sq;
+    const t = setTimeout(() => void runSearch(), sq ? 350 : 0);
+    return () => clearTimeout(t);
+  });
+  async function pick(h: ModpackHit) {
+    err = ''; busy = 'inspect'; picked = h.project_id;
+    try { set(await api.inspectModpack({ provider: h.provider, project_id: h.project_id })); } catch (e) { err = errMsg(e); }
+    busy = ''; picked = '';
+  }
   function set(m: ModpackInspect | null) { pack = m; onresult(m); }
   async function fromFile(f: File | undefined) {
     if (!f) return;
@@ -30,7 +59,7 @@
     busy = ''; up = null;
   }
   async function fromRef() {
-    const r = parseModpackRef(ref, tab === 'file' ? 'modrinth' : tab);
+    const r = parseModpackRef(ref, tab === 'curseforge' ? 'curseforge' : 'modrinth');
     if (!r) { err = 'Enter a project id, slug or URL from Modrinth or CurseForge.'; return; }
     err = ''; busy = 'inspect';
     try { set(await api.inspectModpack(r)); } catch (e) { err = errMsg(e); }
@@ -39,14 +68,20 @@
   const pctDone = $derived(total ? Math.min(100, Math.round((loaded / total) * 100)) : 0);
   function onDrop(e: DragEvent) { e.preventDefault(); drag = false; void fromFile(e.dataTransfer?.files?.[0]); }
   function segKey(e: KeyboardEvent) {
-    const order: ('file' | ProviderId)[] = ['file', 'modrinth', 'curseforge'];
+    const order = tabs.map((t) => t.id);
     const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
     if (!d) return;
     e.preventDefault();
-    tab = order[(order.indexOf(tab) + d + 3) % 3]; err = '';
+    tab = order[(order.indexOf(tab) + d + order.length) % order.length]; err = '';
     (e.currentTarget as HTMLElement).querySelector<HTMLElement>(`[data-t="${tab}"]`)?.focus();
   }
-  const tabs: { id: 'file' | ProviderId; label: string }[] = [{ id: 'file', label: 'Upload file' }, { id: 'modrinth', label: 'Modrinth' }, { id: 'curseforge', label: 'CurseForge' }];
+  function provKey(e: KeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    sp = sp === 'modrinth' ? 'curseforge' : 'modrinth';
+    (e.currentTarget as HTMLElement).querySelector<HTMLElement>(`[data-p="${sp}"]`)?.focus();
+  }
+  const tabs: { id: Tab; label: string }[] = [{ id: 'search', label: 'Search' }, { id: 'file', label: 'Upload file' }, { id: 'modrinth', label: 'Modrinth link' }, { id: 'curseforge', label: 'CurseForge link' }];
 </script>
 
 {#if pack}
@@ -61,7 +96,41 @@
         <button class="segb" role="radio" aria-checked={tab === t.id} tabindex={tab === t.id ? 0 : -1} data-t={t.id} disabled={!!busy} onclick={() => { tab = t.id; err = ''; }}>{t.label}</button>
       {/each}
     </div>
-    {#if tab === 'file'}
+    {#if tab === 'search'}
+      <div class="col" style="gap:10px">
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <div class="field" style="flex:1;min-width:200px">
+            <label for="mp-q">Search modpacks</label>
+            <input id="mp-q" class="input" type="search" bind:value={sq} disabled={!!busy} placeholder="Fabulously Optimized, RLCraft…" autocomplete="off" spellcheck="false" />
+          </div>
+          {#if cfOk}
+            <div class="seg" role="radiogroup" aria-label="Catalogue" tabindex="-1" style="align-self:flex-end" onkeydown={provKey}>
+              {#each [['modrinth', 'Modrinth'], ['curseforge', 'CurseForge']] as [id, label]}
+                <button class="segb" role="radio" aria-checked={sp === id} tabindex={sp === id ? 0 : -1} data-p={id} disabled={!!busy} onclick={() => (sp = id as ProviderId)}>{label}</button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+        {#if !cfOk}<span class="hint">CurseForge modpacks appear here when CurseForge is configured and you are signed in.</span>{/if}
+        <ul class="hits" aria-busy={searching} aria-label="Modpack results">
+          {#each hits as h (h.provider + h.project_id)}
+            <li>
+              <button class="hit" disabled={!!busy} onclick={() => void pick(h)} aria-label="Use {h.title} by {h.author}">
+                {#if h.icon_url}<img src={h.icon_url} alt="" width="40" height="40" loading="lazy" referrerpolicy="no-referrer" />{:else}<span class="ph"><Icon name="package" size={20} /></span>{/if}
+                <span class="meta">
+                  <span class="row" style="gap:8px;flex-wrap:wrap"><b>{h.title}</b><span class="xs muted">by {h.author}</span><span class="xs faint tnum">{compact(h.downloads)} downloads</span></span>
+                  <span class="sm muted desc">{h.description}</span>
+                  {#if h.game_versions?.length || h.loaders?.length}<span class="xs faint">{[...(h.loaders ?? []), ...(h.game_versions ?? [])].join(' · ')}</span>{/if}
+                </span>
+                {#if busy && picked === h.project_id}<span class="xs muted">Reading the pack…</span>{/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+        {#if searching}<div class="skel" style="height:56px"></div>{:else if !hits.length && !err}<p class="muted sm">No modpacks found.</p>{/if}
+        {#if !searching && nextOff != null}<div><button class="btn sm" disabled={!!busy} onclick={() => void runSearch(true)}>Load more</button></div>{/if}
+      </div>
+    {:else if tab === 'file'}
       <div class="drop" class:drag role="group" aria-label="Upload a modpack" ondragover={(e) => { e.preventDefault(); drag = true; }} ondragleave={() => (drag = false)} ondrop={onDrop}>
         {#if busy}
           <div class="prog">
@@ -92,6 +161,15 @@
 {/if}
 
 <style>
+  .hits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+  .hit { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; font: inherit; color: var(--text); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--s1); cursor: pointer; transition: border-color var(--t), background var(--t); }
+  .hit:hover:not(:disabled) { border-color: var(--a1); background: var(--a-soft); }
+  .hit:focus-visible { outline: 2px solid var(--a-text); outline-offset: 1px; }
+  .hit:disabled { opacity: .6; cursor: not-allowed; }
+  .hit img, .ph { width: 40px; height: 40px; border-radius: 8px; flex: none; object-fit: cover; background: var(--s2); display: grid; place-items: center; color: var(--muted); }
+  .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+  .desc { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  @media (prefers-reduced-motion: reduce) { .hit { transition: none; } }
   .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--s2); width: fit-content; max-width: 100%; }
   .segb { border: 0; background: none; color: var(--muted); font: inherit; font-size: calc(13px * var(--ts, 1)); padding: 4px 12px; border-radius: 6px; cursor: pointer; }
   .segb[aria-checked='true'] { background: var(--a-soft); color: var(--a-text); font-weight: 600; }

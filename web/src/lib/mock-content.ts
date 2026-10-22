@@ -2,6 +2,7 @@
 // Findings are computed from the item list, so toggling/removing/installing changes the check result like the real thing.
 import type * as A from './api';
 import { ApiError } from './api';
+import type { ModpackHit } from './api-extra';
 
 export interface Ctx {
   uid: () => string; now: () => string; ago: (ms: number) => string;
@@ -377,4 +378,21 @@ export async function handleContent(c: Ctx, s: A.Server, sub: string, method: st
 export async function inspectModpack(body: unknown): Promise<A.ModpackInspect> {
   await sleep(700);
   return inspect(body);
+}
+
+const PACKS: Omit<ModpackHit, 'provider'>[] = [
+  { project_id: 'fabulously-optimized', slug: 'fabulously-optimized', title: 'Fabulously Optimized', description: 'Improve performance and graphics with a curated set of Fabric mods.', author: 'robotkoer', icon_url: null, downloads: 8_400_000, game_versions: ['1.21.4', '1.21.3'], loaders: ['fabric'] },
+  { project_id: 'better-mc-forge', slug: 'better-mc-forge', title: 'Better MC [FORGE]', description: 'A huge adventure pack with new dimensions, bosses and structures.', author: 'LunaPixelStudios', icon_url: null, downloads: 3_100_000, game_versions: ['1.20.1'], loaders: ['forge'] },
+  { project_id: 'all-the-mods-10', slug: 'all-the-mods-10', title: 'All the Mods 10', description: 'Kitchen-sink pack with 400+ mods for NeoForge.', author: 'ATMTeam', icon_url: null, downloads: 1_250_000, game_versions: ['1.21.1'], loaders: ['neoforge'] },
+  { project_id: 'cobblemon-fabric', slug: 'cobblemon-fabric', title: 'Cobblemon Official Modpack', description: 'Catch and battle Pokemon in Minecraft.', author: 'Cobblemon', icon_url: null, downloads: 920_000, game_versions: ['1.21.1'], loaders: ['fabric'] },
+  { project_id: 'rlcraft', slug: 'rlcraft', title: 'RLCraft', description: 'Brutal survival: dragons, thirst and temperature.', author: 'Shivaxi', icon_url: null, downloads: 700_000, game_versions: ['1.12.2'], loaders: ['forge'] },
+];
+/** GET /modpacks/search */
+export async function searchModpacks(qs: URLSearchParams): Promise<{ items: ModpackHit[]; total: number; next_offset: number | null }> {
+  await sleep(250);
+  const provider = (qs.get('provider') ?? 'modrinth') as A.ProviderId;
+  const t = (qs.get('q') ?? '').trim().toLowerCase();
+  const all = PACKS.filter((x) => !t || `${x.title} ${x.description} ${x.author}`.toLowerCase().includes(t)).map((x) => ({ ...x, provider, project_id: provider === 'curseforge' ? String(x.title.length * 1000 + x.downloads % 997) : x.project_id }));
+  const off = Number(qs.get('offset') ?? 0), lim = Number(qs.get('limit') ?? 20);
+  return { items: all.slice(off, off + lim), total: all.length, next_offset: off + lim < all.length ? off + lim : null };
 }

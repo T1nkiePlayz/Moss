@@ -71,7 +71,7 @@ impl Pack {
 pub struct Scanned { pub pack: Pack, pub overrides: Vec<OverrideEntry>, pub skipped: Vec<String> }
 
 /// Only administrators and per-server managers may stage packs (they can create servers or manage content).
-async fn may_stage(st: &St, user: &User) -> ApiResult<()> {
+pub(super) async fn may_stage(st: &St, user: &User) -> ApiResult<()> {
     if user.is_admin() { return Ok(()); }
     let uid = user.id.clone();
     let ok: bool = st.db.call(move |c| c.query_row("SELECT EXISTS(SELECT 1 FROM grants WHERE user_id=? AND bundle='manager')", [uid], |r| r.get(0))).await?;

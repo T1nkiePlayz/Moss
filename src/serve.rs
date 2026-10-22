@@ -11,7 +11,6 @@ fn private_dir(p: &std::path::Path) -> std::io::Result<()> {
 pub async fn build_state(cfg: config::Config) -> anyhow::Result<state::St> {
     crate::lock::create_data_dir(&cfg.data_dir)?;
     for d in [cfg.data_dir.clone(), cfg.servers_dir(), cfg.backups_dir(), cfg.cache_dir(), cfg.tmp_dir(), cfg.java_dir()] { std::fs::create_dir_all(&d)?; }
-    let _ = std::fs::remove_dir_all(cfg.tmp_dir()); // controller-owned scratch space: safe to clear on start
     std::fs::create_dir_all(cfg.tmp_dir())?;
     private_dir(&cfg.tmp_dir())?; // scratch space for uploads and support bundles is always private
     let db = db::Db::open(&cfg.data_dir.join("moss.sqlite"))?;
@@ -31,6 +30,10 @@ pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     // held until the process exits; `moss recover` uses it to tell that a controller is running
     let lock = crate::lock::try_acquire(&cfg.data_dir)?.ok_or_else(|| anyhow::anyhow!("another Moss controller is already using {}", cfg.data_dir.display()))?;
     std::mem::forget(lock);
+    // controller-owned scratch space: safe to clear once this process holds the lock (not in build_state, which
+    // `moss doctor` also uses while a controller may be running)
+    let _ = std::fs::remove_dir_all(cfg.tmp_dir());
+    crate::selfupdate::capture_launch();
     let st = build_state(cfg.clone()).await?;
     ops::recover(&st).await?;
     {
@@ -51,6 +54,7 @@ pub async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     crate::webhooks::spawn_background(&st);
     crate::analytics::spawn_background(&st).await;
     crate::workflows::spawn_background(&st);
+    crate::selfupdate::spawn_background(&st);
     let addr = format!("{}:{}", cfg.bind, cfg.port);
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}"))?;
     if cfg.dev() { tracing::warn!("AUTH DISABLED (dev mode) — anyone who can reach {addr} has full control"); }

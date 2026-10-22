@@ -40,4 +40,4 @@ CI (`.github/workflows/ci.yml`) runs the UI checks, the relay test and the backe
 
 ## Releasing
 
-Push a tag such as `v0.3.0`. `.github/workflows/release.yml` syncs the version, builds the UI once, builds Linux x86-64 and macOS (Apple silicon and Intel) binaries, packages `moss-<tag>-<os>-<arch>.tar.gz`, writes `SHA256SUMS.txt`, attests the tarballs (public repositories only), generates a Homebrew formula, attaches `install.sh` and opens a **draft** release whose notes are the tagged commit's message. Tags with a `-` become pre-releases.
+Push a tag such as `v0.3.0`. `.github/workflows/release.yml` syncs the version, builds the UI once, builds Linux x86-64 and macOS (Apple silicon and Intel) binaries, packages `moss-<tag>-<os>-<arch>.tar.gz`, writes `SHA256SUMS.txt`, attests the tarballs (public repositories only), generates a Homebrew formula, attaches `install.sh` and opens a **draft** release whose notes are the tagged commit's message. Tags with a `-` become pre-releases. `install.sh` and `moss update` (`src/cli/update.rs`) both depend on the tarball and `SHA256SUMS.txt` names, so change them together.

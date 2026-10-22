@@ -92,7 +92,7 @@ Finding: `{id,severity:"info"|"warn"|"critical",server_id|null,title,detail,evid
 - `GET /settings` → `{default_memory_mb,backup_keep,backup_before_change:boolean,modrinth_contact,public_base_url,data_dir,bind,version}` · `PUT /settings` (admin)
 
 ## Events (SSE) `GET /events?ticket=`
-`event: op` data=Operation · `event: server` data=Server · `event: activity` data=Activity · `event: hello` data `{}`. Stream resumes with `Last-Event-ID` (best effort) and sends `:` keep-alives every 15 s.
+`event: op` data=Operation · `event: server` data=Server · `event: activity` data=Activity · `event: update` data=UpdateInfo (administrators only; see Updating Moss) · `event: hello` data `{}`. Stream resumes with `Last-Event-ID` (best effort) and sends `:` keep-alives every 15 s.
 
 ## Additions
 - `PATCH /servers/{id} {accept_eula:true}` records Minecraft EULA acceptance (audited; writes `eula.txt`).
@@ -152,7 +152,7 @@ Server object gains `limits:{memory_mb:number|null, cpu_pct:number|null, pids:nu
 - `GET /status` host gains `os: "Linux"|"macOS"`.
 
 ### Release
-Tags `v*` build and attach: `moss-<tag>-linux-x86_64.tar.gz`, `moss-<tag>-macos-aarch64.tar.gz`, `moss-<tag>-macos-x86_64.tar.gz`, `SHA256SUMS.txt`, `install.sh`, `moss.rb` (Homebrew formula with the real checksums); build attestations for each tarball.
+Tags `v*` build and attach: `moss-<tag>-linux-x86_64.tar.gz`, `moss-<tag>-macos-aarch64.tar.gz`, `moss-<tag>-macos-x86_64.tar.gz`, `SHA256SUMS.txt`, `install.sh`, `moss.rb` (Homebrew formula with the real checksums); build attestations for each tarball. `moss update` (and `install.sh`) rely on these asset names and on `<name>/moss` inside the tarball, so keep them stable.
 
 ## 0.2 additions: schedules, backups, notifications, metrics
 
@@ -167,7 +167,7 @@ Schedule gains `tz: string` (IANA name, e.g. `"Europe/Berlin"`, default `"UTC"`)
 - `POST /backups/{id}/restore` body gains `only?:string[]` (top-level names such as `["world","world_nether"]`; in-place only): restores just those entries, taking the safety backup first.
 
 ### Notifications and webhooks
-Notification: `{id, time, kind:"crash"|"crash_loop"|"backup_failed"|"disk_low"|"operation_failed"|"restart_failed"|"update_available"|"security", severity:"info"|"warn"|"critical", title, body, server_id:string|null, read:boolean}` (`read` is the caller's own read state; each user marks notifications read for themselves).
+Notification: `{id, time, kind:"crash"|"crash_loop"|"backup_failed"|"disk_low"|"operation_failed"|"restart_failed"|"update_available"|"moss_update"|"security", severity:"info"|"warn"|"critical", title, body, server_id:string|null, read:boolean}` (`read` is the caller's own read state; each user marks notifications read for themselves).
 - `GET /notifications?unread=1&limit=50` → `{items:Notification[], unread:number}` (scoped to servers the caller can see; admin-only kinds hidden from others).
 - `POST /notifications/read {ids?:string[], all?:boolean}` → 204.
 - SSE event `notification` (data = Notification) on `/events`.
@@ -285,6 +285,12 @@ Outbound, signed event subscriptions; consumer guide in `docs/webhooks.md`.
 - `POST /webhooks/{id}/test` → `{delivery}`: one attempt now, even if disabled, logged but never retried or counted towards auto-disable
 - `GET /webhooks/{id}/deliveries` → `{items:[{id,event_id,type,test,state:"pending"|"delivered"|"dead",attempts,max_attempts,created_at,finished_at,next_attempt_at,status_code,latency_ms,response,error}]}` (the last 100 finished plus anything pending; `response` is truncated)
 - `POST /webhooks/{id}/deliveries/{did}/retry` → `{delivery}`; 409 `webhook.not_retryable` unless the delivery is `dead`
+
+## Updating Moss (administrators)
+- `GET /system/update` → UpdateInfo `{current, latest:string|null, available:boolean, checked_at:string|null, method:"self"|"helper"|"manual", reason:string|null, command:string|null, release_url:string|null, running:boolean}`. `latest` is what the last check found (null before the first check). `method` says how the panel can install: `self` (Moss replaces its own binary, then restarts by re-executing itself with the same PID), `helper` (the root `moss-update.path` systemd unit installs it and restarts `moss.service`), `manual` (a package manager owns the binary, or Moss cannot write it: `reason` explains, `command` is what to run on the host, when there is one).
+- `POST /system/update/check` → UpdateInfo after asking the release source now. 502 `update.lookup_failed`.
+- `POST /system/update {version?}` → 202 `{operation}` (kind `moss.update`, audited as `moss.update`). Installs the latest release, or `version` when given; only releases newer than the running one (`moss update --version` on the host goes back). 409 `update.none` when nothing newer, `update.unavailable` when `method` is `manual`, `update.running` while an update runs; 400 `validation` for a malformed version. The release is verified like `moss update` (checksum, and the cosign signature when `cosign` is installed). After a `self` update the controller restarts about 1.5 s after the operation completes: the panel reconnects and `GET /status` reports the new `version`. Game servers keep running.
+- Moss checks for a new release a minute after start and every 6 hours (`MOSS_UPDATE_CHECK=false` turns this off; dev mode never checks). A new release raises the admin-only `moss_update` notification once per version, sent to webhooks as `update.available`.
 
 ## Live maps
 

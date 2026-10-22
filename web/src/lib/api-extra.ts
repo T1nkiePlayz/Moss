@@ -1,5 +1,5 @@
 // Calls used only by lazily loaded pages (game servers, maps, push); kept out of api.ts so the initial bundle stays small.
-import { get, send, q, type GameModHit, type ProviderId, type ProviderInfo, type GameModsInfo, type GameUpdate, type OnlinePlayers, type Operation, type Server, type ServerMap } from './api';
+import { get, send, q, type GameModHit, type ProviderId, type ProviderInfo, type GameModsInfo, type GameUpdate, type OnlinePlayers, type Operation, type Server, type ServerMap, type UpdateInfo } from './api';
 const e = encodeURIComponent;
 
 export interface ModpackHit { provider: ProviderId; project_id: string; slug: string; title: string; description: string; author: string; icon_url: string | null; downloads: number; game_versions?: string[]; loaders?: string[] }
@@ -48,4 +48,10 @@ export const playerLists = {
   removeEntry: (id: string, name: string) => send('DELETE', `/player-lists/${e(id)}/entries/${e(name)}`),
   forServer: (id: string) => get<ServerPlayerLists>(`/servers/${e(id)}/player-lists`, { ttl: 0 }),
   subscribe: (id: string, list_ids: string[]) => send<{ list_ids: string[] }>('PUT', `/servers/${e(id)}/player-lists`, { list_ids }),
+};
+
+export const sysUpdate = {
+  info: () => get<UpdateInfo>('/system/update', { ttl: 0 }),
+  check: () => send<UpdateInfo>('POST', '/system/update/check'),
+  start: (version?: string) => send<{ operation: Operation }>('POST', '/system/update', version ? { version } : {}),
 };

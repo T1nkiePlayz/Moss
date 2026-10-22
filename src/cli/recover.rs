@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 #[derive(Args, Clone, Debug)]
 pub struct Recover {
     /// Data directory (the same one `moss serve` uses).
-    #[arg(long, env = "MOSS_DATA_DIR", default_value = "./moss-data")]
+    #[arg(long, env = "MOSS_DATA_DIR", default_value_os_t = crate::config::default_data_dir())]
     pub data_dir: PathBuf,
     /// Run even though a controller appears to be running. Changes can then be lost or overwritten; stop Moss first if you can.
     #[arg(long)]

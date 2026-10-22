@@ -1,4 +1,4 @@
-import { api, openEvents, errMsg, type Activity, type AppNotification, type Finding, type HostStatus, type Operation, type Server, type Stream } from './api';
+import { api, openEvents, errMsg, type Activity, type AppNotification, type Finding, type HostStatus, type Operation, type Server, type Stream, type UpdateInfo } from './api';
 import { toast, toastError, ui } from './feedback.svelte';
 
 // ---------- visibility + polling ----------
@@ -112,6 +112,9 @@ export async function markRead(ids?: string[]) {
 /** SSE `resync`: events were dropped, so refetch every list. */
 function resync() { void refreshServers(); void refreshOps(); void refreshNotifications(); feed.rev++; }
 
+/** Latest `update` SSE payload (admins only); the lazily loaded update banner and Settings section watch it. */
+export const sysUpdate = $state<{ info: UpdateInfo | null }>({ info: null });
+
 // ---------- live connection ----------
 let stream: Stream | null = null;
 let retry = 0;
@@ -132,6 +135,7 @@ function connect() {
     server: upsertServer,
     activity: (a) => (feed.latest = a),
     notification: onNotification,
+    update: (u) => (sysUpdate.info = u),
     resync,
   });
 }

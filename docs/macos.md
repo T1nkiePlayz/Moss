@@ -23,6 +23,20 @@ brew services start moss        # data and logs under $(brew --prefix)/var/moss 
 **By hand**: download `moss-<tag>-macos-aarch64.tar.gz` (or `-x86_64`), check it with `shasum -a 256 -c SHA256SUMS.txt`
 and `gh attestation verify`, then copy `moss` somewhere on your `PATH`.
 
+### Update
+
+- **Script or by hand:** `moss update` downloads the latest release, verifies it like the install script (checksum,
+  plus the cosign signature when `cosign` is installed), checks that it starts, and swaps it in atomically. Use
+  `moss update --check` to only compare versions, and `sudo moss update` when the binary is in a root-owned directory such as `/usr/local/bin`.
+- **Homebrew:** `brew upgrade moss`. `moss update` leaves a Homebrew copy alone unless you pass `--force`.
+
+Then restart the controller (`launchctl kickstart -k gui/$(id -u)/io.moss.controller`, or `brew services restart moss`).
+Game servers keep running.
+
+- **From the panel:** **Settings → Updates** installs a newer release and restarts Moss in place when Moss can write
+  its own binary (for example a copy in your home folder run as a LaunchAgent). A root-owned binary or a Homebrew copy
+  shows the command to run instead.
+
 ### Gatekeeper
 
 Files downloaded with `curl` or the install script are not quarantined. A tarball downloaded in a browser is, and the
@@ -42,7 +56,7 @@ MOSS_AUTH=dev moss serve          # no sign-in, loopback only: for trying it out
 moss doctor                       # checks data directory, port, Java and sign-in settings
 ```
 
-For real use, sign-in works out of the box: the sign-in settings are built into Moss, so `moss serve` needs no config file. Open the panel, sign in, and enter the setup token Moss wrote to `<data dir>/setup-token` to become the owner. To pin the owner by e-mail instead, add `MOSS_OWNER_EMAILS=you@example.com` to `.env.local` in the folder you run Moss from (or to `moss.env` in the launchd steps below).
+For real use, sign-in works out of the box: the sign-in settings are built into Moss, so `moss serve` needs no config file. Open the panel, sign in, and enter the setup token Moss wrote to `<data dir>/setup-token` to become the owner. To pin the owner by e-mail instead, add `MOSS_OWNER_EMAILS=you@example.com` to `.env.local` in the folder you run Moss from (or to `moss.env` in the launchd steps below). Data goes to `~/Library/Application Support/Moss/data` unless you pass `--data-dir`; a Moss database already in `./moss-data`, `~/moss/moss-data` or `~/moss-data` (the old default) is used instead.
 
 ### launchd
 

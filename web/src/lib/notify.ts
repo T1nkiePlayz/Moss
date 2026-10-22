@@ -3,7 +3,7 @@ import type { AppNotification, NotificationKind, Severity } from './api';
 
 export const kindLabel: Record<NotificationKind, string> = {
   crash: 'Crash', crash_loop: 'Crash loop', backup_failed: 'Backup failed', disk_low: 'Low disk', operation_failed: 'Operation failed',
-  restart_failed: 'Restart failed', update_available: 'Update available', security: 'Security', webhook_disabled: 'Webhook switched off', player_join: 'Player joined',
+  restart_failed: 'Restart failed', update_available: 'Update available', security: 'Security', webhook_disabled: 'Webhook switched off', player_join: 'Player joined', moss_update: 'Moss update',
 };
 /** Event kinds an admin can subscribe the webhook to, in display order, with the contract's defaults. */
 export const webhookKinds: { kind: NotificationKind; label: string; hint: string }[] = [

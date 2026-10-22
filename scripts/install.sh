@@ -8,6 +8,7 @@
 # Options
 #   --version TAG   install this release (default: the latest published, non-draft release)
 #   --prefix DIR    install to DIR/bin (default /usr/local/bin, using sudo when it is not writable)
+#   --force         reinstall without asking when this release is already installed there
 #   -h, --help      show this help
 # Environment
 #   MOSS_VERSION        same as --version
@@ -20,6 +21,8 @@ set -eu
 
 REPO="${MOSS_REPO:-T1nkiePlayz/Moss}"
 VERSION="${MOSS_VERSION:-}"
+FORCE=""
+PINNED=""
 PREFIX=""
 BASE="${MOSS_RELEASE_BASE:-}"
 API="https://api.github.com/repos/$REPO"
@@ -28,9 +31,10 @@ say() { printf '%s\n' "$*"; }
 die() { printf 'moss-install: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOT'
-Usage: install.sh [--version TAG] [--prefix DIR]
+Usage: install.sh [--version TAG] [--prefix DIR] [--force]
   --version TAG   install this release (default: the latest published release)
   --prefix DIR    install to DIR/bin (default /usr/local/bin, using sudo when it is not writable)
+  --force         reinstall without asking when this release is already installed there
 Environment: MOSS_VERSION, MOSS_REPO, GITHUB_TOKEN (private repo), MOSS_RELEASE_BASE (mirror or test directory),
   MOSS_SKIP_COSIGN=1 (skip the optional cosign signature check).
 EOT
@@ -38,10 +42,11 @@ EOT
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version) [ $# -ge 2 ] || die "--version needs a value"; VERSION="$2"; shift 2 ;;
-    --version=*) VERSION="${1#--version=}"; shift ;;
+    --version) [ $# -ge 2 ] || die "--version needs a value"; VERSION="$2"; PINNED=1; shift 2 ;;
+    --version=*) VERSION="${1#--version=}"; PINNED=1; shift ;;
     --prefix) [ $# -ge 2 ] || die "--prefix needs a value"; PREFIX="$2"; shift 2 ;;
     --prefix=*) PREFIX="${1#--prefix=}"; shift ;;
+    --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -105,6 +110,25 @@ fi
 case "$VERSION" in v*) ;; *) VERSION="v$VERSION" ;; esac
 printf '%s' "$VERSION" | grep -Eq '^v[0-9A-Za-z._+-]+$' || die "invalid version: $VERSION"
 
+if [ -n "$PREFIX" ]; then DEST="$PREFIX/bin"; else DEST="/usr/local/bin"; fi
+
+# --- already installed? -----------------------------------------------------------------------------------------
+if [ -z "$FORCE" ] && [ -x "$DEST/moss" ]; then
+  have="$("$DEST/moss" --version 2>/dev/null | awk '{print $2}')"
+  if [ -n "$have" ] && [ "v${have#v}" = "$VERSION" ]; then
+    if [ -n "${MOSS_VERSION:-}" ] || [ -n "$PINNED" ]; then which="requested"; else which="latest"; fi
+    say "Moss $VERSION (the $which version) is already installed at $DEST/moss."
+    if (: < /dev/tty) 2>/dev/null; then
+      printf 'Do you really want to reinstall it? [y/N] ' > /dev/tty
+      read -r answer < /dev/tty || answer=""
+      case "$answer" in y|Y|yes|YES|Yes) ;; *) say "Nothing changed."; exit 0 ;; esac
+    else
+      say "Nothing changed (pass --force to reinstall)."
+      exit 0
+    fi
+  fi
+fi
+
 NAME="moss-$VERSION-$OS-$ARCH"
 TARBALL="$NAME.tar.gz"
 say "Installing Moss $VERSION for $OS-$ARCH"
@@ -163,7 +187,6 @@ say "Checksum OK ($have)"
 
 # --- install ----------------------------------------------------------------------------------------------------
 tar -xzf "$TMP/$TARBALL" -C "$TMP" "$NAME/moss" || die "the tarball does not contain $NAME/moss"
-if [ -n "$PREFIX" ]; then DEST="$PREFIX/bin"; else DEST="/usr/local/bin"; fi
 SUDO=""
 if ! { mkdir -p "$DEST" 2>/dev/null && [ -w "$DEST" ]; }; then
   [ "$(id -u)" -eq 0 ] && die "cannot write to $DEST"
@@ -178,14 +201,28 @@ say "Installed $DEST/moss"
 # --- next steps -------------------------------------------------------------------------------------------------
 say ""
 say "Next steps"
-say "  Start it (sign-in is built in):           mkdir -p ~/moss && cd ~/moss && $DEST/moss serve"
-say "  Then open http://127.0.0.1:8420, sign in, and enter the setup token from ~/moss/moss-data/setup-token."
+if [ "$OS" = linux ]; then DATA="${XDG_DATA_HOME:-~/.local/share}/moss"; else DATA="~/Library/Application Support/Moss/data"; fi
+for old in "$HOME/moss/moss-data" "$HOME/moss-data"; do
+  # data left by older versions (which kept it next to wherever Moss was started) is still picked up
+  if [ -f "$old/moss.sqlite" ]; then DATA="$old"; say "  Existing data found in $old: Moss keeps using it, from whatever folder you start it."; break; fi
+done
+say "  Start it (sign-in is built in):           $DEST/moss serve      (data goes to $DATA)"
+say "  Then open http://127.0.0.1:8420 and sign in. The first time, Moss asks for its one-time setup token, which proves"
+say "  you own this machine: \`moss serve\` writes it to $DATA/setup-token when it starts and prints that path."
 say "  Try it without sign-in (loopback only):   MOSS_AUTH=dev $DEST/moss serve"
 say "  Check the environment:                    $DEST/moss doctor"
+say "  Update later:                             $DEST/moss update   (with sudo if $DEST needs it)"
 if [ "$OS" = linux ]; then
   say "  Run as a service: the tarball ships moss.service, .env and moss.env.example (see the README, Linux: production-style install)."
 else
   say "  Run at login: the tarball ships io.moss.controller.plist; see docs/macos.md (launchd), or use Homebrew's moss.rb."
   say "  If macOS blocks the binary: xattr -d com.apple.quarantine $DEST/moss"
 fi
-case ":$PATH:" in *":$DEST:"*) ;; *) say "  Note: $DEST is not on your PATH." ;; esac
+ONPATH=1
+case ":$PATH:" in *":$DEST:"*) ;; *) ONPATH=""; say "  Note: $DEST is not on your PATH." ;; esac
+first="$(command -v moss 2>/dev/null || true)"
+if [ -n "$first" ] && [ "$first" != "$DEST/moss" ]; then
+  say ""
+  say "Warning: \`moss\` runs $first ($("$first" --version 2>/dev/null || echo "unknown version")), $( [ -n "$ONPATH" ] && echo "which comes before $DEST on your PATH" || echo "not the copy just installed")."
+  say "  Remove the old copy (rm \"$first\") or run $DEST/moss directly."
+fi

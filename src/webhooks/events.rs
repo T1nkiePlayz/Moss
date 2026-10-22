@@ -118,7 +118,7 @@ pub fn spawn(st: &St) {
                     };
                     d.on_op(&e.data, |_| name.clone())
                 }
-                "notification" if e.data["kind"] == "update_available" => vec![Ev { kind: "update.available", server: None, data: json!({"title": e.data["title"], "body": e.data["body"]}) }],
+                "notification" if e.data["kind"] == "update_available" || e.data["kind"] == "moss_update" => vec![Ev { kind: "update.available", server: None, data: json!({"title": e.data["title"], "body": e.data["body"]}) }],
                 _ => vec![],
             };
             for ev in &mut out { if ev.kind == "backup.completed" { enrich_backup(&st1, ev).await; } }

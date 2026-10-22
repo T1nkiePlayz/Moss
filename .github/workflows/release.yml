@@ -113,6 +113,7 @@ jobs:
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/moss" LICENSE README.md "dist/$name/"
           cp "${{ matrix.service }}" packaging/moss.env.example .env "dist/$name/"
+          if [ "${{ matrix.service }}" = packaging/moss.service ]; then cp packaging/moss-update.path packaging/moss-update.service "dist/$name/"; fi
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           ls -l dist
 

@@ -406,7 +406,8 @@ async function ticket(): Promise<string> {
 
 export interface Stream { close(): void }
 
-export interface EventHandlers { onOpen(): void; onError(): void; op(o: Operation): void; server(s: Server): void; activity(a: Activity): void; notification?(n: AppNotification): void; resync?(): void }
+export interface EventHandlers { onOpen(): void; onError(): void; op(o: Operation): void; server(s: Server): void; activity(a: Activity): void; notification?(n: AppNotification): void; update?(u: UpdateInfo): void; resync?(): void }
+export interface UpdateInfo { current: string; latest: string | null; available: boolean; checked_at: string | null; method: 'self' | 'helper' | 'manual'; reason: string | null; command: string | null; release_url: string | null }
 export function openEvents(h: EventHandlers): Stream {
   if (mock) return mock.openEvents(h);
   let es: EventSource | null = null;
@@ -425,6 +426,7 @@ export function openEvents(h: EventHandlers): Stream {
       on('server', h.server);
       on('activity', h.activity);
       on('notification', (n: AppNotification) => h.notification?.(n));
+      on('update', (u: UpdateInfo) => h.update?.(u));
       es.addEventListener('resync', () => h.resync?.());
     })
     .catch(() => !closed && h.onError());
@@ -490,7 +492,7 @@ export interface Schedule { tz?: string }
 export type AuditMode = 'redacted' | 'all' | 'off';
 export interface Settings { notify_webhook_url?: string; notify_events?: string[]; audit_console_commands?: AuditMode; access_message?: string }
 
-export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security' | 'webhook_disabled' | 'player_join';
+export type NotificationKind = 'crash' | 'crash_loop' | 'backup_failed' | 'disk_low' | 'operation_failed' | 'restart_failed' | 'update_available' | 'security' | 'webhook_disabled' | 'player_join' | 'moss_update';
 export type Severity = 'info' | 'warn' | 'critical';
 export interface AppNotification { id: string; time: string; kind: NotificationKind; severity: Severity; title: string; body: string; server_id: string | null; read: boolean }
 export interface NotificationList { items: AppNotification[]; unread: number }

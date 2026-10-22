@@ -8,8 +8,9 @@ pub struct Config {
     pub bind: String,
     #[arg(long, env = "MOSS_PORT", default_value_t = 8420)]
     pub port: u16,
-    /// Data directory (database, servers, backups, cache).
-    #[arg(long, env = "MOSS_DATA_DIR", default_value = "./moss-data")]
+    /// Data directory (database, servers, backups, cache). Default: an existing ./moss-data, ~/moss/moss-data or
+    /// ~/moss-data that holds a Moss database (the old default), otherwise ~/.local/share/moss (Linux, or $XDG_DATA_HOME/moss) or ~/Library/Application Support/Moss/data (macOS, as in the launchd setup).
+    #[arg(long, env = "MOSS_DATA_DIR", default_value_os_t = default_data_dir())]
     pub data_dir: PathBuf,
     /// `supabase` (production) or `dev` (no login, loopback only).
     #[arg(long, env = "MOSS_AUTH", default_value = "supabase")]
@@ -64,6 +65,37 @@ pub struct Config {
     /// Container engine CLI for servers set to container isolation: a name (`docker`, `podman`) or a path. Empty = detect (rootless Podman, then Docker, then Podman).
     #[arg(long, env = "MOSS_CONTAINER_ENGINE", default_value = "")]
     pub container_engine: String,
+}
+
+/// The old default, relative to the folder Moss was started from.
+pub const LEGACY_DATA_DIR: &str = "./moss-data";
+
+/// Where Moss keeps its data when neither --data-dir nor MOSS_DATA_DIR is set: one fixed per-user folder, so starting
+/// Moss from another folder never starts a second, empty instance. Data left by the old default (./moss-data, which
+/// the docs told people to create from ~/moss) wins, so existing installs keep their data.
+pub fn default_data_dir() -> PathBuf {
+    let home = std::env::var_os("HOME");
+    legacy_data_dirs(home.clone()).into_iter().find(|d| d.join("moss.sqlite").is_file())
+        .or_else(|| user_data_dir(home, std::env::var_os("XDG_DATA_HOME"), cfg!(target_os = "macos")))
+        .unwrap_or_else(|| PathBuf::from(LEGACY_DATA_DIR))
+}
+
+/// Places the old cwd-relative default put data, most specific first: the current folder, then ~/moss (where the old
+/// quick start ran Moss), then ~ itself.
+pub fn legacy_data_dirs(home: Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    let mut v = vec![PathBuf::from(LEGACY_DATA_DIR)];
+    if let Some(h) = home.filter(|h| !h.is_empty()).map(PathBuf::from).filter(|h| h.is_absolute()) {
+        v.push(h.join("moss/moss-data"));
+        v.push(h.join("moss-data"));
+    }
+    v
+}
+
+fn user_data_dir(home: Option<std::ffi::OsString>, xdg: Option<std::ffi::OsString>, macos: bool) -> Option<PathBuf> {
+    let home = home.filter(|h| !h.is_empty()).map(PathBuf::from).filter(|h| h.is_absolute());
+    if macos { return home.map(|h| h.join("Library/Application Support/Moss/data")); }
+    let xdg = xdg.map(PathBuf::from).filter(|d| d.is_absolute()); // the XDG spec says to ignore relative paths
+    xdg.or_else(|| home.map(|h| h.join(".local/share"))).map(|d| d.join("moss"))
 }
 
 impl Config {
@@ -127,6 +159,18 @@ pub fn for_test(dir: &std::path::Path) -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_default_data_dir_does_not_depend_on_the_working_folder() {
+        let d = |h: Option<&str>, x: Option<&str>, mac| user_data_dir(h.map(Into::into), x.map(Into::into), mac);
+        assert_eq!(d(Some("/home/a"), None, false), Some(PathBuf::from("/home/a/.local/share/moss")));
+        assert_eq!(d(Some("/home/a"), Some("/data/x"), false), Some(PathBuf::from("/data/x/moss")));
+        assert_eq!(d(Some("/home/a"), Some("rel"), false), Some(PathBuf::from("/home/a/.local/share/moss")), "a relative XDG_DATA_HOME is ignored");
+        assert_eq!(d(Some("/Users/a"), Some("/x"), true), Some(PathBuf::from("/Users/a/Library/Application Support/Moss/data")));
+        assert_eq!(d(None, None, false), None);
+        assert_eq!(d(Some(""), None, false), None);
+        assert_eq!(legacy_data_dirs(Some("/home/a".into())), [PathBuf::from("./moss-data"), "/home/a/moss/moss-data".into(), "/home/a/moss-data".into()]);
+        assert_eq!(legacy_data_dirs(None), [PathBuf::from("./moss-data")]);
+    }
     #[test]
     fn port_ranges_are_validated() {
         assert_eq!(parse_port_range("30000-30999"), Some((30000, 30999)));

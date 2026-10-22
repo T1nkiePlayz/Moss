@@ -29,6 +29,16 @@
     return () => { stops.forEach((s) => s()); stopLive(); };
   });
 
+  // Admins get the update banner, fetched once the shell has painted so it never competes with first load.
+  let idle = $state(false);
+  $effect(() => {
+    if (!isAdmin()) return;
+    const go = () => (idle = true);
+    if ('requestIdleCallback' in window) { const h = requestIdleCallback(go, { timeout: 4000 }); return () => cancelIdleCallback(h); }
+    const h = setTimeout(go, 1500); return () => clearTimeout(h);
+  });
+  const loadBanner = () => import('./components/UpdateBanner.svelte');
+
   $effect(() => {
     const r = router.route;
     const base = r.name === 'server' ? serverById(r.params.id)?.name ?? 'Server' : r.name === 'overview' ? 'Overview' : r.name === 'new' ? 'New server' : r.name[0].toUpperCase() + r.name.slice(1);
@@ -78,6 +88,7 @@
     </nav>
   </div>
 <OpsDrawer />
+{#if idle && isAdmin()}<Lazy load={loadBanner} />{/if}
 {#if ui.palette}{#await import('./components/Palette.svelte') then m}{@const P = m.default}<P />{/await}{/if}
 
 <style>

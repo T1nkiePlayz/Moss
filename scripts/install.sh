@@ -178,6 +178,8 @@ say "Installed $DEST/moss"
 # --- next steps -------------------------------------------------------------------------------------------------
 say ""
 say "Next steps"
+say "  Start it (sign-in is built in):           mkdir -p ~/moss && cd ~/moss && $DEST/moss serve"
+say "  Then open http://127.0.0.1:8420, sign in, and enter the setup token from ~/moss/moss-data/setup-token."
 say "  Try it without sign-in (loopback only):   MOSS_AUTH=dev $DEST/moss serve"
 say "  Check the environment:                    $DEST/moss doctor"
 if [ "$OS" = linux ]; then

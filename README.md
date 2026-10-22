@@ -135,6 +135,14 @@ Or use the installer, which verifies the checksum (and the cosign signature when
 sh install.sh --prefix "$HOME/.local"
 ```
 
+Then start it and open the panel in your browser. Sign-in is built in, so no config file is needed:
+
+```bash
+mkdir -p ~/moss && cd ~/moss && moss serve   # http://127.0.0.1:8420 ; data goes to ./moss-data (or set MOSS_DATA_DIR)
+```
+
+Sign in, then enter the one-time setup token from `moss-data/setup-token` to become the owner. To keep Moss running in the background, use the service below.
+
 ### Try it without any account (development mode)
 
 ```bash
@@ -149,7 +157,7 @@ Open the panel, create a server, accept the EULA, and (if you have no Java insta
 sudo useradd --system --home /var/lib/moss --create-home --shell /usr/sbin/nologin moss
 sudo install -m 0755 moss /usr/local/bin/moss
 sudo install -d -m 0750 -o root -g moss /etc/moss
-sudo install -m 0640 -o root -g moss .env /etc/moss/moss.env   # sign-in settings; add options from moss.env.example if you like
+sudo install -m 0640 -o root -g moss .env /etc/moss/moss.env   # settings file for the unit; sign-in is built in, add options from moss.env.example if you like
 sudo install -m 0644 moss.service /etc/systemd/system/moss.service
 sudo systemctl enable --now moss
 ```
@@ -186,7 +194,7 @@ cargo build --release                      # → target/release/moss
 
 ## Sign-in
 
-Moss uses [Supabase Auth](https://supabase.com/docs/guides/auth) only to prove who someone is; Moss itself decides what they may do. Sign-in works out of the box: releases include the public sign-in settings in `.env`. Open the panel, create an account or sign in with a provider, and enter the one-time setup token Moss wrote to `<data dir>/setup-token` to become the owner. Anyone else needs an invite from the owner, even though the sign-in service itself is open.
+Moss uses [Supabase Auth](https://supabase.com/docs/guides/auth) only to prove who someone is; Moss itself decides what they may do. Sign-in works out of the box: the public sign-in settings (the project's Supabase URL and anon key, from the repository's `.env`) are built into Moss, so an installed binary needs no config file. Open the panel, create an account or sign in with a provider, and enter the one-time setup token Moss wrote to `<data dir>/setup-token` to become the owner. Anyone else needs an invite from the owner, even though the sign-in service itself is open.
 
 - Roles: `owner`, `admin`, `user`, plus per-server grants (`manager`, `operator`, `viewer`).
 - Pin the owner by e-mail with `MOSS_OWNER_EMAILS`, require two-factor sign-in with `MOSS_REQUIRE_MFA`, and create personal API tokens in **Settings**.
@@ -202,7 +210,7 @@ Flags and environment variables (flags win):
 | `MOSS_BIND` / `MOSS_PORT` | `127.0.0.1` / `8420` | Listener. Keep loopback unless a TLS proxy fronts it. |
 | `MOSS_DATA_DIR` | `./moss-data` | Database, servers, backups, managed Java, cache. |
 | `MOSS_AUTH` | `supabase` | `supabase` or `dev` (no login, loopback only). |
-| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | shipped `.env` | Only to use your own sign-in project instead of the default. |
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | built in | Only to use your own sign-in project instead of the default. Setting either one (flag, environment or `.env`) turns the built-in pair off, so set both. |
 | `SUPABASE_JWT_SECRET` | – | Only for legacy HS256-signed projects. |
 | `MOSS_OWNER_EMAILS` | – | Comma-separated emails that become owner on first verified sign-in. |
 | `MOSS_REQUIRE_VERIFIED_EMAIL` | `true` | Require a verified email before matching owner/invite. |

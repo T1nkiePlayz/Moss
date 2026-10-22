@@ -31,6 +31,19 @@ pub fn load() {
     for (k, v) in loaded { unsafe { std::env::set_var(k, v); } }
 }
 
+/// The repository's `.env` at build time (see build.rs): the sign-in settings releases ship with.
+pub const SHIPPED: &str = include_str!(concat!(env!("OUT_DIR"), "/shipped.env"));
+
+/// The lowest layer, under flags, the environment and both files: the shipped Supabase URL and anon key, so an
+/// installed binary signs people in with no config file. Used only when neither the URL nor the key was given
+/// (an empty value counts as not given), so a URL or key of your own is never mixed with the shipped one.
+/// Nothing else is taken from the shipped file.
+pub fn fill_shipped_signin(url: &mut String, key: &mut String, shipped: &str) {
+    if !url.is_empty() || !key.is_empty() { return; }
+    let kv: HashMap<String, String> = parse(shipped, &HashSet::new()).into_iter().collect();
+    if let (Some(u), Some(k)) = (kv.get("SUPABASE_URL"), kv.get("SUPABASE_ANON_KEY")) { (*url, *key) = (u.clone(), k.clone()); }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,5 +52,26 @@ mod tests {
         let preset: HashSet<String> = ["SET".to_string()].into();
         let t = "# c\nA=1\nexport B = \"two\"\nC='3'\nEMPTY=\nSET=x\nnoequals\n=v\n";
         assert_eq!(parse(t, &preset), vec![("A".into(), "1".into()), ("B".into(), "two".into()), ("C".into(), "3".into())]);
+    }
+
+    #[test]
+    fn shipped_signin_fills_only_an_unconfigured_install() {
+        let shipped = "SUPABASE_URL=https://shipped.supabase.co\nSUPABASE_ANON_KEY=shipped-key\nMOSS_PORT=1\n";
+        let fill = |u: &str, k: &str, shipped: &str| { let (mut u, mut k) = (u.to_string(), k.to_string()); fill_shipped_signin(&mut u, &mut k, shipped); (u, k) };
+        let pair = |u: &str, k: &str| (u.to_string(), k.to_string());
+        // nothing configured (or only empty values): both shipped values
+        assert_eq!(fill("", "", shipped), pair("https://shipped.supabase.co", "shipped-key"));
+        // a URL or a key of your own, from a flag, the environment or a file, is never mixed with a shipped one
+        assert_eq!(fill("https://mine.supabase.co", "", shipped), pair("https://mine.supabase.co", ""));
+        assert_eq!(fill("", "my-key", shipped), pair("", "my-key"));
+        // a build without a complete shipped pair adds nothing
+        assert_eq!(fill("", "", ""), pair("", ""));
+        assert_eq!(fill("", "", "SUPABASE_URL=https://shipped.supabase.co\n"), pair("", ""));
+    }
+
+    #[test]
+    fn the_build_ships_the_repository_sign_in_settings() {
+        let repo = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/.env")).unwrap_or_default();
+        assert_eq!(SHIPPED, repo, "build.rs copies .env verbatim");
     }
 }

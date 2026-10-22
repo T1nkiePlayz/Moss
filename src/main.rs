@@ -21,14 +21,20 @@ enum Cmd {
     SimServer { #[arg(long, default_value_t = 25565)] port: u16 },
 }
 
+/// Flags, the environment and the .env files come first; the built-in sign-in settings fill in only what none of them set.
+fn shipped_signin(mut cfg: config::Config) -> config::Config {
+    dotenv::fill_shipped_signin(&mut cfg.supabase_url, &mut cfg.supabase_anon_key, dotenv::SHIPPED);
+    cfg
+}
+
 fn main() -> anyhow::Result<()> {
     dotenv::load();
     let cli = Cli::parse();
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "moss=info,tower_http=warn".into())).with_target(false).init();
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     match cli.cmd {
-        Cmd::Serve(cfg) => rt.block_on(serve::serve(cfg)),
-        Cmd::Doctor(cfg) => rt.block_on(doctor::doctor(cfg)),
+        Cmd::Serve(cfg) => rt.block_on(serve::serve(shipped_signin(cfg))),
+        Cmd::Doctor(cfg) => rt.block_on(doctor::doctor(shipped_signin(cfg))),
         Cmd::Recover(a) => cli::recover::run(a),
         Cmd::SimServer { port } => rt.block_on(sim::run(port)),
     }

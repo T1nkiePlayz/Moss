@@ -3,7 +3,7 @@
   import OpCard from '../components/OpCard.svelte';
   import States from '../components/States.svelte';
   import { api, ApiError, errMsg, type ImportDetection, type Runtime } from '../lib/api';
-  import { ops, trackOp } from '../lib/stores.svelte';
+  import { maxMemoryMb, ops, trackOp } from '../lib/stores.svelte';
   import { bytes } from '../lib/format';
   import { navigate } from '../lib/router.svelte';
   import { serverHref } from '../lib/route';
@@ -15,9 +15,12 @@
   let det = $state<ImportDetection | null>(null);
   let busy = $state(false);
   let err = $state('');
+  let drag = $state(false);
+  const maxMem = $derived(maxMemoryMb());
+  function pickFile(x: File | null | undefined) { if (!x) return; file = x; det = null; }
   let fieldErr = $state<Record<string, string>>({});
   let runtimes = $state<Runtime[]>([]);
-  let f = $state({ name: '', runtime: '', game_version: '', memory_mb: 2048, port: null as number | null, eula: false });
+  let f = $state({ name: '', runtime: '', game_version: '', memory_mb: 2048, port: null as number | null, eula: null as 'accept' | 'skip' | null });
   let created = $state<{ opId: string; serverId: string } | null>(null);
   const admin = isAdmin();
   $effect(() => { api.runtimes().then((r) => (runtimes = r.filter((x) => x.installable && x.id !== 'custom')), () => (runtimes = [])); });
@@ -27,18 +30,19 @@
     try {
       const d = mode === 'path' ? await api.importInspectPath(path.trim()) : await api.importInspectFile(file!);
       det = d;
-      f = { name: d.name.slice(0, 48), runtime: d.runtime ?? '', game_version: d.game_version ?? '', memory_mb: Math.max(1024, f.memory_mb), port: d.port, eula: false };
+      f = { name: d.name.slice(0, 48), runtime: d.runtime ?? '', game_version: d.game_version ?? '', memory_mb: Math.min(maxMemoryMb(), Math.max(1024, f.memory_mb)), port: d.port, eula: null };
     } catch (e) { err = errMsg(e); }
     busy = false;
   }
+  const needsEula = $derived(!!f.runtime && f.runtime !== 'velocity');
   const nameOk = $derived(f.name.trim().length >= 1 && f.name.length <= 48);
-  const ready = $derived(!!det && nameOk && !!f.runtime && !!f.game_version.trim() && f.eula && (f.port == null || (f.port >= 1024 && f.port <= 65535)));
+  const ready = $derived(!!det && nameOk && !!f.runtime && !!f.game_version.trim() && (!needsEula || !!f.eula) && (f.port == null || (f.port >= 1024 && f.port <= 65535)));
   async function start() {
     if (!det) return;
     busy = true; err = ''; fieldErr = {};
     try {
       const r = await api.importServer({
-        name: f.name.trim(), runtime: f.runtime, game_version: f.game_version.trim(), memory_mb: f.memory_mb, accept_eula: f.eula,
+        name: f.name.trim(), runtime: f.runtime, game_version: f.game_version.trim(), memory_mb: f.memory_mb, accept_eula: needsEula && f.eula === 'accept',
         ...(f.port ? { port: f.port } : {}),
         ...(mode === 'path' ? { path: path.trim() } : { token: det.token }),
       });
@@ -70,7 +74,16 @@
     </div>
     {#if mode === 'upload'}
       <div class="field"><label for="imp-file">Server archive</label>
-        <input id="imp-file" class="input" type="file" accept=".zip,.tar.zst,.zst" onchange={(e) => { file = e.currentTarget.files?.[0] ?? null; det = null; }} />
+        <div class="drop" class:drag role="presentation"
+          ondragover={(e) => { e.preventDefault(); drag = true; }} ondragleave={() => (drag = false)}
+          ondrop={(e) => { e.preventDefault(); drag = false; pickFile(e.dataTransfer?.files?.[0]); }}>
+          <input id="imp-file" class="sr" type="file" accept=".zip,.tar.zst,.zst" onchange={(e) => pickFile(e.currentTarget.files?.[0])} />
+          <label for="imp-file" class="dz">
+            <Icon name="upload" size={26} />
+            {#if file}<b class="fname ellipsis">{file.name}</b><span class="muted sm tnum">{bytes(file.size)} · choose a different file</span>
+            {:else}<b>Choose a .zip or .tar.zst</b><span class="muted sm">or drop it here</span>{/if}
+          </label>
+        </div>
         <span class="hint">A .zip or .tar.zst of the server folder, up to 512 MiB.</span></div>
     {:else}
       <div class="field"><label for="imp-path">Folder path</label>
@@ -98,10 +111,17 @@
         <div class="field"><label for="i-rt">Runtime</label>
           <select id="i-rt" class="select" bind:value={f.runtime}><option value="">Choose…</option>{#each runtimes as r (r.id)}<option value={r.id}>{r.name}</option>{/each}</select>{#if fieldErr.runtime}<span class="err">{fieldErr.runtime}</span>{/if}</div>
         <div class="field"><label for="i-ver">Minecraft version</label><input id="i-ver" class="input" bind:value={f.game_version} placeholder="1.21.4" />{#if fieldErr.game_version}<span class="err">{fieldErr.game_version}</span>{/if}</div>
-        <div class="field"><label for="i-mem">Memory (MB)</label><input id="i-mem" class="input" type="number" min="512" step="256" bind:value={f.memory_mb} /></div>
+        <div class="field"><label for="i-mem">Memory (MB)</label><input id="i-mem" class="input" type="number" min="512" max={maxMem} step="256" bind:value={f.memory_mb} /></div>
         <div class="field"><label for="i-port">Port</label><input id="i-port" class="input" type="number" min="1024" max="65535" placeholder="Auto-assign" bind:value={f.port} />{#if fieldErr.port}<span class="err">{fieldErr.port}</span>{/if}</div>
       </div>
-      <label class="row g6 eula"><input type="checkbox" class="check" bind:checked={f.eula} /><span class="sm">I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">Minecraft EULA</a>. This acceptance is recorded and audited.</span></label>
+      {#if needsEula}
+        <fieldset class="eulas">
+          <legend class="sm">Minecraft EULA</legend>
+          <label class="row g6 eula"><input type="radio" name="eula" class="check" value="accept" bind:group={f.eula} /><span class="sm">Accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">Minecraft EULA</a>. This acceptance is recorded and audited.</span></label>
+          <label class="row g6 eula"><input type="radio" name="eula" class="check" value="skip" bind:group={f.eula} /><span class="sm">Skip for now — I'll accept it later (set <code>eula=true</code> in eula.txt, or accept from the server page). The server won't start until then.</span></label>
+          {#if fieldErr.accept_eula}<span class="err">{fieldErr.accept_eula}</span>{/if}
+        </fieldset>
+      {/if}
       {#if err}<div class="banner danger" role="alert"><Icon name="alert" size={16} /><span>{err}</span></div>{/if}
       <div class="row end"><button class="btn primary lg" disabled={busy || !ready} onclick={start}>{busy ? 'Importing…' : 'Import server'}</button></div>
     </section>
@@ -109,10 +129,18 @@
 {/if}
 
 <style>
+  .drop { display: block; }
+  .dz { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; min-height: 128px; padding: 20px 16px; border: 2px dashed var(--line); border-radius: var(--r); background: var(--s2); color: var(--text); cursor: pointer; transition: border-color .15s, background .15s; }
+  .dz:hover, .drag .dz { border-color: var(--a1); background: var(--s3); }
+  .drop:focus-within .dz { outline: 2px solid var(--a1); outline-offset: 2px; }
+  .fname { max-width: 100%; }
+  @media (prefers-reduced-motion: reduce) { .dz { transition: none; } }
   .found { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 20px; margin: 0; }
   .found dt { font-size: var(--fs-xs); color: var(--muted); }
   .found dd { margin: 2px 0 0; font-weight: 550; }
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+  .eulas { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .eulas legend { padding: 0 0 6px; font-weight: 600; }
   .eula a { text-decoration: underline; }
   .eula { align-items: flex-start; padding: 12px; background: var(--s2); border-radius: var(--r-sm); border: 1px solid var(--line); }
 </style>

@@ -33,7 +33,7 @@ Server object:
  capabilities:string[] /* console,files,content,backups,players,properties,config,schedules */}
 ```
 - `GET /servers` → `Server[]`
-- `POST /servers {name,runtime,game_version,loader_version?,memory_mb,port?,accept_eula:boolean,flags_profile?,autostart?,custom?:{command:string[]}}` → 202 `{server,operation}`. `accept_eula` must be true for Minecraft runtimes (recorded + audited).
+- `POST /servers {name,runtime,game_version,loader_version?,memory_mb,port?,accept_eula:boolean,flags_profile?,autostart?,custom?:{command:string[]}}` → 202 `{server,operation}`. `accept_eula: true` records Minecraft EULA acceptance (audited) for runtimes that need it (Minecraft Java servers except the Velocity proxy, and Bedrock); without it the server is created but will not start until the EULA is accepted, either with `PATCH /servers/{id} {accept_eula:true}` or, for Java servers, by setting `eula=true` in the server's `eula.txt` (recorded at the next start as accepted via `eula.txt`). `memory_mb` may not exceed this machine's total memory (here and in `PATCH`, imports and blueprints).
 - `GET /servers/{id}` · `PATCH /servers/{id} {name?,memory_mb?,port?,flags_profile?,autostart?,restart_policy?,tags?,notes?,game_version?}` · `DELETE /servers/{id}?delete_data=false`
 - `POST /servers/{id}/actions/{start|stop|restart|kill}` → `{server}` (start/stop are asynchronous; watch `state`)
 - `POST /servers/{id}/command {command}` → 204

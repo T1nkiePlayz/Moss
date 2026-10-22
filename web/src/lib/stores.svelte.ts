@@ -140,6 +140,8 @@ export function stopLive() {
 }
 
 // ---------- host status & global health ----------
+/** Largest memory a server may be given: the host's total memory rounded down to 256 MB (no cap until the host is known). */
+export const maxMemoryMb = () => { const t = host.status?.host.mem_total; return t ? Math.max(256, Math.floor(t / 1048576 / 256) * 256) : 262144; };
 export const host = $state<{ status: HostStatus | null; cpu: number[]; mem: number[]; error: string }>({ status: null, cpu: [], mem: [], error: '' });
 export async function refreshHost() {
   try {

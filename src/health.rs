@@ -43,7 +43,7 @@ pub async fn for_server(st: &St, s: &Srv, all: &[Srv]) -> Vec<Value> {
     let mut f = vec![];
     let (state, detail) = server::state_of(s, st);
     if eula_missing(s) {
-        f.push(finding(format!("{}:eula", s.id), "critical", Some(&s.id), "EULA not accepted", "This server cannot start until the Minecraft EULA is accepted.".into(), vec!["eula_at is empty".into()], Some(json!({"label": "Accept EULA", "kind": "accept_eula"}))));
+        f.push(finding(format!("{}:eula", s.id), "critical", Some(&s.id), "EULA not accepted", "This server cannot start until the Minecraft EULA is accepted. Accept it here, or set eula=true in the server's eula.txt (Minecraft Java only).".into(), vec!["eula_at is empty".into()], Some(json!({"label": "Accept EULA", "kind": "accept_eula"}))));
     }
     if s.installed && s.is_mc() && crate::java::find_async(st, s.java_major as u32).await.is_none() {
         f.push(finding(format!("{}:java", s.id), "critical", Some(&s.id), &format!("Java {} is missing", s.java_major), "Moss can download a verified Temurin runtime for you.".into(), vec![format!("required major: {}", s.java_major)], Some(json!({"label": "Install Java", "kind": "install_java", "major": s.java_major}))));

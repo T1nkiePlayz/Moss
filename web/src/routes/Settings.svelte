@@ -4,7 +4,7 @@
   import Lazy from '../components/Lazy.svelte';
   import { api, ApiError, errMsg, type JavaInstall, type Settings as S } from '../lib/api';
 import { apiOps } from '../lib/api-ops';
-  import { confirmDialog, host, prefs, resetA11y, setPref, toast, toastError, trackOp, type Prefs } from '../lib/stores.svelte';
+  import { confirmDialog, host, maxMemoryMb, prefs, resetA11y, setPref, toast, toastError, trackOp, type Prefs } from '../lib/stores.svelte';
   import { A11Y_DEFAULTS, TEXT_SIZES } from '../lib/a11y';
   import { can, isAdmin } from '../lib/auth.svelte';
   import { duration } from '../lib/format';
@@ -126,7 +126,7 @@ import { apiOps } from '../lib/api-ops';
     {:else if !st}<States kind="loading" rows={2} />
     {:else}
       <form class="grid cols-2" onsubmit={save}>
-        <div class="field"><label for="dm">Default memory (MB)</label><input id="dm" class="input" type="number" min="512" step="256" bind:value={st.default_memory_mb} readonly={!canAdmin} /></div>
+        <div class="field"><label for="dm">Default memory (MB)</label><input id="dm" class="input" type="number" min="512" max={Math.max(maxMemoryMb(), st.default_memory_mb)} step="256" bind:value={st.default_memory_mb} readonly={!canAdmin} /></div>
         <div class="field"><label for="bk">Backups to keep</label><input id="bk" class="input" type="number" min="1" bind:value={st.backup_keep} readonly={!canAdmin} /></div>
         <div class="field"><label for="mc">Modrinth contact</label><input id="mc" class="input" bind:value={st.modrinth_contact} readonly={!canAdmin} /><span class="hint">Sent in the User-Agent so Modrinth can reach you.</span></div>
         <div class="field"><label for="pb">Public base URL</label><input id="pb" class="input" bind:value={st.public_base_url} readonly={!canAdmin} /></div>

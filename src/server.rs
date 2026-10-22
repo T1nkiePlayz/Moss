@@ -68,7 +68,7 @@ impl Srv {
     pub fn game(&self) -> Option<&'static crate::games::Game> { crate::games::get(&self.runtime) }
     pub fn is_game(&self) -> bool { self.game().is_some() }
     /// The Minecraft EULA must be accepted (Java servers and Bedrock).
-    pub fn needs_eula(&self) -> bool { self.is_mc() || self.game().is_some_and(|g| g.needs_eula) }
+    pub fn needs_eula(&self) -> bool { (self.is_mc() && !self.is_proxy()) || self.game().is_some_and(|g| g.needs_eula) }
     pub fn is_proxy(&self) -> bool { self.runtime == "velocity" }
     pub fn content_kind(&self) -> &'static str {
         match self.runtime.as_str() {

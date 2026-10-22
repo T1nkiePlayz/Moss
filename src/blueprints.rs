@@ -34,6 +34,7 @@ pub fn sanitize(v: &Value) -> ApiResult<Value> {
     let lv = match o.get("loader_version") { None | Some(Value::Null) => Value::Null, Some(Value::String(s)) if plain(s, 40) => json!(s), _ => return Err(bad("loader_version", "invalid loader version")) };
     let mem = o.get("memory_mb").and_then(Value::as_i64).unwrap_or(2048);
     if !(256..=262144).contains(&mem) { return Err(bad("memory_mb", "memory out of range")); }
+    if let Some(msg) = crate::platform::memory_over(mem, crate::platform::host_memory_mb()) { return Err(bad("memory_mb", &msg)); }
     let flags = o.get("flags_profile").and_then(Value::as_str).filter(|f| matches!(*f, "balanced" | "minimal")).unwrap_or("balanced");
     let mut props = Map::new();
     if let Some(p) = o.get("properties") {

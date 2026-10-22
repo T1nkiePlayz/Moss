@@ -5,7 +5,7 @@
   import Lazy from '../components/Lazy.svelte';
   import BlueprintStart from '../components/BlueprintStart.svelte';
   import { api, ApiError, errMsg, type Runtime, type Versions, type JavaInstall, type ModpackInspect } from '../lib/api';
-  import { host, ops, trackOp, toastError } from '../lib/stores.svelte';
+  import { host, maxMemoryMb, ops, trackOp, toastError } from '../lib/stores.svelte';
   import { bytes } from '../lib/format';
   import { runtimeIcon } from '../lib/runtime-icons';
   import { navigate } from '../lib/router.svelte';
@@ -29,7 +29,7 @@
   let memory = $state(2048);
   let port = $state<number | null>(null);
   let command = $state('java -jar server.jar nogui');
-  let eula = $state(false);
+  let eulaChoice = $state<'accept' | 'skip' | null>(null);
   let java = $state<JavaInstall[] | null>(null);
   let busy = $state(false);
   let created = $state<{ opId: string; serverId: string } | null>(null);
@@ -65,18 +65,20 @@
   const loaders = $derived(versions?.loader_versions?.[version] ?? []);
   $effect(() => { const l = loaders; if (!fromPack) loaderVer = l.find((x) => x.recommended)?.id ?? l[0]?.id ?? ''; });
 
-  function startPack() { fromPack = true; pack = null; packReady = false; packErr = ''; runtime = null; versions = null; version = ''; step = 2; }
+  function clearErr() { fieldErr = {}; formErr = ''; }
+  function startPack() { clearErr(); fromPack = true; pack = null; packReady = false; packErr = ''; runtime = null; versions = null; version = ''; step = 2; }
   function onPack(m: ModpackInspect | null) {
-    pack = m; packErr = '';
+    pack = m; packErr = ''; clearErr();
     if (!m) return;
     const r = usableRuntimes.find((x) => x.id === m.loader.id);
     if (!r || !r.installable) { packErr = `This pack needs ${m.loader.id}, which Moss cannot install yet.`; return; }
     runtime = r; version = m.game_version; loaderVer = m.loader.version ?? '';
-    name = m.name.slice(0, 48); memory = Math.max(memory, 4096);
+    name = m.name.slice(0, 48); memory = Math.min(maxMem, Math.max(memory, 4096));
   }
 
   async function pick(r: Runtime) {
     if (!r.installable) return;
+    clearErr(); eulaChoice = null;
     fromPack = false; pack = null; packReady = false;
     runtime = r;
     versions = null; vErr = ''; version = '';
@@ -84,14 +86,15 @@
       api.versions(r.id).then((v) => { versions = v; version = v.recommended; }).catch((e) => (vErr = errMsg(e)));
     }
     if (!name) name = r.name === 'Custom command' ? 'Custom server' : `My ${r.name} server`;
-    memory = r.category === 'game' ? 2048 : r.id === 'velocity' ? 512 : Math.max(memory, 2048);
+    memory = Math.min(maxMem, r.category === 'game' ? 2048 : r.id === 'velocity' ? 512 : Math.max(memory, 2048));
     step = 2;
   }
 
   const shown = $derived((versions?.versions ?? []).filter((v) => vFilter === 'all' || v.stable));
   const needsEula = $derived(!!runtime && (runtime.category === 'game' ? !!runtime.needs_eula : runtime.id !== 'velocity' && runtime.id !== 'custom'));
   const hasUnstable = $derived((versions?.versions ?? []).some((v) => !v.stable));
-  const maxMem = $derived(Math.max(4096, Math.floor(((host.status?.host.mem_total ?? 16e9) / 1048576) * 0.9 / 256) * 256));
+  const maxMem = $derived(maxMemoryMb());
+  $effect(() => { if (memory > maxMem) memory = maxMem; });
   // Rough Java requirement by game version (informational; the backend decides the real value).
   const javaNeed = $derived.by(() => {
     if (runtime?.id === 'velocity') return 17;
@@ -118,8 +121,8 @@
     busy = true; fieldErr = {}; formErr = '';
     try {
       const r = await api.createServer({
-        name: name.trim(), runtime: runtime.id, game_version: runtime.id === 'custom' ? 'custom' : version, memory_mb: isGame ? 2048 : memory,
-        port: port ?? undefined, accept_eula: needsEula ? eula : false,
+        name: name.trim(), runtime: runtime.id, game_version: runtime.id === 'custom' ? 'custom' : version, memory_mb: isGame ? Math.min(2048, maxMem) : memory,
+        port: port ?? undefined, accept_eula: needsEula && eulaChoice === 'accept',
         ...((fromPack || loaders.length) && loaderVer ? { loader_version: loaderVer } : {}),
         ...(fromPack && pack ? { modpack_token: pack.token } : {}),
         ...(runtime.id === 'custom' ? { custom: { command: command.trim().split(/\s+/) } } : {}),
@@ -256,7 +259,7 @@
     </div>
     {#if isGame}<div class="banner" style="align-items:center"><Icon name="info" size={16} /><div class="grow sm">{runtime.description} Edit the game's own config from the Files tab after installing.</div></div>{/if}
     {#if formErr && step === 2}<div class="banner danger" role="alert">{formErr}</div>{/if}
-    <div class="row end"><button class="btn" onclick={() => (step = 1)}>Back</button><button class="btn primary" disabled={!canNext2} onclick={toReview}>Review<Icon name="chevron-right" size={15} /></button></div>
+    <div class="row end"><button class="btn" onclick={() => { clearErr(); step = 1; }}>Back</button><button class="btn primary" disabled={!canNext2} onclick={toReview}>Review<Icon name="chevron-right" size={15} /></button></div>
   </div>
 {:else if step === 3 && runtime}
   <div class="card form">
@@ -276,10 +279,15 @@
       {:else}<div class="banner warn" style="align-items:center"><Icon name="alert" size={18} /><div class="grow">This version needs Java {javaNeed}+ and none is installed. You can create the server now, but it will not start until Java is available.</div><button class="btn sm" onclick={installJava}>Install Java {javaNeed}</button></div>{/if}
     {/if}
     {#if needsEula}
-      <label class="row eula"><input type="checkbox" class="check" bind:checked={eula} /><span class="sm">I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">Minecraft EULA <Icon name="external" size={12} /></a>. This acceptance is recorded and audited.</span></label>
+      <fieldset class="eulas" aria-describedby={fieldErr.accept_eula ? 'eula-err' : undefined}>
+        <legend class="sm">Minecraft EULA</legend>
+        <label class="row eula"><input type="radio" name="eula" class="check" value="accept" bind:group={eulaChoice} /><span class="sm">Accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">Minecraft EULA <Icon name="external" size={12} /></a>. This acceptance is recorded and audited.</span></label>
+        <label class="row eula"><input type="radio" name="eula" class="check" value="skip" bind:group={eulaChoice} /><span class="sm">Skip for now — I'll accept it later ({runtime?.category === 'game' ? 'from the server page' : 'set eula=true in eula.txt, or accept from the server page'}). The server won't start until then.</span></label>
+        {#if fieldErr.accept_eula}<span class="err" id="eula-err">{fieldErr.accept_eula}</span>{/if}
+      </fieldset>
     {/if}
     {#if formErr}<div class="banner danger" role="alert">{formErr}</div>{/if}
-    <div class="row end"><button class="btn" onclick={() => (step = 2)}>Back</button><button class="btn primary lg" disabled={busy || (needsEula && !eula)} onclick={create}>{busy ? 'Creating…' : 'Create server'}</button></div>
+    <div class="row end"><button class="btn" onclick={() => { clearErr(); step = 2; }}>Back</button><button class="btn primary lg" disabled={busy || (needsEula && !eulaChoice)} onclick={create}>{busy ? 'Creating…' : 'Create server'}</button></div>
   </div>
 {:else if step === 4 && created}
   <div class="card form">
@@ -309,5 +317,7 @@
   .rico { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--a-soft); color: var(--a-text); }
   .form { max-width: 640px; display: flex; flex-direction: column; gap: 18px; }
   .sum { display: grid; grid-template-columns: 110px 1fr; gap: 8px 16px; margin: 0; } .sum dt { color: var(--muted); } .sum dd { margin: 0; font-weight: 550; }
+  .eulas { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .eulas legend { padding: 0 0 6px; font-weight: 600; }
   .eula { gap: 10px; align-items: flex-start; padding: 12px; background: var(--s2); border-radius: var(--r-sm); border: 1px solid var(--line); cursor: pointer; }
 </style>

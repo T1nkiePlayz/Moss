@@ -19,9 +19,40 @@ pub async fn start(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     r
 }
 
+/// Java Properties semantics: `#`/`!` comment lines are ignored and the last `eula=` value wins.
+pub(crate) fn eula_txt_accepted(text: &str) -> bool {
+    text.lines().map(str::trim).filter(|l| !l.starts_with('#') && !l.starts_with('!'))
+        .filter_map(|l| l.split_once('=')).rfind(|(k, _)| k.trim().eq_ignore_ascii_case("eula"))
+        .is_some_and(|(_, v)| v.trim().eq_ignore_ascii_case("true"))
+}
+
+/// Read eula.txt only if it is a regular file (not a link, FIFO or device) of sane size; blocking work, so call from spawn_blocking.
+pub(crate) fn read_eula_txt(dir: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    // O_NOFOLLOW + O_NONBLOCK, then check the opened file itself, so a swap after any earlier check cannot block or redirect.
+    let f = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(dir.join("eula.txt")).ok()?;
+    if !f.metadata().ok()?.file_type().is_file() { return None; }
+    let mut s = String::new();
+    f.take(64 << 10).read_to_string(&mut s).ok()?;
+    Some(s)
+}
+
+/// A Minecraft Java server whose owner set `eula=true` in eula.txt by hand counts as accepted: record it (once) and allow the start.
+async fn accept_from_eula_txt(st: &St, s: &Srv, actor: &str) -> ApiResult<bool> {
+    if !s.is_mc() || s.is_proxy() { return Ok(false); }
+    let dir = s.dir(st);
+    let text = tokio::task::spawn_blocking(move || read_eula_txt(&dir)).await.map_err(anyhow::Error::from)?;
+    if !text.is_some_and(|t| eula_txt_accepted(&t)) { return Ok(false); }
+    let (i, now) = (s.id.clone(), crate::db::now());
+    let changed = st.db.call(move |c| c.execute("UPDATE servers SET eula_at=?, eula_by='eula.txt' WHERE id=? AND eula_at IS NULL", rusqlite::params![now, i])).await?;
+    if changed > 0 { st.audit(actor, "eula.accept", &s.name, "Minecraft EULA accepted via eula.txt", Some(&s.id)).await; }
+    Ok(true)
+}
+
 async fn start_inner(st: &St, s: &Srv, actor: &str) -> ApiResult<()> {
     if !s.installed { return Err(ApiError::conflict("server.not_installed", "server is not installed yet")); }
-    if crate::health::eula_missing(s) { return Err(ApiError::conflict("eula.required", "The Minecraft EULA must be accepted before this server can start.")); }
+    if crate::health::eula_missing(s) && !accept_from_eula_txt(st, s, actor).await? { return Err(ApiError::conflict("eula.required", "The Minecraft EULA must be accepted before this server can start.")); }
     if st.live.lock().unwrap().get(&s.id).is_some_and(|l| l.alive) { return Err(ApiError::conflict("server.running", "server is already running")); }
     if tokio::net::TcpListener::bind(("0.0.0.0", s.port as u16)).await.is_err() {
         return Err(ApiError::conflict("port.in_use", format!("port {} is already in use on this host", s.port)));
@@ -112,4 +143,39 @@ pub async fn send_command(st: &St, s: &Srv, cmd: &str) -> ApiResult<()> {
     }).await.map_err(|e| anyhow::anyhow!(e))?.map_err(|e| if e.kind() == std::io::ErrorKind::WouldBlock { ApiError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "console.busy", "the server is not reading its console fast enough; try again in a moment") } else { ApiError::conflict("server.not_running", "console is not accepting input") })?;
     crate::console::push(&crate::console::hub(st, &s.id), format!("\x1b[36m> {cmd}\x1b[0m"));
     Ok(())
+}
+
+#[cfg(test)]
+mod eula_tests {
+    use super::eula_txt_accepted;
+    #[test]
+    fn eula_txt_needs_an_uncommented_true() {
+        assert!(eula_txt_accepted("# by Mojang\neula=true\n"));
+        assert!(eula_txt_accepted("eula = TRUE"));
+        assert!(!eula_txt_accepted("#eula=true\n"));
+        assert!(!eula_txt_accepted("# x\neula=false\n"));
+        assert!(!eula_txt_accepted(""));
+        assert!(!eula_txt_accepted("eula=true\neula=false\n"), "last value wins");
+        assert!(eula_txt_accepted("eula=false\n! c\neula=true\n"));
+        assert!(!eula_txt_accepted("!eula=true\n"));
+    }
+
+    #[test]
+    fn eula_txt_must_be_a_regular_file() {
+        let d = std::env::temp_dir().join(format!("moss-eula-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        assert!(super::read_eula_txt(&d).is_none());
+        std::fs::write(d.join("real.txt"), "eula=true\n").unwrap();
+        std::os::unix::fs::symlink(d.join("real.txt"), d.join("eula.txt")).unwrap();
+        assert!(super::read_eula_txt(&d).is_none(), "symlink refused");
+        std::fs::remove_file(d.join("eula.txt")).unwrap();
+        let c = std::ffi::CString::new(d.join("eula.txt").to_string_lossy().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        assert!(super::read_eula_txt(&d).is_none(), "fifo refused without blocking");
+        std::fs::remove_file(d.join("eula.txt")).unwrap();
+        std::fs::write(d.join("eula.txt"), "eula=true\n").unwrap();
+        assert_eq!(super::read_eula_txt(&d).as_deref(), Some("eula=true\n"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

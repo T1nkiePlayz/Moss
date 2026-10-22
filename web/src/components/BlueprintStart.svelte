@@ -2,6 +2,7 @@
   import Icon from './Icon.svelte';
   import { api, ApiError, errMsg, type Blueprint, type Operation, type Server } from '../lib/api';
   import { isAdmin } from '../lib/auth.svelte';
+  import { maxMemoryMb } from '../lib/stores.svelte';
   import { cleanCode } from '../lib/blueprint-share';
 
   let { oncreated }: { oncreated: (r: { server: Server; operation: Operation }) => void } = $props();
@@ -39,15 +40,15 @@
           <option value="">Choose one…</option>
           {#each list as b (b.id)}<option value={b.id}>{b.name} ({b.runtime} {b.game_version})</option>{/each}
         </select>
-        {#if bp}<span class="hint">{bp.properties} settings, {bp.content} content items, {bp.schedules} schedules. Needs {bp.memory_mb} MB.</span>{/if}
+        {#if bp}<span class="hint">{bp.properties} settings, {bp.content} content items, {bp.schedules} schedules. Needs {bp.memory_mb} MB.{#if bp.memory_mb > maxMemoryMb()} This machine has less memory than that, so creating it will be refused.{/if}</span>{/if}
       </div>
       <div class="field"><label for="bpc">Or paste a share code</label>
         <div class="row g6"><input id="bpc" class="input mono" style="flex:1" spellcheck="false" placeholder="moss1_…" bind:value={code} /><button class="btn" disabled={!code.trim()} onclick={useCode}>Use code</button></div>
         {#if codeErr}<span class="hint" style="color:var(--danger)" role="alert">{codeErr}</span>{:else}<span class="hint">The code is checked and saved as a blueprint here. Nothing runs until you create the server.</span>{/if}</div>
       <div class="field"><label for="bpn">Name for the new server</label><input id="bpn" class="input" maxlength="48" bind:value={name} /></div>
-      <label class="row g6"><input type="checkbox" class="check" bind:checked={eula} /><span class="sm">I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener" style="text-decoration:underline">Minecraft EULA</a>. This acceptance is recorded and audited.</span></label>
+      <label class="row g6"><input type="checkbox" class="check" bind:checked={eula} /><span class="sm">I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener" style="text-decoration:underline">Minecraft EULA</a>. This acceptance is recorded and audited. Optional: leave it unticked to accept later; the server won't start until then.</span></label>
       {#if err}<div class="banner danger" role="alert"><Icon name="alert" size={16} /><span>{err}</span></div>{/if}
-      <div class="row end"><button class="btn" onclick={() => (open = false)}>Cancel</button><button class="btn primary" disabled={busy || !bp || !name.trim() || !eula} onclick={go}>{busy ? 'Creating…' : 'Create from blueprint'}</button></div>
+      <div class="row end"><button class="btn" onclick={() => (open = false)}>Cancel</button><button class="btn primary" disabled={busy || !bp || !name.trim()} onclick={go}>{busy ? 'Creating…' : 'Create from blueprint'}</button></div>
     {/if}
   </section>
 {/if}

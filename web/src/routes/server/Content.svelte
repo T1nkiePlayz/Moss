@@ -36,6 +36,7 @@
   let reloadKey = $state(0);
   let busyFinding = $state<string | null>(null);
   let tracked = $state<string[]>([]);
+  let fade = $state<Record<string, boolean>>({});
   let importer = $state<import('svelte').Component<any> | null>(null);
   let exporting = $state(false);
   const drawer = $derived(items?.find((i) => i.id === drawerId) ?? null);
@@ -254,7 +255,7 @@
     {#each tracked as id (id)}
       {@const o = ops.list.find((x) => x.id === id)}
       {#if o}
-        <div class="trk"><OpCard op={o} open={o.kind.includes('identify') || o.kind.includes('modpack')} />{#if o.state !== 'running' && o.state !== 'queued'}<button class="btn ghost icon sm x" aria-label="Dismiss" onclick={() => (tracked = tracked.filter((t) => t !== id))}><Icon name="x" size={14} /></button>{/if}</div>
+        <div class="trk" class:fading={fade[id]}><OpCard op={o} open={o.kind.includes('identify') || o.kind.includes('modpack')} autoClear bind:fading={fade[id]} onclear={() => (tracked = tracked.filter((t) => t !== id))} />{#if o.state !== 'running' && o.state !== 'queued'}<button class="btn ghost icon sm x" aria-label="Dismiss" onclick={() => (tracked = tracked.filter((t) => t !== id))}><Icon name="x" size={14} /></button>{/if}</div>
       {/if}
     {/each}
     {#if !items.length}
@@ -354,7 +355,9 @@
 
 <style>
   .cnt { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--a-ink); color: var(--a-text); font-size: calc(11px * var(--ts, 1)); margin-left: 2px; }
-  .trk { position: relative; margin-bottom: 12px; }
+  .trk { position: relative; margin-bottom: 12px; transition: opacity .4s var(--ease); }
+  .trk.fading { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) { .trk { transition: none; } }
   .trk .x { position: absolute; bottom: 8px; right: 10px; }
   .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--s2); }
   .segb { border: 0; background: none; color: var(--muted); font: inherit; font-size: calc(13px * var(--ts, 1)); padding: 4px 12px; border-radius: 6px; cursor: pointer; }

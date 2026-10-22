@@ -31,6 +31,7 @@
     if (!s) return [];
     const c = s.capabilities;
     const t: { id: string; label: string; icon: string }[] = [{ id: 'overview', label: 'Overview', icon: 'home' }];
+    t.push({ id: 'setup', label: 'Setup', icon: 'download' });
     if (c.includes('console')) t.push({ id: 'console', label: 'Console', icon: 'terminal' });
     if (c.includes('files')) t.push({ id: 'files', label: 'Files', icon: 'folder' });
     if (c.includes('properties') || c.includes('config')) t.push({ id: 'config', label: 'Config', icon: 'sliders' });
@@ -45,6 +46,7 @@
     return t;
   });
   const loaders = {
+    setup: () => import('./server/Setup.svelte'),
     console: () => import('./server/Console.svelte'),
     files: () => import('./server/Files.svelte'),
     config: () => import('./server/Config.svelte'),

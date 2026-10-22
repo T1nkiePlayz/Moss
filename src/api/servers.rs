@@ -63,23 +63,23 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
     let rt = cat.as_array().unwrap().iter().find(|x| x["id"] == r.runtime.as_str());
     if !rt.is_some_and(|x| x["installable"] == true) { return Err(ApiError::bad("runtime.unsupported", "unknown or not yet installable runtime").field("runtime", "choose an installable runtime")); }
     let game = crate::games::get(&r.runtime);
-    let is_mc = !matches!(r.runtime.as_str(), "custom" | "sim") && game.is_none();
+    let is_mc = !matches!(r.runtime.as_str(), "custom" | "sim" | "velocity") && game.is_none();
     let needs_eula = is_mc || game.is_some_and(|g| g.needs_eula);
     if game.is_some_and(|g| matches!(g.install, crate::games::Install::Steam(_))) && r.game_version != "latest" { return Err(ApiError::bad("validation", "this game always installs the latest build").field("game_version", "use \"latest\"")); }
-    if needs_eula && r.accept_eula != Some(true) { return Err(ApiError::bad("eula.required", "You must accept the Minecraft EULA to create a Minecraft server.").field("accept_eula", "required")); }
     // versions end up in upstream URLs, so only plain version-ish strings are accepted
     let plain = |v: &str| !v.is_empty() && v.len() <= 40 && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'));
     if !plain(&r.game_version) { return Err(ApiError::bad("validation", "invalid game version").field("game_version", "letters, digits and . _ + -")); }
     if r.loader_version.as_deref().is_some_and(|l| !plain(l)) { return Err(ApiError::bad("validation", "invalid loader version").field("loader_version", "letters, digits and . _ + -")); }
     let mem = r.memory_mb.unwrap_or(2048);
     if !(256..=262144).contains(&mem) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", "256–262144")); }
+    if let Some(msg) = crate::platform::memory_over(mem, crate::platform::host_memory_mb()) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", &msg)); }
     let custom = match (&r.runtime[..], &r.custom) {
         ("custom", Some(c)) if !c.command.is_empty() && c.command.iter().all(|a| !a.is_empty() && a.len() < 2048 && !a.contains('\0')) => Some(serde_json::to_string(&c.command).unwrap()),
         ("custom", _) => return Err(ApiError::bad("validation", "custom runtime needs a non-empty command array").field("custom.command", "required")),
         _ => None,
     };
     let lim = limits::LimitsPatch { memory: Some(r.memory_limit_mb), cpu: Some(r.cpu_limit_pct), pids: Some(r.pids_limit) };
-    limits::validate_now(&lim)?;
+    limits::validate_now(&lim, None)?;
     let flags = r.flags_profile.filter(|f| f == "balanced" || f == "minimal").unwrap_or_else(|| "balanced".into());
     // Game ports and other servers' TCP extra ports are both off limits when picking a free port.
     let existing: Vec<i64> = server::list_all(&st).await?.iter().flat_map(|s| (s.port..=s.port + s.port_span()).chain(crate::container::ports::parse_stored(&s.extra_ports).into_iter().filter(|e| e.proto == crate::container::ports::Proto::Tcp).map(|e| i64::from(e.port)))).collect();
@@ -90,7 +90,8 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
         None => free_port(&st, default_port, &existing, game.map_or(0, |g| i64::from(g.span()))).await,
     };
     let (id, now) = (uuid::Uuid::now_v7().to_string(), crate::db::now());
-    let eula = (needs_eula && r.accept_eula == Some(true)).then(|| now.clone());
+    let eula_accepted = needs_eula && r.accept_eula == Some(true);
+    let eula = eula_accepted.then(|| now.clone());
     let row = (id.clone(), name.clone(), r.runtime.clone(), r.game_version.clone(), r.loader_version.clone(), port, mem, flags, r.autostart.unwrap_or(false), eula, user.email.clone(), custom, now);
     // The port check and the INSERT share one transaction so two concurrent creates cannot both take the same port.
     let inserted = st.db.call(move |c| {
@@ -109,7 +110,7 @@ async fn create_server(st: St, user: User, mut r: CreateReq) -> ApiResult<(Statu
     limits::save(&st, &id, lim).await?;
     let s = server::get(&st, &id).await?;
     tokio::fs::create_dir_all(s.dir(&st)).await?;
-    if needs_eula { st.audit(&user.actor(), "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
+    if eula_accepted { st.audit(&user.actor(), "eula.accept", &name, "Minecraft EULA accepted at server creation", Some(&id)).await; }
     st.audit(&user.actor(), "server.create", &name, &format!("{} {}", s.runtime, s.game_version), Some(&id)).await;
     let op = ops::spawn_op(&st, "server.install", format!("Install {name}"), Some(&id), true, {
         let (id, tok, u, bp) = (id.clone(), r.modpack_token.clone(), user.clone(), r.blueprint.clone());
@@ -147,8 +148,9 @@ pub(super) async fn server_patch(State(st): State<St>, user: User, Path(id): Pat
     let s = server::get(&st, &id).await?;
     if let Some(n) = &p.name && (n.trim().is_empty() || n.trim().chars().count() > 48 || n.chars().any(|c| c.is_control())) { return Err(ApiError::bad("validation", "invalid name").field("name", "1–48 characters, no control characters")); }
     if let Some(m) = p.memory_mb && !(256..=262144).contains(&m) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", "256–262144")); }
+    if let Some(m) = p.memory_mb && m != s.memory_mb && let Some(msg) = crate::platform::memory_over(m, crate::platform::host_memory_mb()) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", &msg)); }
     let lim = limits::LimitsPatch { memory: p.memory_limit_mb, cpu: p.cpu_limit_pct, pids: p.pids_limit };
-    limits::validate_now(&lim)?;
+    limits::validate_now(&lim, s.memory_limit_mb)?;
     if let Some(f) = &p.flags_profile && f != "balanced" && f != "minimal" { return Err(ApiError::bad("validation", "unknown flags profile").field("flags_profile", "balanced | minimal")); }
     if let Some(port) = p.port && !(1..=65535).contains(&port) { return Err(ApiError::bad("validation", "invalid port").field("port", "1–65535")); }
     let iso = isolation_patch(&st, &user, &s, &p).await?;

@@ -4,16 +4,26 @@
   import { api } from '../lib/api';
   import { serverById, toastError } from '../lib/stores.svelte';
   import type { Operation } from '../lib/api';
-  let { op, open = false }: { op: Operation; open?: boolean } = $props();
+  // `open` is the initial log state; bind `showLog` to observe or drive it. `autoClear` removes a completed card (via
+  // `onclear`) 15 s after completion unless its log is open or the pointer/focus is inside; `fading` is bindable for styling.
+  let { op, open = false, showLog = $bindable(open), autoClear = false, onclear, fading = $bindable() }: { op: Operation; open?: boolean; showLog?: boolean; autoClear?: boolean; onclear?: () => void; fading?: boolean } = $props();
+  let paused = $state(false);
+  let gone: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    if (!autoClear || op.state !== 'completed' || showLog || paused) return;
+    const t = setTimeout(() => {
+      fading = true;
+      gone = setTimeout(() => onclear?.(), matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 400);
+    }, 15000);
+    return () => { clearTimeout(t); clearTimeout(gone); fading = false; };
+  });
   const live = $derived(op.state === 'queued' || op.state === 'running');
   const tone = $derived(op.state === 'completed' ? 'ok' : op.state === 'failed' ? 'danger' : op.state === 'running' ? 'info' : op.state === 'queued' ? '' : 'warn');
   const srv = $derived(op.server_id ? serverById(op.server_id) : null);
-  // svelte-ignore state_referenced_locally
-  let showLog = $state(open);
   async function cancel() { try { await api.cancelOp(op.id); } catch (e) { toastError(e, 'Cancel failed'); } }
 </script>
 
-<article class="op" class:failed={op.state === 'failed'}>
+<article class="op" class:failed={op.state === 'failed'} onmouseenter={() => (paused = true)} onmouseleave={() => (paused = false)} onfocusin={() => (paused = true)} onfocusout={() => (paused = false)}>
   <div class="row between" style="align-items:flex-start">
     <div class="grow">
       <div class="ellipsis"><b>{op.title}</b></div>

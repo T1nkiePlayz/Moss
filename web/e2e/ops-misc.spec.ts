@@ -121,9 +121,9 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(page.getByLabel('Name', { exact: true })).toHaveValue('friends-world');
       await audit(page, 'import review');
       const go = page.getByRole('button', { name: 'Import server' });
-      await expect(go).toBeDisabled(); // EULA not accepted
+      await expect(go).toBeDisabled(); // EULA neither accepted nor skipped
       await page.getByLabel('Port').fill('25565');
-      await page.getByRole('checkbox').check();
+      await page.getByRole('radio', { name: /Accept the Minecraft EULA/ }).check();
       await go.click();
       await expect(page.getByRole('alert').filter({ hasText: 'already used' })).toBeVisible();
       await page.getByLabel('Port').fill('25830');

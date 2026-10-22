@@ -47,14 +47,14 @@ import { apiOps } from '../lib/api-ops';
       {#each backups as b (b.id)}
         {@const [tone, lab] = badge(b)}
         <tr class:pre={isPreChange(b)}>
-          <td><div title={dateTime(b.created_at)}>{relTime(b.created_at)}</div>{#if b.note}<div class="xs muted ellipsis" style="max-width:220px">{b.note}</div>{/if}
+          <td class="when"><div class="t" title={dateTime(b.created_at)}>{relTime(b.created_at)}</div>{#if b.note}<div class="sm muted ellipsis reason" style="max-width:240px">{b.note}</div>{/if}
             {#if b.worlds?.length}<div class="chips" aria-label="Worlds in this backup">{#each b.worlds as w}<span class="wchip mono">{w}</span>{/each}</div>{/if}</td>
           {#if showServer}<td><a href="#/servers/{b.server_id}">{serverById(b.server_id)?.name ?? b.server_id.slice(0, 8)}</a></td>{/if}
           <td>{#if isPreChange(b)}<span class="badge info" title="Taken automatically before a change such as a restore, update or import. Only the newest 3 are kept."><Icon name="shield" size={12} />Pre-change</span><div class="xs muted">Safety copy</div>{:else}<span class="badge">{b.kind}</span>{/if}{#if !b.consistent}<span class="badge warn" style="margin-left:4px" title="Taken while the server was running without a save-all pause">Crash-consistent</span>{/if}</td>
           <td class="num">{bytes(b.size)}</td>
           <td class="ck"><code class="xs" title={b.sha256}>{b.sha256.slice(0, 10)}…</code></td>
           <td><div class="stack"><span class="badge {tone}">{#if tone === 'ok'}<Icon name="check" size={12} />{/if}{lab}</span>{#if b.locked}<span class="badge warn"><Icon name="lock" size={12} />Locked</span>{/if}{#if remoteBadge(b)}{@const rb = remoteBadge(b)!}<span class="badge {rb.tone}" title={rb.title}><Icon name="upload" size={12} />{rb.label}</span>{/if}</div>{#if b.remote === 'failed' && b.remote_error}<div class="xs muted ellipsis" style="max-width:200px" title={b.remote_error}>{b.remote_error}</div>{/if}</td>
-          <td class="num"><span class="row g4" style="justify-content:flex-end">
+          <td class="num"><span class="row acts">
             <button class="btn ghost icon sm" aria-label="Verify backup" title="Verify checksum" disabled={!manage || b.status !== 'ok'} onclick={() => verify(b)}><Icon name="shield" size={14} /></button>
             <button class="btn sm" disabled={!manage || b.status !== 'ok'} onclick={() => (restoring = b)}><Icon name="history" size={13} />Restore</button>
             {#if isRemoteOnly(b)}<button class="btn sm" disabled={!manage || b.status !== 'ok'} title="This backup is only at the destination. Download it to this machine." onclick={() => fromRemote(b)}><Icon name="download" size={13} />Download from remote</button>
@@ -76,10 +76,20 @@ import { apiOps } from '../lib/api-ops';
 <style>
   tr.pre td:first-child { box-shadow: inset 3px 0 0 var(--info); }
   tr.pre { background: color-mix(in srgb, var(--info-soft), transparent 40%); }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; max-width: 210px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; max-width: 210px; }
   @media (max-width: 1360px) { .ck { display: none; } }
   .wchip { font-size: calc(11px * var(--ts, 1)); padding: 0 6px; border-radius: 6px; background: var(--s3); color: var(--muted); border: 1px solid var(--line); }
   .stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px 0; }
-  td, th { padding-inline: 10px; }
+  td, th { padding-inline: 14px; }
+  td { padding-block: calc(var(--pad) * .8); vertical-align: middle; }
+  th { padding-block: 10px; white-space: nowrap; }
+  .when { min-width: 150px; }
+  .t { font-weight: 600; font-size: var(--fs-md); }
+  .reason { margin-top: 3px; }
+  .chips { margin-top: 6px; }
+  .acts { display: flex; justify-content: flex-end; align-items: center; gap: 6px; flex-wrap: nowrap; }
+  .acts :global(.btn.icon) { min-width: 34px; min-height: 34px; }
+  .acts :global(.btn.sm:not(.icon)) { min-height: 34px; padding-inline: 12px; }
+  @media (max-width: 640px) { td, th { padding-inline: 10px; } .when { min-width: 120px; } }
   .btn.locked { opacity: .4; cursor: not-allowed; }
 </style>

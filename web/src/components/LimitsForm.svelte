@@ -2,7 +2,7 @@
   import Icon from './Icon.svelte';
   import { ApiError, type Server } from '../lib/api';
 import { apiOps } from '../lib/api-ops';
-  import { host, toast, toastError } from '../lib/stores.svelte';
+  import { host, maxMemoryMb, toast, toastError } from '../lib/stores.svelte';
   import { can } from '../lib/auth.svelte';
   import { describeLimits, limitWarnings } from '../lib/limits';
 
@@ -54,7 +54,7 @@ import { apiOps } from '../lib/api-ops';
   <form class="lf" onsubmit={save}>
     <div class="field">
       <label for="lm">Memory hard limit (MB)</label>
-      <input id="lm" class="input" type="number" min="256" step="128" placeholder="Default ({Math.round(s.memory_mb * 1.25 + 512)})" bind:value={f.mem} readonly={!canEdit} aria-describedby="lm-h" />
+      <input id="lm" class="input" type="number" min="256" max={Math.max(maxMemoryMb(), Number(f.mem) || 0)} step="128" placeholder="Default ({Math.round(s.memory_mb * 1.25 + 512)})" bind:value={f.mem} readonly={!canEdit} aria-describedby="lm-h" />
       <span class="hint" id="lm-h">Above this the process is killed. Leave empty for the default: heap + 25% + 512 MiB.</span>
       {#if errs.memory_limit_mb}<span class="err">{errs.memory_limit_mb}</span>{/if}
     </div>

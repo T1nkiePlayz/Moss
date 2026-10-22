@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 mod apply;
 mod check;
-mod identify;
+pub(crate) mod identify;
 mod cfpack;
 mod hangar;
 mod inventory;

@@ -59,6 +59,10 @@ import { apiOps } from '../../lib/api-ops';
   const fallback = async (): Promise<MetricSample[]> => (await api.stats(s.id)).samples.map((x) => ({ t: x.t, cpu_avg: x.cpu, cpu_max: x.cpu, mem_avg: x.mem, mem_max: x.mem, players_max: x.players ?? 0 }));
 </script>
 
+{#if s.state === 'installing' || s.state === 'failed'}
+  <div class="banner {s.state === 'failed' ? 'danger' : 'info'}" style="margin-bottom:var(--gap)"><Icon name={s.state === 'failed' ? 'x-circle' : 'download'} size={16} /><div class="grow">{s.state === 'failed' ? 'The install failed.' : 'This server is still installing.'} <a href={serverHref(s.id, 'setup')}>See the setup log</a></div></div>
+{/if}
+
 <div class="grid hero-grid">
   <section class="card hero" class:on={s.state === 'running'} class:bad={s.state === 'crashed' || s.state === 'failed'} aria-label="Status">
     <div class="row between wrap g16">

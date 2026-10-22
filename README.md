@@ -88,7 +88,7 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 **Interface** · fourteen themes: dark, light, system and high contrast, plus game-inspired and seasonal ones such as Nether, Synthwave, Amber terminal, Deep sea, Campfire and Cherry blossom, all checked for WCAG AA contrast · a **theme editor** (live preview, contrast checker, import/export) · accent and density options · saved views for lists · command palette that searches servers, backups, content and files (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>) · **accessibility settings** (text size up to 150%, strong focus ring, always-underlined links, wider text spacing, reduced motion and effects, following the system's high-contrast request) · keyboard first, responsive, axe-checked in CI. See [ACCESSIBILITY.md](ACCESSIBILITY.md).
 
-**Access and recovery** · roles and per-server grants enforced everywhere · personal API tokens · login throttling · optional MFA requirement · activity log · **`moss recover`** command line for locked-out owners, stuck operations and integrity checks.
+**Access and recovery** · roles and per-server grants enforced everywhere · personal API tokens · login throttling · optional MFA requirement · activity log · **`moss recover`** command line for locked-out owners, stuck operations and integrity checks · **`moss update`** to install the latest release in place, verified like the installer.
 
 ## Screenshots
 
@@ -167,6 +167,18 @@ The unit sets `Delegate=yes` so Moss can enforce per-server resource limits (nee
 ### macOS
 
 Install the tarball (or the Homebrew formula from the release), run it as a LaunchAgent/LaunchDaemon with [`packaging/macos/io.moss.controller.plist`](packaging/macos/io.moss.controller.plist), and read [docs/macos.md](docs/macos.md) for Gatekeeper, Java and what differs from Linux.
+
+### Updating
+
+`moss update` does what the installer does for the binary that is running it. It finds the latest release, verifies the checksum (and the cosign signature when `cosign` is installed), makes sure the new binary starts, and then swaps it in atomically. Then restart the controller; game servers keep running while it restarts.
+
+```bash
+moss update --check                                   # show the installed and the latest version
+sudo moss update && sudo systemctl restart moss       # a root-owned /usr/local/bin/moss needs sudo
+moss update --version v0.1.1                          # a specific release (also to go back)
+```
+
+Copies installed by Homebrew, Nix or a system package (for example the AUR) are left to that package manager unless you pass `--force`. Going back to an older release works only until a newer Moss has upgraded the database: an older Moss refuses a newer database rather than touching it (see [docs/recovery.md](docs/recovery.md)).
 
 ### Reverse proxy
 

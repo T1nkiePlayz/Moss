@@ -182,6 +182,7 @@ say "  Start it (sign-in is built in):           mkdir -p ~/moss && cd ~/moss &&
 say "  Then open http://127.0.0.1:8420, sign in, and enter the setup token from ~/moss/moss-data/setup-token."
 say "  Try it without sign-in (loopback only):   MOSS_AUTH=dev $DEST/moss serve"
 say "  Check the environment:                    $DEST/moss doctor"
+say "  Update later:                             $DEST/moss update   (with sudo if $DEST needs it)"
 if [ "$OS" = linux ]; then
   say "  Run as a service: the tarball ships moss.service, .env and moss.env.example (see the README, Linux: production-style install)."
 else

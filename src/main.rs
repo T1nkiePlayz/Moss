@@ -17,6 +17,8 @@ enum Cmd {
     Doctor(config::Config),
     /// Offline repair tools for the data directory (owner, stuck operations, setup token, backups, database)
     Recover(cli::recover::Recover),
+    /// Update this Moss binary to the latest release (checksum- and, with cosign installed, signature-verified)
+    Update(cli::update::Update),
     /// A tiny fake Minecraft server, used by the `sim` runtime for demos and tests
     SimServer { #[arg(long, default_value_t = 25565)] port: u16 },
 }
@@ -36,6 +38,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Serve(cfg) => rt.block_on(serve::serve(shipped_signin(cfg))),
         Cmd::Doctor(cfg) => rt.block_on(doctor::doctor(shipped_signin(cfg))),
         Cmd::Recover(a) => cli::recover::run(a),
+        Cmd::Update(a) => rt.block_on(cli::update::run(a)),
         Cmd::SimServer { port } => rt.block_on(sim::run(port)),
     }
 }

@@ -152,7 +152,7 @@ Server object gains `limits:{memory_mb:number|null, cpu_pct:number|null, pids:nu
 - `GET /status` host gains `os: "Linux"|"macOS"`.
 
 ### Release
-Tags `v*` build and attach: `moss-<tag>-linux-x86_64.tar.gz`, `moss-<tag>-macos-aarch64.tar.gz`, `moss-<tag>-macos-x86_64.tar.gz`, `SHA256SUMS.txt`, `install.sh`, `moss.rb` (Homebrew formula with the real checksums); build attestations for each tarball.
+Tags `v*` build and attach: `moss-<tag>-linux-x86_64.tar.gz`, `moss-<tag>-macos-aarch64.tar.gz`, `moss-<tag>-macos-x86_64.tar.gz`, `SHA256SUMS.txt`, `install.sh`, `moss.rb` (Homebrew formula with the real checksums); build attestations for each tarball. `moss update` (and `install.sh`) rely on these asset names and on `<name>/moss` inside the tarball, so keep them stable.
 
 ## 0.2 additions: schedules, backups, notifications, metrics
 

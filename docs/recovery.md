@@ -41,7 +41,7 @@ Marks every queued or running operation, and every backup that was in progress, 
 moss recover db check
 ```
 
-Runs SQLite's integrity check and compares the schema version with what this Moss expects. If the file is damaged, restore `moss.sqlite` from a copy (stop Moss first, and delete `moss.sqlite-wal` and `moss.sqlite-shm` when you replace the file). A database from a newer Moss is refused rather than modified: upgrade Moss instead of downgrading.
+Runs SQLite's integrity check and compares the schema version with what this Moss expects. If the file is damaged, restore `moss.sqlite` from a copy (stop Moss first, and delete `moss.sqlite-wal` and `moss.sqlite-shm` when you replace the file). A database from a newer Moss is refused rather than modified: upgrade Moss (`moss update`) instead of downgrading.
 
 ## Check backups
 

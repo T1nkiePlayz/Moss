@@ -23,6 +23,16 @@ brew services start moss        # data and logs under $(brew --prefix)/var/moss 
 **By hand**: download `moss-<tag>-macos-aarch64.tar.gz` (or `-x86_64`), check it with `shasum -a 256 -c SHA256SUMS.txt`
 and `gh attestation verify`, then copy `moss` somewhere on your `PATH`.
 
+### Update
+
+- **Script or by hand:** `moss update` downloads the latest release, verifies it like the install script (checksum,
+  plus the cosign signature when `cosign` is installed), checks that it starts, and swaps it in atomically. Use
+  `moss update --check` to only compare versions, and `sudo moss update` when the binary is in a root-owned directory such as `/usr/local/bin`.
+- **Homebrew:** `brew upgrade moss`. `moss update` leaves a Homebrew copy alone unless you pass `--force`.
+
+Then restart the controller (`launchctl kickstart -k gui/$(id -u)/io.moss.controller`, or `brew services restart moss`).
+Game servers keep running.
+
 ### Gatekeeper
 
 Files downloaded with `curl` or the install script are not quarantined. A tarball downloaded in a browser is, and the

@@ -48,10 +48,21 @@ pub async fn identify(State(st): State<St>, user: User, Path(id): Path<String>) 
 async fn run(ctx: OpCtx, s: Srv, c: Compat, token: Option<String>, actor: String) -> Result<()> {
     let st = ctx.st.clone();
     let _guard = st.lock_for(&s.id).try_lock_owned().map_err(|_| anyhow!("another operation is changing this server"))?;
+    run_locked(ctx, s, c, token, actor).await.map(|_| ())
+}
+
+/// Identify a freshly imported server's files. The caller already holds the server lock. Returns (recognised, total).
+pub(crate) async fn identify_imported(ctx: OpCtx, s: Srv, token: Option<String>, actor: String) -> Result<(usize, usize)> {
+    let c = compat(&ctx.st, &s).ok_or_else(|| anyhow!("this runtime has no managed content"))?;
+    run_locked(ctx, s, c, token, actor).await
+}
+
+async fn run_locked(ctx: OpCtx, s: Srv, c: Compat, token: Option<String>, actor: String) -> Result<(usize, usize)> {
+    let st = ctx.st.clone();
     ctx.stage("Hashing files");
     let paths: Vec<(String, PathBuf)> = inventory::list_files(&st, &s, &c).await?.into_iter().filter(|(i, _)| i["provider"] == "manual").map(|(i, p)| (i["filename"].as_str().unwrap_or_default().to_string(), p)).collect();
     let total = paths.len();
-    if total == 0 { ctx.log("No unmanaged files to identify."); return Ok(()); }
+    if total == 0 { ctx.log("No unmanaged files to identify."); return Ok((0, 0)); }
     let cx = ctx.clone();
     let hashed: Vec<Hashed> = tokio::task::spawn_blocking(move || {
         let mut v = vec![];
@@ -94,7 +105,7 @@ async fn run(ctx: OpCtx, s: Srv, c: Compat, token: Option<String>, actor: String
     record(&st, &s, &c, found).await?;
     ctx.log(format!("Identified {n} of {total} files ({by_modrinth} on Modrinth, {cfn} on CurseForge, {hgn} on Hangar); {} could not be identified and stay manual.", total - n));
     st.audit(&actor, "content.identify", &s.name, &format!("{n} of {total} files"), Some(&s.id)).await;
-    Ok(())
+    Ok((n, total))
 }
 
 /// SHA-256 of each remaining file, then one Hangar hash lookup per file (Hangar has no batch endpoint).

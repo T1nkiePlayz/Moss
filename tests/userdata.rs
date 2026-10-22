@@ -107,7 +107,18 @@ async fn prefs_views_and_blueprints() {
     let list: Value = c.get(format!("{api}/blueprints")).send().await.unwrap().json().await.unwrap();
     assert_eq!(list.as_array().unwrap().len(), 3);
     assert_eq!(c.post(format!("{api}/blueprints/{bid}/create")).json(&json!({"name": "", "accept_eula": true})).send().await.unwrap().status(), 400);
-    assert_eq!(c.post(format!("{api}/blueprints/{bid}/create")).json(&json!({"name": "New", "accept_eula": false})).send().await.unwrap().status(), 400, "EULA still required");
+    assert_eq!(c.post(format!("{api}/blueprints/{bid}/create")).json(&json!({"name": "New", "accept_eula": false})).send().await.unwrap().status().as_u16(), 202, "skipping the EULA is allowed; the start guard enforces it");
+    // velocity needs no EULA; Paper may be created without accepting (eula_at stays empty); memory is capped at the host's
+    for (rt, ver) in [("velocity", "3.4.0"), ("paper", "1.21.4")] {
+        let r = c.post(format!("{api}/servers")).json(&json!({"name": format!("no-eula-{rt}"), "runtime": rt, "game_version": ver})).send().await.unwrap();
+        assert_eq!(r.status(), 202, "{rt}");
+        let s: Value = r.json().await.unwrap();
+        assert_eq!(s["server"]["eula_accepted"], rt == "velocity", "{s}");
+    }
+    let r = c.post(format!("{api}/servers")).json(&json!({"name": "huge", "runtime": "paper", "game_version": "1.21.4", "memory_mb": 262144})).send().await.unwrap();
+    assert_eq!(r.status(), 400);
+    let e: Value = r.json().await.unwrap();
+    assert!(e["error"]["fields"]["memory_mb"].to_string().contains("this machine's memory") || e.to_string().contains("this machine's memory"), "{e}");
     assert_eq!(c.delete(format!("{api}/blueprints/{bid}")).send().await.unwrap().status(), 204);
     assert_eq!(c.get(format!("{api}/blueprints/{bid}/export")).send().await.unwrap().status(), 404);
     let _ = std::fs::remove_dir_all(&dir);

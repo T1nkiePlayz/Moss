@@ -357,9 +357,10 @@ pub async fn start(State(st): State<St>, user: User, Json(r): Json<ImportReq>) -
     let game = r.game_version.clone().or(d.game_version.clone()).filter(|v| plain(v)).ok_or_else(|| ApiError::bad("validation", "Enter the Minecraft version.").field("game_version", "required"))?;
     let loader = r.loader_version.clone().or(d.loader_version.clone()).filter(|v| plain(v));
     if matches!(runtime.as_str(), "forge" | "neoforge") && loader.is_none() { return Err(ApiError::bad("validation", "Enter the loader version.").field("loader_version", "required")); }
-    if r.accept_eula != Some(true) { return Err(ApiError::bad("eula.required", "You must accept the Minecraft EULA to run a Minecraft server.").field("accept_eula", "required")); }
+    let eula_accepted = runtime != "velocity" && r.accept_eula == Some(true);
     let mem = r.memory_mb.unwrap_or(2048);
     if !(256..=262144).contains(&mem) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", "256–262144")); }
+    if let Some(msg) = crate::platform::memory_over(mem, crate::platform::host_memory_mb()) { return Err(ApiError::bad("validation", "memory out of range").field("memory_mb", &msg)); }
     // every port another server uses, including a game's extra ports (Valheim takes port+1 and port+2)
     let existing: Vec<i64> = crate::server::list(&st).await?.iter().flat_map(|s| s.port..=s.port + s.port_span()).collect();
     let default_port = if runtime == "velocity" { 25577 } else { 25565 };
@@ -371,15 +372,16 @@ pub async fn start(State(st): State<St>, user: User, Json(r): Json<ImportReq>) -
     };
     let java = java_for(&runtime, &game);
     let (id, now) = (uuid::Uuid::now_v7().to_string(), crate::db::now());
-    let row = (id.clone(), name.clone(), runtime.clone(), game.clone(), loader.clone(), java as i64, port, mem, user.email.clone(), now.clone());
+    let eula_at = eula_accepted.then(|| now.clone());
+    let row = (id.clone(), name.clone(), runtime.clone(), game.clone(), loader.clone(), java as i64, port, mem, user.email.clone(), now.clone(), eula_at);
     st.db.call(move |c| c.execute("INSERT INTO servers(id,name,runtime,game_version,loader_version,java_major,port,memory_mb,eula_at,eula_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        rusqlite::params![row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.9.clone(), row.8, row.9])).await?;
+        rusqlite::params![row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.10.clone(), row.10.as_ref().map(|_| row.8.clone()), row.9])).await?;
     let s = crate::server::get(&st, &id).await?;
-    st.audit(&user.actor(), "eula.accept", &name, "Minecraft EULA accepted at import", Some(&id)).await;
+    if eula_accepted { st.audit(&user.actor(), "eula.accept", &name, "Minecraft EULA accepted at import", Some(&id)).await; }
     st.audit(&user.actor(), "server.import", &name, &format!("{runtime} {game} from {}", if is_upload { "an uploaded archive".to_string() } else { src.display().to_string() }), Some(&id)).await;
     let jar = d.jar.clone();
     let op = crate::ops::spawn_op(&st, "server.import", format!("Import {name}"), Some(&id), true, {
-        let (id, src, rt) = (id.clone(), src.clone(), runtime.clone());
+        let (id, src, rt, token, actor) = (id.clone(), src.clone(), runtime.clone(), user.token.clone(), user.actor());
         move |ctx| async move {
             let st = ctx.st.clone();
             let _guard = st.lock_for(&id).lock_owned().await;
@@ -407,10 +409,17 @@ pub async fn start(State(st): State<St>, user: User, Json(r): Json<ImportReq>) -
                 ctx.stage("Preparing to start");
                 let (d2, rt2, jar2) = (dir.clone(), rt.clone(), jar.clone());
                 if let Some(n) = tokio::task::spawn_blocking(move || normalise_launcher(&d2, &rt2, jar2.as_deref())).await?? { ctx.log(n); }
-                tokio::fs::write(dir.join("eula.txt"), "# Accepted via Moss by the server owner (https://aka.ms/MinecraftEULA)\neula=true\n").await?;
+                if s.eula_at.is_some() { tokio::fs::write(dir.join("eula.txt"), "# Accepted via Moss by the server owner (https://aka.ms/MinecraftEULA)\neula=true\n").await?; }
                 let i = id.clone();
                 st.db.call(move |c| c.execute("UPDATE servers SET installed=1, install_error=NULL WHERE id=?", [i])).await?;
                 if crate::java::find(&st, java).is_none() { ctx.log(format!("Java {java} is not installed. Install it from Settings, then Java, before starting.")); }
+                // Recognise plugins and mods already in the folder; a failed lookup never fails the import.
+                if let Ok(s2) = crate::server::get(&st, &id).await {
+                    match crate::content::identify::identify_imported(ctx.clone(), s2, token.clone(), actor.clone()).await {
+                        Ok((n, m)) => ctx.log(format!("Recognised {n} of {m} files")),
+                        Err(e) => ctx.log(format!("Warning: could not identify plugins and mods: {e:#}")),
+                    }
+                }
                 Ok(())
             }.await;
             if let Err(e) = &res {

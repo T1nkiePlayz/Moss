@@ -6,7 +6,7 @@
   import { canReinstall, reinstall } from '../../lib/lifecycle';
   import { apiExtra, isGameServer } from '../../lib/api-extra';
   import { api, ApiError, errMsg, type GameUpdate, type Server } from '../../lib/api';
-  import { confirmDialog, toast, toastError, trackOp } from '../../lib/stores.svelte';
+  import { confirmDialog, maxMemoryMb, toast, toastError, trackOp } from '../../lib/stores.svelte';
   import { can, isAdmin } from '../../lib/auth.svelte';
   import { navigate } from '../../lib/router.svelte';
 
@@ -76,7 +76,7 @@
     <div class="field"><label for="n">Name</label><input id="n" class="input" bind:value={f.name} maxlength="48" required readonly={!canEdit} />{#if errs.name}<span class="err">{errs.name}</span>{/if}</div>
     {#if s.capabilities.includes('java')}<div class="field">
       <div class="row between"><label for="m">Memory</label><b class="tnum sm">{f.memory_mb} MB</b></div>
-      <input id="m" type="range" min="512" max="32768" step="256" bind:value={f.memory_mb} disabled={!canEdit} />{#if errs.memory_mb}<span class="err">{errs.memory_mb}</span>{/if}
+      <input id="m" type="range" min="512" max={Math.max(maxMemoryMb(), f.memory_mb)} step="256" bind:value={f.memory_mb} disabled={!canEdit} />{#if f.memory_mb > maxMemoryMb()}<span class="hint">This is more than this machine's memory ({maxMemoryMb()} MB); lower it to change other settings, or leave it as is.</span>{/if}{#if errs.memory_mb}<span class="err">{errs.memory_mb}</span>{/if}
     </div>{/if}
     <div class="field"><label for="p">Port</label><input id="p" class="input" type="number" min="1024" max="65535" bind:value={f.port} readonly={!canEdit} />{#if errs.port}<span class="err">{errs.port}</span>{/if}</div>
     {#if s.capabilities.includes('java')}<div class="field"><label for="fl">JVM flags profile</label>

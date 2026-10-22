@@ -57,8 +57,8 @@ async fn import_from_path_and_upload() {
     let det: Value = c.post(format!("{api}/servers/import/inspect")).json(&json!({"path": src.to_str().unwrap()})).send().await.unwrap().json().await.unwrap();
     assert_eq!((det["runtime"].as_str(), det["game_version"].as_str(), det["port"].as_i64(), det["has_world"].as_bool()), (Some("paper"), Some("1.21.4"), Some(25811), Some(true)), "{det}");
 
-    // EULA is required
-    let r = c.post(format!("{api}/servers/import")).json(&json!({"name": "Imported", "path": src.to_str().unwrap()})).send().await.unwrap();
+    // the EULA is optional at import (the start guard enforces it); a bad name is still refused
+    let r = c.post(format!("{api}/servers/import")).json(&json!({"name": "", "path": src.to_str().unwrap()})).send().await.unwrap();
     assert_eq!(r.status(), 400);
     let r = c.post(format!("{api}/servers/import")).json(&json!({"name": "Imported", "path": src.to_str().unwrap(), "accept_eula": true})).send().await.unwrap();
     assert_eq!(r.status(), 202);
@@ -67,6 +67,7 @@ async fn import_from_path_and_upload() {
     assert_eq!(out["server"]["port"], 25811);
     let done = wait_op(&c, &api, &op).await;
     assert_eq!(done["state"], "completed", "{done}");
+    assert!(done["log"].as_array().unwrap().iter().any(|l| l.as_str().is_some_and(|l| l.starts_with("Recognised 0 of 0 files"))), "identify ran after the copy: {done}");
     let sdir = dir.join("servers").join(&sid);
     assert!(sdir.join("world/level.dat").is_file() && sdir.join("config/paper-global.yml").is_file());
     assert!(sdir.join("server.jar").is_file(), "launcher normalised");
@@ -117,5 +118,18 @@ async fn import_from_path_and_upload() {
     assert_eq!(multipart("evil.zip", std::fs::read(&evil).unwrap()).send().await.unwrap().status(), 400);
     assert!(!dir.join("escape.txt").exists() && !base.join("escape.txt").exists());
     assert_eq!(multipart("junk.zip", b"not an archive".to_vec()).send().await.unwrap().status(), 400);
+    // a proxy needs no EULA: importing without accepting works, records nothing and writes no eula.txt
+    let vsrc = base.join("velocity-src");
+    std::fs::create_dir_all(&vsrc).unwrap();
+    make_jar(&vsrc.join("velocity-3.4.0-100.jar"), &[("velocity-version.json", "{}")]);
+    std::fs::write(vsrc.join("velocity.toml"), "bind = \"0.0.0.0:25899\"\n").unwrap();
+    let r = c.post(format!("{api}/servers/import")).json(&json!({"name": "Proxy", "path": vsrc.to_str().unwrap(), "runtime": "velocity", "game_version": "3.4.0", "port": 25899})).send().await.unwrap();
+    assert_eq!(r.status(), 202);
+    let out: Value = r.json().await.unwrap();
+    let (vid, vop) = (out["server"]["id"].as_str().unwrap().to_string(), out["operation"]["id"].as_str().unwrap().to_string());
+    assert_eq!(out["server"]["eula_accepted"], true, "{out}");
+    let done = wait_op(&c, &api, &vop).await;
+    assert_eq!(done["state"], "completed", "{done}");
+    assert!(!dir.join("servers").join(&vid).join("eula.txt").exists(), "no eula.txt for a proxy");
     let _ = std::fs::remove_dir_all(&base);
 }

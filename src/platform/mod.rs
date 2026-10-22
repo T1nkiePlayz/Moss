@@ -13,6 +13,14 @@ compile_error!("Moss supports Linux and macOS hosts only");
 
 pub mod cgroup;
 
+/// Total physical memory in MB, or 0 when it cannot be read.
+pub fn host_memory_mb() -> i64 { (host_memory().0 >> 20) as i64 }
+
+/// The "too much memory" message for a request above `total_mb` (0 = unknown, no cap).
+pub fn memory_over(mb: i64, total_mb: i64) -> Option<String> {
+    (total_mb > 0 && mb > total_mb).then(|| format!("at most {total_mb} MB (this machine's memory)"))
+}
+
 pub use imp::{HostSampler, group_usage_all, host_memory, load1, pid_start};
 
 /// Name Adoptium uses for this OS in its API (`os=` parameter).
@@ -87,6 +95,13 @@ pub type GroupUsage = HashMap<i64, (f64, u64)>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_cap_message() {
+        assert!(memory_over(16384, 16000).unwrap().contains("16000 MB"));
+        assert!(memory_over(16000, 16000).is_none());
+        assert!(memory_over(1 << 30, 0).is_none());
+    }
 
     #[test]
     fn own_process_is_visible() {

@@ -41,11 +41,24 @@ pub(super) async fn save(st: &St, id: &str, p: LimitsPatch) -> ApiResult<()> {
     Ok(())
 }
 
-pub(super) fn validate_now(p: &LimitsPatch) -> ApiResult<()> { validate(p, cgroup::cores()) }
+/// `current` is the stored memory limit: an unchanged value is never re-checked against the host cap.
+pub(super) fn validate_now(p: &LimitsPatch, current: Option<i64>) -> ApiResult<()> {
+    validate(p, cgroup::cores())?;
+    if let Some(Some(m)) = p.memory && Some(m) != current && let Some(msg) = crate::platform::memory_over(m, crate::platform::host_memory_mb()) { return Err(ApiError::bad("validation", "memory_limit_mb out of range").field("memory_limit_mb", &msg)); }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_cap_applies_only_to_changed_memory_limit() {
+        let over = crate::platform::host_memory_mb().max(256) + 1;
+        let p = LimitsPatch { memory: Some(Some(over)), ..Default::default() };
+        assert!(validate_now(&p, None).is_err(), "a new value above the host is refused");
+        assert!(validate_now(&p, Some(over)).is_ok(), "an unchanged value above the host is left alone");
+    }
 
     #[test]
     fn bounds_and_null() {

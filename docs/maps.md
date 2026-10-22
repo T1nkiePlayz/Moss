@@ -28,9 +28,11 @@ Map pages are plugin-controlled HTML and JavaScript, so they must never run with
   `Access-Control-Allow-Origin: *` (the sandboxed page can read its own tiles). The plugin's `Set-Cookie`, CSP, CORS and
   framing headers are removed. The UI frame uses `sandbox="allow-scripts allow-popups"` as well.
 - A sandboxed page sends no Moss cookies, so access is a capability link: `/map/{server_id}/{token}/...`, where the token
-  is `expiry.scope.HMAC-SHA256(key, server id + expiry + scope)`. The key is `map.key` in the data directory (created on
-  first use, owner-only). `GET /api/v1/servers/{id}/map` issues a 12 hour link to anyone who may view the server.
-  Tokens are bound to one server and fail once expired or altered.
+  is `expiry.p.HMAC` for public links or `expiry.u.<hex user id>.HMAC` for user links (HMAC-SHA256 under the key over
+  server id, expiry, scope and holder). The key is `map.key` in the data directory (created on first use, owner-only).
+  `GET /api/v1/servers/{id}/map` issues a 12 hour link to anyone who may view the server. Tokens are bound to one
+  server and fail once expired or altered. A user link also names its holder, whose access is re-checked (cached for
+  5 seconds): deleting the user or removing their grant ends their links at once.
 - Only `GET`, `HEAD` (and a locally answered `OPTIONS`) are accepted. Only `Accept`, `Accept-Encoding`, `Range`,
   `If-None-Match` and `If-Modified-Since` are forwarded. Paths are normalised (`..`, encoded separators and control
   characters are refused), redirects are kept inside the proxy, requests time out after 60 seconds and responses are

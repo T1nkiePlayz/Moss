@@ -167,7 +167,7 @@ Schedule gains `tz: string` (IANA name, e.g. `"Europe/Berlin"`, default `"UTC"`)
 - `POST /backups/{id}/restore` body gains `only?:string[]` (top-level names such as `["world","world_nether"]`; in-place only): restores just those entries, taking the safety backup first.
 
 ### Notifications and webhooks
-Notification: `{id, time, kind:"crash"|"crash_loop"|"backup_failed"|"disk_low"|"operation_failed"|"restart_failed"|"update_available"|"security", severity:"info"|"warn"|"critical", title, body, server_id:string|null, read:boolean}`.
+Notification: `{id, time, kind:"crash"|"crash_loop"|"backup_failed"|"disk_low"|"operation_failed"|"restart_failed"|"update_available"|"security", severity:"info"|"warn"|"critical", title, body, server_id:string|null, read:boolean}` (`read` is the caller's own read state; each user marks notifications read for themselves).
 - `GET /notifications?unread=1&limit=50` → `{items:Notification[], unread:number}` (scoped to servers the caller can see; admin-only kinds hidden from others).
 - `POST /notifications/read {ids?:string[], all?:boolean}` → 204.
 - SSE event `notification` (data = Notification) on `/events`.

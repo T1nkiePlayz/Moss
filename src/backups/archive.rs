@@ -13,6 +13,12 @@ impl<W: Write> Write for HashW<W> {
     fn flush(&mut self) -> std::io::Result<()> { self.inner.flush() }
 }
 
+/// Files up to this size are read whole before their tar header is written, so a game rewriting one mid-backup (region
+/// files, player data, configs) is archived at whatever length it has then instead of failing the backup.
+const SNAPSHOT_MAX: u64 = 32 << 20;
+/// The error text of a larger file that shrank mid-backup; `create` retries the backup when it sees it.
+pub const SHRANK: &str = "a file shrank while it was being backed up";
+
 /// Reads exactly `len` bytes; errors if the file shrinks while being archived (tar needs a fixed length).
 struct Fixed { f: std::io::Take<std::fs::File>, left: u64 }
 impl Read for Fixed {
@@ -20,7 +26,7 @@ impl Read for Fixed {
         if self.left == 0 { return Ok(0); }
         let want = buf.len().min(self.left as usize);
         let n = self.f.read(&mut buf[..want])?;
-        if n == 0 { return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "a file shrank while it was being backed up; try again")); }
+        if n == 0 { return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, SHRANK)); }
         self.left -= n as u64;
         Ok(n)
     }
@@ -64,13 +70,21 @@ pub fn build_archive(root: PathBuf, out: PathBuf, manifest: String, token: tokio
                 stack.push((e.path(), false));
             } else if t.is_file() {
                 // A file deleted mid-backup is skipped; anything else unreadable fails the backup rather than recording an incomplete one as ok.
-                let file = match std::fs::File::open(e.path()) { Ok(f) => f, Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue, Err(err) => bail!("cannot read {}: {err}", rel.display()) };
+                let mut file = match std::fs::File::open(e.path()) { Ok(f) => f, Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue, Err(err) => bail!("cannot read {}: {err}", rel.display()) };
                 let m = file.metadata()?;
                 let mut hd = tar::Header::new_gnu();
                 hd.set_metadata(&m);
-                hd.set_size(m.len());
-                hd.set_cksum();
-                tar.append_data(&mut hd, &rel, Fixed { f: file.take(m.len()), left: m.len() })?;
+                if m.len() <= SNAPSHOT_MAX {
+                    let mut buf = Vec::with_capacity(m.len() as usize);
+                    file.read_to_end(&mut buf).map_err(|err| anyhow::anyhow!("cannot read {}: {err}", rel.display()))?;
+                    hd.set_size(buf.len() as u64);
+                    hd.set_cksum();
+                    tar.append_data(&mut hd, &rel, buf.as_slice())?;
+                } else {
+                    hd.set_size(m.len());
+                    hd.set_cksum();
+                    tar.append_data(&mut hd, &rel, Fixed { f: file.take(m.len()), left: m.len() })?;
+                }
                 files += 1;
             } // symlinks, sockets and devices are deliberately not archived
         }

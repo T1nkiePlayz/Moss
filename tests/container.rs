@@ -145,6 +145,23 @@ async fn container_servers_start_stop_reattach_and_recover() {
         b["lines"].as_array()?.iter().any(|l| l.as_str().is_some_and(|l| l.contains("[Server] after restart"))).then_some(())
     }).await;
 
+    // The server directory is bind-mounted, so the game can swap Moss's own files for links to host files: console
+    // input must not be written through a planted link, nor a host file shown as console output.
+    let mdir = data.join("servers").join(&id).join(".moss");
+    let (secret, sink) = (root.join("host-secret.txt"), root.join("host-sink.txt"));
+    std::fs::write(&secret, "TOPSECRET-host-file\n").unwrap();
+    std::fs::write(&sink, "").unwrap();
+    for f in ["console.fifo", "console.log"] { std::fs::rename(mdir.join(f), mdir.join(format!("{f}.real"))).unwrap(); }
+    std::os::unix::fs::symlink(&sink, mdir.join("console.fifo")).unwrap();
+    std::os::unix::fs::symlink(&secret, mdir.join("console.log")).unwrap();
+    let r = c.post(format!("{}/servers/{id}/command", moss.base)).json(&json!({"command": "say through a link"})).send().await.unwrap();
+    assert!(!r.status().is_success(), "console input through a planted link is refused");
+    assert_eq!(std::fs::read_to_string(&sink).unwrap(), "", "nothing written to the host file");
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let b = get(&c, format!("{}/servers/{id}/console/backlog?lines=300", moss.base)).await.unwrap();
+    assert!(!b.to_string().contains("TOPSECRET"), "a linked host file never reaches the console");
+    for f in ["console.fifo", "console.log"] { std::fs::remove_file(mdir.join(f)).unwrap(); std::fs::rename(mdir.join(format!("{f}.real")), mdir.join(f)).unwrap(); }
+
     eprintln!("step: graceful stop:");
     // graceful stop: `stop` over the console FIFO, then the container is removed and nothing is left behind
     assert!(c.post(format!("{}/servers/{id}/actions/stop", moss.base)).send().await.unwrap().status().is_success());

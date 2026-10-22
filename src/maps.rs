@@ -144,10 +144,10 @@ fn from_json(v: &Value) -> Option<MapPlugin> {
 
 // ---- capability tokens ------------------------------------------------------------------------------------------
 
-/// Who a token was minted for. Public tokens go through the public rate limiter.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Scope { User, Public }
-impl Scope { fn c(self) -> char { match self { Scope::User => 'u', Scope::Public => 'p' } } }
+/// Who a token was minted for. A user link names its holder, so the proxy re-checks that user's access on every request
+/// (removing a grant or the user ends the link at once); public tokens go through the public rate limiter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Scope { User(String), Public }
 
 /// The signing key lives in `<data dir>/map.key` (64 random characters, owner-only), created on first use.
 fn key(st: &Inner) -> Vec<u8> {
@@ -164,28 +164,39 @@ fn key(st: &Inner) -> Vec<u8> {
     stored(&path).unwrap_or_else(|| fresh.into_bytes())
 }
 
-fn mac(key: &[u8], server_id: &str, exp: i64, scope: Scope) -> String {
-    hex::encode(crate::webhooks::sign::hmac_sha256(key, format!("moss-map-v1\n{server_id}\n{exp}\n{}", scope.c()).as_bytes()))
+fn mac(key: &[u8], server_id: &str, exp: i64, scope: &Scope) -> String {
+    let msg = match scope {
+        Scope::Public => format!("moss-map-v1\n{server_id}\n{exp}\np"),
+        // v2: user links issued before holders were bound (`<exp>.u.<mac>`) no longer verify
+        Scope::User(uid) => format!("moss-map-v2\n{server_id}\n{exp}\nu\n{uid}"),
+    };
+    hex::encode(crate::webhooks::sign::hmac_sha256(key, msg.as_bytes()))
 }
 
-/// `<expiry>.<scope>.<hex HMAC-SHA256(server key, server id + expiry + scope)>`, safe inside a URL path.
+/// `<expiry>.p.<mac>` or `<expiry>.u.<hex user id>.<mac>` (HMAC-SHA256 under the server key over server id, expiry,
+/// scope and holder), safe inside a URL path.
 pub fn mint(st: &Inner, server_id: &str, scope: Scope, ttl_secs: i64) -> (String, i64) {
     let exp = chrono::Utc::now().timestamp() + ttl_secs;
-    (mint_with(&key(st), server_id, scope, exp), exp)
+    (mint_with(&key(st), server_id, &scope, exp), exp)
 }
 
-fn mint_with(key: &[u8], server_id: &str, scope: Scope, exp: i64) -> String { format!("{exp}.{}.{}", scope.c(), mac(key, server_id, exp, scope)) }
+fn mint_with(key: &[u8], server_id: &str, scope: &Scope, exp: i64) -> String {
+    let m = mac(key, server_id, exp, scope);
+    match scope { Scope::Public => format!("{exp}.p.{m}"), Scope::User(uid) => format!("{exp}.u.{}.{m}", hex::encode(uid)) }
+}
 
-/// The scope of a valid, unexpired token for exactly this server.
+/// The scope of a valid, unexpired token for exactly this server. A user scope still has to pass that user's access check.
 pub fn verify(st: &Inner, server_id: &str, token: &str) -> Option<Scope> { verify_with(&key(st), server_id, token, chrono::Utc::now().timestamp()) }
 
 fn verify_with(key: &[u8], server_id: &str, token: &str, now: i64) -> Option<Scope> {
-    let mut p = token.split('.');
-    let (exp, scope, given) = (p.next()?, p.next()?, p.next()?);
-    if p.next().is_some() { return None; }
-    let scope = match scope { "u" => Scope::User, "p" => Scope::Public, _ => return None };
+    let p: Vec<&str> = token.split('.').collect();
+    let (exp, scope, given) = match p.as_slice() {
+        [exp, "p", given] => (exp, Scope::Public, given),
+        [exp, "u", holder, given] => (exp, Scope::User(String::from_utf8(hex::decode(holder).ok()?).ok().filter(|u| !u.is_empty())?), given),
+        _ => return None,
+    };
     let exp: i64 = exp.parse().ok()?;
-    if !secret::ct_eq(mac(key, server_id, exp, scope).as_bytes(), given.as_bytes()) || exp < now { return None; }
+    if !secret::ct_eq(mac(key, server_id, exp, &scope).as_bytes(), given.as_bytes()) || exp < now { return None; }
     Some(scope)
 }
 
@@ -334,37 +345,43 @@ mod tests {
     #[test]
     fn tokens_expire_and_bind_to_the_server() {
         let k = b"k".repeat(32);
-        let t = mint_with(&k, "srv-a", Scope::User, 1_000);
-        assert_eq!(verify_with(&k, "srv-a", &t, 999), Some(Scope::User));
-        assert_eq!(verify_with(&k, "srv-a", &t, 1_000), Some(Scope::User));
+        let u = || Scope::User("user-1".into());
+        let t = mint_with(&k, "srv-a", &u(), 1_000);
+        assert_eq!(verify_with(&k, "srv-a", &t, 999), Some(u()));
+        assert_eq!(verify_with(&k, "srv-a", &t, 1_000), Some(u()));
         assert_eq!(verify_with(&k, "srv-a", &t, 1_001), None, "expired");
         assert_eq!(verify_with(&k, "srv-b", &t, 0), None, "wrong server");
         assert_eq!(verify_with(&b"x".repeat(32), "srv-a", &t, 0), None, "wrong key");
-        let p = mint_with(&k, "srv-a", Scope::Public, 1_000);
+        let p = mint_with(&k, "srv-a", &Scope::Public, 1_000);
         assert_eq!(verify_with(&k, "srv-a", &p, 0), Some(Scope::Public));
     }
 
     #[test]
     fn tampered_tokens_are_refused() {
         let k = b"k".repeat(32);
-        let t = mint_with(&k, "s", Scope::User, 1_000);
+        let t = mint_with(&k, "s", &Scope::User("user-1".into()), 1_000);
         let (_, rest) = t.split_once('.').unwrap();
         assert_eq!(verify_with(&k, "s", &format!("9999999999.{rest}"), 0), None, "extended expiry");
-        assert_eq!(verify_with(&k, "s", &t.replacen(".u.", ".p.", 1), 0), None, "escalated scope");
+        let m = t.rsplit('.').next().unwrap();
+        assert_eq!(verify_with(&k, "s", &format!("1000.p.{m}"), 0), None, "escalated scope");
+        assert_eq!(verify_with(&k, "s", &t.replace(&hex::encode("user-1"), &hex::encode("user-2")), 0), None, "another holder");
+        // links minted before holders were bound stop working
+        let v1 = format!("1000.u.{}", hex::encode(crate::webhooks::sign::hmac_sha256(&k, b"moss-map-v1\ns\n1000\nu")));
+        assert_eq!(verify_with(&k, "s", &v1, 0), None, "unbound v1 user link");
         let mut flipped = t.clone();
         flipped.pop();
         flipped.push(if t.ends_with('0') { '1' } else { '0' });
         assert_eq!(verify_with(&k, "s", &flipped, 0), None);
-        for bad in ["", ".", "..", "1.u", "1.u.", "x.u.ab", &format!("{t}.extra"), "-1.u.00"] { assert_eq!(verify_with(&k, "s", bad, 0), None, "{bad}"); }
+        for bad in ["", ".", "..", "1.u", "1.u.", "x.u.ab", &format!("{t}.extra"), "-1.u.00", "1.u..00", "1.u.zz.00"] { assert_eq!(verify_with(&k, "s", bad, 0), None, "{bad}"); }
     }
 
     #[tokio::test]
     async fn the_key_is_stable_across_calls_and_private() {
         let st = crate::testutil::state(|_| {}).await;
-        let (t, _) = mint(&st, "s1", Scope::User, 60);
-        assert_eq!(verify(&st, "s1", &t), Some(Scope::User));
+        let (t, _) = mint(&st, "s1", Scope::User("u".into()), 60);
+        assert_eq!(verify(&st, "s1", &t), Some(Scope::User("u".into())));
         assert_eq!(verify(&st, "s2", &t), None);
-        let (expired, _) = mint(&st, "s1", Scope::User, -5);
+        let (expired, _) = mint(&st, "s1", Scope::User("u".into()), -5);
         assert_eq!(verify(&st, "s1", &expired), None);
         #[cfg(unix)]
         { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(st.cfg.data_dir.join("map.key")).unwrap().permissions().mode() & 0o777, 0o600); }

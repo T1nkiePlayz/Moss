@@ -58,13 +58,22 @@ async fn backup_inner(ctx: &OpCtx, st: &St, s: &Srv, kind: &str, note: &str, kee
         tokio::fs::create_dir_all(&dir).await?;
         let (out, part) = (archive_path(st, &s.id, &id), dir.join(format!("{id}.part")));
         let manifest = json!({"moss": env!("CARGO_PKG_VERSION"), "backup_id": id, "server_id": s.id, "server_name": s.name, "runtime": s.runtime, "game_version": s.game_version, "created_at": crate::db::now(), "consistent": consistent, "excluded": EXCLUDE_TOP}).to_string();
-        let (root2, part2, token) = (root.clone(), part.clone(), ctx.token.clone());
         let ticker = { let c = ctx.clone(); let p = part.clone(); tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_millis(500)).await; let done = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0) as f64; c.progress(Some(if est == 0 { 0.5 } else { (done / (est as f64 * 0.5 + 1.0)).min(0.95) })); } }) };
         let root3 = root.clone();
-        let (r, w) = tokio::join!(tokio::task::spawn_blocking(move || build_archive(root2, part2, manifest, token)), tokio::task::spawn_blocking(move || worlds_of(&root3)));
-        worlds = w.unwrap_or_default();
+        let w = tokio::task::spawn_blocking(move || worlds_of(&root3));
+        // A large file the game truncated mid-backup cannot be archived at its old length: start over a couple of times.
+        let mut attempt = 0;
+        let r = loop {
+            let (root2, part2, token, manifest) = (root.clone(), part.clone(), ctx.token.clone(), manifest.clone());
+            let r = tokio::task::spawn_blocking(move || build_archive(root2, part2, manifest, token)).await.map_err(|e| anyhow!(e)).and_then(|r| r);
+            attempt += 1;
+            match r {
+                Err(e) if attempt < 3 && format!("{e:#}").contains(super::archive::SHRANK) => { ctx.log(format!("{e:#}; starting the archive again")); }
+                r => break r.map_err(|e| if format!("{e:#}").contains(super::archive::SHRANK) { anyhow!("{e:#}; try again when the server is quieter") } else { e }),
+            }
+        };
+        worlds = w.await.unwrap_or_default();
         ticker.abort();
-        let r = r.map_err(|e| anyhow!(e)).and_then(|r| r);
         match r { Ok(v) => { tokio::fs::rename(&part, &out).await?; Ok(v) } Err(e) => { let _ = tokio::fs::remove_file(&part).await; Err(e) } }
     }.await;
     if running && s.is_mc() { let _ = crate::lifecycle::send_command(st, s, "save-on").await; }

@@ -277,6 +277,8 @@ Data layout: `moss.sqlite`, `servers/<id>/` (game files; Moss metadata in `.moss
 
 ### Other games
 
+Whether each SteamCMD game really installs, starts and answers a player query is tracked in [docs/game-compat.md](docs/game-compat.md).
+
 | Game | Installed from | Platforms | Players | Notes |
 |---|---|---|---|---|
 | Minecraft Bedrock | minecraft.net (official server zip) | Linux | From the log | Needs the Minecraft EULA; `server.properties` editor |
@@ -386,7 +388,7 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 
 **Trust and testing**
 - [ ] Run container mode against real Docker and Podman in CI (one Minecraft server and one SteamCMD game each), not just the stand-in.
-- [ ] A nightly game end-to-end matrix (install, start, player query, backup, stop) for every SteamCMD game, with the results published as a compatibility table.
+- [x] A nightly game end-to-end matrix ([games-e2e.yml](.github/workflows/games-e2e.yml)) installs, starts, queries players, backs up and stops every SteamCMD game and renders a compatibility table; see [docs/game-compat.md](docs/game-compat.md). Results are filled in as runs complete.
 - [x] The desktop app has a build workflow ([desktop.yml](.github/workflows/desktop.yml), AppImage, `.deb` and `.dmg`). Still open: run it on every pull request as a smoke build, not by hand only.
 - [ ] Ship the first signed release.
 - [ ] An external security review, and fuzz or property tests for the riskiest parsers (archive and modpack import, jar manifests, path confinement in the file manager).
@@ -424,6 +426,7 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 | [docs/migrating.md](docs/migrating.md) | Moving a Minecraft server to Moss from Pterodactyl, Pelican, AMP or a systemd setup |
 | [docs/threat-model.md](docs/threat-model.md) · [docs/security-review.md](docs/security-review.md) · [SECURITY.md](SECURITY.md) | What Moss defends against, what the internal review found, how to report a problem |
 | [docs/webhooks.md](docs/webhooks.md) | Signed event webhooks and how to verify them |
+| [docs/game-compat.md](docs/game-compat.md) | The nightly end-to-end matrix for the SteamCMD games and how to run one locally |
 | [docs/game-mods.md](docs/game-mods.md) · [docs/player-lists.md](docs/player-lists.md) | Mods for Valheim, Factorio, Garry's Mod and CS2; shared allow and ban lists |
 | [docs/maps.md](docs/maps.md) · [docs/push.md](docs/push.md) | Live web maps; installing the app and Web Push |
 | [docs/api-policy.md](docs/api-policy.md) | The frozen API and what counts as a breaking change |

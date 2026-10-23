@@ -1,4 +1,5 @@
 //! The `doctor` command: checks data directory, disk, port, Java, auth and CurseForge configuration.
+//! The wording of each check is documented in `docs/troubleshooting.md`; keep the two in step when a message changes.
 use std::path::Path;
 use crate::{config, providers::curseforge, java, platform, serve::build_state};
 

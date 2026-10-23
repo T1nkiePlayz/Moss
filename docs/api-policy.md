@@ -42,3 +42,7 @@ The version is the path prefix. A breaking change means a new prefix (`/api/v2`)
 - `tests/openapi.rs` checks that every route is documented.
 - `tests/api_compat.rs` compares `docs/openapi.json` with `docs/openapi.frozen.json` and fails on any removed path or method, removed or retyped response field, newly required request field or parameter, removed enum value or removed success status.
 - After an **additive** change the test still passes. When you want the new routes and fields protected too, refresh the snapshot with `node scripts/api-freeze.mjs` and commit it with your change. Refreshing is also how a reviewed, intended break is recorded (`--allow-breaking`); do that only together with a new API version or a documented pre-release exception.
+
+## SDKs
+
+The TypeScript client in [`sdk/typescript`](../sdk/typescript) and the Python client in [`sdk/python`](../sdk/python) are generated from `docs/openapi.frozen.json`, so they only describe the stable API. Run `scripts/gen-sdk.sh` whenever the snapshot changes and commit the result; the `SDKs` workflow regenerates them and fails on any difference.

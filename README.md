@@ -406,12 +406,12 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 - [ ] World tools: reset or regenerate a world, swap worlds, pre-generate chunks (Chunky), each with an automatic safety backup.
 - [ ] A public join page with the address and a one-click client modpack download, built on the status pages.
 - [ ] Multi-node, first step: add another Moss as a read-only peer in the servers list.
-- [ ] Typed SDKs (TypeScript and Python) generated from [docs/openapi.frozen.json](docs/openapi.frozen.json).
+- [x] Typed SDKs for TypeScript and Python, generated from [docs/openapi.frozen.json](docs/openapi.frozen.json), live in [sdk/](sdk/typescript).
 
 **Language and docs**
 - [ ] Extract panel strings into a catalog (English only) as the first step of M9, then add a community translation workflow.
-- [ ] A migration guide from Pterodactyl, AMP or a hand-written systemd setup.
-- [ ] A troubleshooting page built from the `moss doctor` messages.
+- [x] A migration guide from Pterodactyl, Pelican, AMP or a hand-written systemd setup: [docs/migrating.md](docs/migrating.md).
+- [x] A troubleshooting page built from the `moss doctor` messages and the panel's health findings: [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Documentation
 
@@ -420,6 +420,8 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 | [docs/curseforge.md](docs/curseforge.md) · [docs/hangar.md](docs/hangar.md) | How CurseForge and Hangar work in Moss, limits, using your own key |
 | [docs/macos.md](docs/macos.md) | Running Moss on macOS |
 | [docs/recovery.md](docs/recovery.md) | `moss recover`: locked-out owner, stuck jobs, integrity |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | What each `moss doctor` line and panel health finding means, common problems, support bundle, reporting bugs |
+| [docs/migrating.md](docs/migrating.md) | Moving a Minecraft server to Moss from Pterodactyl, Pelican, AMP or a systemd setup |
 | [docs/threat-model.md](docs/threat-model.md) · [docs/security-review.md](docs/security-review.md) · [SECURITY.md](SECURITY.md) | What Moss defends against, what the internal review found, how to report a problem |
 | [docs/webhooks.md](docs/webhooks.md) | Signed event webhooks and how to verify them |
 | [docs/game-mods.md](docs/game-mods.md) · [docs/player-lists.md](docs/player-lists.md) | Mods for Valheim, Factorio, Garry's Mod and CS2; shared allow and ban lists |
@@ -428,6 +430,7 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 | [docs/desktop.md](docs/desktop.md) | The desktop app |
 | [docs/architecture.md](docs/architecture.md) · [docs/adr](docs/adr) | How it works and why |
 | [docs/api.md](docs/api.md) · [docs/openapi.json](docs/openapi.json) | HTTP API reference |
+| [sdk/typescript](sdk/typescript) · [sdk/python](sdk/python) | Typed API clients generated from the frozen OpenAPI document |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing and releasing |
 | [ACCESSIBILITY.md](ACCESSIBILITY.md) | Accessibility target, settings, testing, known limits and how to report a problem |
 

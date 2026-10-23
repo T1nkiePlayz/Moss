@@ -1,0 +1,35 @@
+name: Moss performance
+
+# Startup time, idle memory and console/event-stream rates of the release binary against perf-budget.json
+# (see tests/perf.rs). A separate workflow so ci.yml keeps its few jobs; the release build is cached from main.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    name: Performance budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+      - name: Cache Rust
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The binary embeds web/dist; an empty directory is enough for the measurements.
+      - name: Prepare embedded UI directory
+        run: mkdir -p web/dist
+      - name: Performance budget (table goes to the run summary)
+        run: cargo test --locked --release --test perf -- --ignored --nocapture

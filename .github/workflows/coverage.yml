@@ -1,0 +1,53 @@
+name: Moss coverage
+
+# Line coverage of the backend, per source directory, in the run summary (no pull request comment, so it also works for
+# forks). The full lcov file is kept as an artifact. Nothing here fails a build.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+        with:
+          components: llvm-tools-preview
+      - name: Cache Rust
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-nextest and cargo-llvm-cov
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-nextest@0.9.146,cargo-llvm-cov@0.9.1
+      # The binary embeds web/dist; an empty directory is enough to compile and test the backend.
+      - name: Prepare embedded UI directory
+        run: mkdir -p web/dist
+      - name: Test with coverage
+        run: cargo llvm-cov nextest --locked --profile ci --lcov --output-path lcov.info
+      - name: Summary
+        run: cargo llvm-cov report --summary-only
+      - name: Per-directory summary
+        run: node scripts/coverage-summary.mjs lcov.info
+      - name: Upload lcov
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lcov
+          path: lcov.info
+          retention-days: 14

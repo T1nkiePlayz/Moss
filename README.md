@@ -392,8 +392,8 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 - [x] The desktop app has a build workflow ([desktop.yml](.github/workflows/desktop.yml), AppImage, `.deb` and `.dmg`). Still open: run it on every pull request as a smoke build, not by hand only.
 - [ ] Ship the first signed release.
 - [ ] An external security review, and fuzz or property tests for the riskiest parsers (archive and modpack import, jar manifests, path confinement in the file manager).
-- [ ] Performance gates in CI for idle memory, startup time and event-stream rate, next to the existing bundle-size budget.
-- [ ] A per-pull-request test-coverage report (`cargo llvm-cov`) to show weak spots such as the newer games.
+- [x] Performance gates in CI for startup time, idle memory and console and event-stream rates, next to the bundle-size budget (`tests/perf.rs`, `perf-budget.json`).
+- [x] A per-pull-request test-coverage report (`cargo llvm-cov`, per directory in the run summary) to show weak spots such as the newer games.
 
 **Reliability and operations**
 - [x] systemd and launchd unit files ship in [`packaging/`](packaging) and are documented. Still open: a `moss install-service` command that writes and enables them, and a health finding when Moss is not set up to start on boot.

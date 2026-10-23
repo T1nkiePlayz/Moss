@@ -415,6 +415,15 @@ mod tests {
         (g.launch)(&Launch { port, max_players: g.max_players, name: "My Server", cfg: &cfg }).unwrap()
     }
 
+    /// Prints the SteamCMD game ids as one JSON line. The nightly matrix (.github/workflows/games-e2e.yml) runs it to
+    /// build its job list from the catalogue itself: `cargo test --bin moss -- --ignored --exact games::tests::list_steam_games --nocapture`.
+    #[test]
+    #[ignore = "prints the matrix for the nightly game workflow"]
+    fn list_steam_games() {
+        let ids: Vec<&str> = GAMES.iter().filter(|g| matches!(g.install, Install::Steam(_))).map(|g| g.id).collect();
+        println!("STEAM_GAMES={}", serde_json::to_string(&ids).unwrap());
+    }
+
     #[test]
     fn descriptors_are_consistent() {
         let mut ids = HashSet::new();

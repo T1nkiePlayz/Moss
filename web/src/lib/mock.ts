@@ -208,7 +208,7 @@ const users: A.User[] = [
   { id: uid(), email: 'jo@example.com', role: 'user', created_at: ago(3 * DAY) },
 ];
 let grants: A.Grant[] = [{ user_id: users[2].id, email: users[2].email, bundle: 'operator' }];
-const settings: A.Settings = { default_memory_mb: 4096, backup_keep: 10, backup_before_change: true, modrinth_contact: 'owner@example.com', public_base_url: 'https://moss.example.com', data_dir: '/var/lib/moss', bind: '127.0.0.1:8420', version: '0.1.0-mock' };
+const settings: A.Settings = { default_memory_mb: 4096, backup_keep: 10, backup_before_change: true, backup_remote_safety: false, backup_keep_gib: 0, modrinth_contact: 'owner@example.com', public_base_url: 'https://moss.example.com', data_dir: '/var/lib/moss', bind: '127.0.0.1:8420', version: '0.1.0-mock' };
 const javaInstalls: A.JavaInstall[] = [{ major: 21, path: '/var/lib/moss/java/21', managed: true, version: '21.0.5+11' }, { major: 17, path: '/usr/lib/jvm/java-17', managed: false, version: '17.0.13' }];
 
 function stats(s: A.Server): A.StatSample[] {

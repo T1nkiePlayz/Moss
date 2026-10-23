@@ -784,6 +784,12 @@
           "backup_before_change": {
             "type": "boolean"
           },
+          "backup_remote_safety": {
+            "type": "boolean"
+          },
+          "backup_keep_gib": {
+            "type": "integer"
+          },
           "modrinth_contact": {
             "type": "string"
           },

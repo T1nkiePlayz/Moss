@@ -84,11 +84,13 @@ async fn backup_inner(ctx: &OpCtx, st: &St, s: &Srv, kind: &str, note: &str, kee
             st.db.call(move |c| c.execute("UPDATE backups SET status='ok', size=?, sha256=?, files=?, consistent=?, worlds=? WHERE id=?", rusqlite::params![size as i64, sha2, files as i64, consistent, w, i3])).await?;
             ctx.log(format!("{} files, {} MiB, sha256 {}", files, size >> 20, &sha[..16]));
             st.timeline(&s.id, "backup", kind).await;
-            if kind != "pre-change" { // safety backups are short-lived and stay local
+            if kind != "pre-change" || st.setting("backup_remote_safety", "false").await == "true" { // safety backups stay local unless mirroring is on
                 match super::remote::jobs::queue_upload(st, s, &id).await { Ok(Some(_)) => ctx.log("copying to the remote destination in a separate operation"), Ok(None) => {} Err(e) => ctx.log(format!("could not start the remote copy: {e:#}")) }
             }
             if kind == "scheduled" { prune(st, &s.id, "scheduled", keep.unwrap_or(0)).await; }
             if kind == "pre-change" { prune(st, &s.id, "pre-change", super::pre_change::KEEP).await; }
+            let cap_gib: i64 = st.setting("backup_keep_gib", "0").await.parse().unwrap_or(0);
+            if cap_gib > 0 { enforce_size_cap(ctx, st, &s.id, cap_gib.min(10000) << 30).await; }
             Ok(id)
         }
         Err(e) => {
@@ -129,6 +131,30 @@ fn prune_victims(c: &rusqlite::Connection, sid: &str, kind: &str, keep: i64) -> 
     Ok(v)
 }
 
+/// Retire the oldest scheduled/pre-change local backups until the server's local backups fit `cap` bytes.
+async fn enforce_size_cap(ctx: &OpCtx, st: &St, sid: &str, cap: i64) {
+    let s2 = sid.to_string();
+    let (victims, left): (Vec<String>, i64) = st.db.call(move |c| size_victims(c, &s2, cap)).await.unwrap_or_default();
+    for v in victims { retire_local(st, sid, &v).await; }
+    if left > cap { ctx.log(format!("local backups still use {} GiB, over the {} GiB cap; locked, manual and the newest backups are kept", left >> 30, cap >> 30)); }
+}
+
+/// Oldest-first scheduled/pre-change ok backups to retire so the local total fits `cap`, plus the total left afterwards.
+/// Never locked ones, never manual ones (they still count), never the server's newest ok backup.
+fn size_victims(c: &rusqlite::Connection, sid: &str, cap: i64) -> rusqlite::Result<(Vec<String>, i64)> {
+    let newest: String = c.query_row("SELECT COALESCE((SELECT id FROM backups WHERE server_id=?1 AND status='ok' ORDER BY created_at DESC LIMIT 1), '')", [sid], |r| r.get(0))?;
+    let mut q = c.prepare("SELECT id, kind, locked OR remote='uploading', COALESCE(size,0) FROM backups WHERE server_id=?1 AND status='ok' AND local_present=1 ORDER BY created_at ASC")?;
+    let rows = q.query_map([sid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?, r.get::<_, i64>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut total: i64 = rows.iter().map(|r| r.3).sum();
+    let mut v = vec![];
+    for (id, kind, keep, size) in rows { // keep: locked, or its remote copy is still being made
+        if total <= cap { break; }
+        if keep || id == newest || (kind != "scheduled" && kind != "pre-change") { continue; }
+        total -= size; v.push(id);
+    }
+    Ok((v, total))
+}
+
 /// Retention for local copies: a backup that is safely on a remote destination only loses its local file.
 async fn retire_local(st: &St, sid: &str, id: &str) {
     let i = id.to_string();
@@ -164,5 +190,33 @@ mod tests {
         assert!(v.contains(&"ok1".to_string()), "oldest ok beyond keep=2 goes");
         assert!(!v.contains(&"ok2".to_string()) && !v.contains(&"ok3".to_string()), "newest 2 ok are kept");
         assert_eq!(v.iter().filter(|x| x.starts_with('f')).count(), 2, "failed rows beyond the newest 3 go");
+    }
+
+    fn seed(c: &rusqlite::Connection) {
+        crate::db::migrate_for_tests(c);
+        c.execute("INSERT INTO servers(id,name,runtime,game_version,port,created_at) VALUES ('s','s','vanilla','1.21',25565,'t')", []).ok();
+    }
+    fn ins(c: &rusqlite::Connection, id: &str, at: &str, kind: &str, size: i64, locked: bool) {
+        c.execute("INSERT INTO backups(id,server_id,created_at,status,kind,size,locked) VALUES (?,'s',?,'ok',?,?,?)", rusqlite::params![id, at, kind, size, locked]).unwrap();
+    }
+
+    #[test]
+    fn size_cap_retires_oldest_scheduled_and_pre_change_only() {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        seed(&c);
+        ins(&c, "m", "2024-01-01", "manual", 4 << 30, false);
+        ins(&c, "l", "2024-01-02", "scheduled", 1 << 30, true);
+        ins(&c, "a", "2024-01-03", "scheduled", 1 << 30, false);
+        ins(&c, "b", "2024-01-04", "pre-change", 1 << 30, false);
+        ins(&c, "n", "2024-01-05", "scheduled", 1 << 30, false);
+        let (v, left) = size_victims(&c, "s", 7 << 30).unwrap();
+        assert_eq!(v, vec!["a".to_string()], "oldest unlocked non-manual first, stops once under the cap");
+        assert_eq!(left, 7 << 30);
+        let (v, left) = size_victims(&c, "s", 1 << 30).unwrap();
+        assert_eq!(v, vec!["a".to_string(), "b".to_string()], "manual, locked and newest survive");
+        assert_eq!(left, 6 << 30);
+        assert!(size_victims(&c, "s", 100 << 30).unwrap().0.is_empty());
+        c.execute("UPDATE backups SET remote='uploading' WHERE id='a'", []).unwrap();
+        assert_eq!(size_victims(&c, "s", 1 << 30).unwrap().0, vec!["b".to_string()], "a backup still uploading is never retired");
     }
 }

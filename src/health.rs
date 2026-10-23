@@ -89,6 +89,48 @@ async fn content_summary(st: &St, s: &Srv) -> Option<Value> {
         bad.iter().take(5).map(|x| x.title.clone()).collect(), Some(json!({"label": "Review content", "kind": "open_tab", "tab": "content"}))))
 }
 
+const DAY_MS: f64 = 86_400_000.0;
+
+/// Days until free space reaches `floor`, from a least-squares line over `(t ms, free bytes)` samples.
+/// None unless there are at least 24 samples spanning 24 h or more and free space is falling.
+pub fn forecast_days(samples: &[(i64, i64)], floor: i64) -> Option<f64> {
+    let (slope, now) = trend(samples)?;
+    Some(((now - floor as f64) / -slope / DAY_MS).max(0.0))
+}
+
+/// Least-squares fit of free space over time: (bytes per ms, fitted free bytes at the newest sample). `None` unless
+/// there are at least 24 samples spanning a day and free space is falling.
+fn trend(samples: &[(i64, i64)]) -> Option<(f64, f64)> {
+    if samples.len() < 24 { return None; }
+    let (t0, t1) = (samples.iter().map(|s| s.0).min()?, samples.iter().map(|s| s.0).max()?);
+    if ((t1 - t0) as f64) < DAY_MS { return None; }
+    let n = samples.len() as f64;
+    let (mt, mf) = (samples.iter().map(|s| (s.0 - t0) as f64).sum::<f64>() / n, samples.iter().map(|s| s.1 as f64).sum::<f64>() / n);
+    let (sxy, sxx) = samples.iter().fold((0.0, 0.0), |(a, b), s| { let dx = (s.0 - t0) as f64 - mt; (a + dx * (s.1 as f64 - mf), b + dx * dx) });
+    if sxx <= 0.0 { return None; }
+    let slope = sxy / sxx;
+    if slope >= 0.0 { return None; }
+    Some((slope, mf + slope * ((t1 - t0) as f64 - mt)))
+}
+
+/// Severity for a forecast: critical within 3 days, warn within 14, otherwise none.
+fn forecast_severity(days: f64) -> Option<&'static str> { if days <= 3.0 { Some("critical") } else if days <= 14.0 { Some("warn") } else { None } }
+
+/// The "disk will be full in about N days" finding from the last 7 days of hourly host roll-ups.
+async fn disk_forecast(st: &St, total: i64) -> Option<Value> {
+    let since = crate::history::hour_of(chrono::Utc::now().timestamp_millis()) - 7 * 24;
+    let samples: Vec<(i64, i64)> = st.db.call(move |c| c.prepare("SELECT hour, disk_free FROM host_hourly WHERE hour>=? AND disk_free>0 ORDER BY hour")?.query_map([since], |r| Ok((r.get::<_, i64>(0)? * 3_600_000, r.get::<_, i64>(1)?)))?.collect::<Result<Vec<_>, _>>()).await.ok()?;
+    let floor = (2i64 << 30).max(total / 20);
+    let days = forecast_days(&samples, floor)?;
+    let sev = forecast_severity(days)?;
+    let gib = (1u64 << 30) as f64;
+    let per_day = -trend(&samples)?.0 * DAY_MS / gib; // the fitted slope the forecast uses, so always positive
+    let n = days.round().max(1.0) as i64;
+    Some(finding("host:disk-forecast".into(), sev, None, &format!("Disk will be full in about {n} day{}", if n == 1 { "" } else { "s" }),
+        format!("Free space on the data volume has been falling by roughly {per_day:.1} GiB per day. At that pace it reaches {:.1} GiB, where backups and saves start to fail, in about {n} day{}.", floor as f64 / gib, if n == 1 { "" } else { "s" }),
+        vec![format!("trend: -{per_day:.1} GiB/day over {} hourly samples", samples.len()), format!("forecast: {days:.1} days to {:.1} GiB free", floor as f64 / gib)], None))
+}
+
 pub async fn collect(st: &St, user: &User) -> ApiResult<Vec<Value>> {
     let vis = auth::visible_servers(st, user).await?;
     let all = server::list(st).await?;
@@ -98,7 +140,9 @@ pub async fn collect(st: &St, user: &User) -> ApiResult<Vec<Value>> {
         let (total, free) = crate::platform::disk(&st.cfg.data_dir);
         if total > 0 {
             let pct = free as f64 / total as f64 * 100.0;
-            if pct < 5.0 || free < (2 << 30) { out.push(finding("host:disk".into(), "critical", None, "Disk almost full", format!("Only {:.1} GiB free on the data volume. Backups and world saves may fail.", free as f64 / (1u64 << 30) as f64), vec![format!("{pct:.1}% free")], None)); }
+            let critical = pct < 5.0 || free < (2 << 30);
+            if !critical { out.extend(disk_forecast(st, total as i64).await); }
+            if critical { out.push(finding("host:disk".into(), "critical", None, "Disk almost full", format!("Only {:.1} GiB free on the data volume. Backups and world saves may fail.", free as f64 / (1u64 << 30) as f64), vec![format!("{pct:.1}% free")], None)); }
             else if pct < 15.0 { out.push(finding("host:disk".into(), "warn", None, "Disk space is getting low", format!("{:.1} GiB free ({pct:.0}%).", free as f64 / (1u64 << 30) as f64), vec![format!("{pct:.1}% free")], None)); }
         }
     }
@@ -118,8 +162,34 @@ pub async fn server_health(State(st): State<St>, user: User, Path(id): Path<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::eula_missing;
+    use super::{eula_missing, forecast_days, forecast_severity};
     use crate::runtimes::launch::test_srv;
+
+    const GIB: i64 = 1 << 30;
+    fn series(n: i64, start: i64, per_hour: i64) -> Vec<(i64, i64)> { (0..n).map(|i| (i * 3_600_000, start + per_hour * i)).collect() }
+
+    #[test]
+    fn forecast_steady_decline() {
+        let s = series(48, 200 * GIB, -GIB); // 1 GiB/hour = 24 GiB/day
+        let d = forecast_days(&s, 2 * GIB).unwrap(); // 153 GiB left at the last sample
+        assert!((d - (153.0 - 2.0) / 24.0).abs() < 0.01, "{d}");
+    }
+    #[test]
+    fn forecast_none_when_rising_flat_or_short() {
+        assert!(forecast_days(&series(48, 50 * GIB, GIB / 10), 2 * GIB).is_none());
+        assert!(forecast_days(&series(48, 50 * GIB, 0), 2 * GIB).is_none());
+        assert!(forecast_days(&series(23, 50 * GIB, -GIB / 10), 2 * GIB).is_none(), "fewer than 24 samples");
+        let dense: Vec<_> = (0..40).map(|i| (i * 60_000, 50 * GIB - i)).collect();
+        assert!(forecast_days(&dense, 2 * GIB).is_none(), "spans under 24 h");
+    }
+    #[test]
+    fn forecast_thresholds() {
+        assert_eq!(forecast_severity(0.5), Some("critical"));
+        assert_eq!(forecast_severity(3.0), Some("critical"));
+        assert_eq!(forecast_severity(3.1), Some("warn"));
+        assert_eq!(forecast_severity(14.0), Some("warn"));
+        assert_eq!(forecast_severity(14.1), None);
+    }
 
     #[test]
     fn bedrock_needs_the_eula_before_it_can_start() {

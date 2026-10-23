@@ -80,11 +80,11 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 **Version upgrades** · plan and run a Minecraft/loader upgrade with per-mod verdicts, backup and rollback; optionally try it on a copy first.
 
-**Backups** · manual and scheduled, checksummed `tar.zst`, verify, lock, world-aware listing, restore as a new server, in place or per world · busy servers are never backed up into a torn file: small files are snapshotted whole and a backup restarts if a large file is cut short · **restore preview, or restore to a staging folder and promote after comparing** · **remote destinations**: a folder (for example a NAS mount) or any S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, MinIO), with upload retries, checksums and remote retention.
+**Backups** · manual and scheduled, checksummed `tar.zst`, verify, lock, world-aware listing, restore as a new server, in place or per world · busy servers are never backed up into a torn file: small files are snapshotted whole and a backup restarts if a large file is cut short · **restore preview, or restore to a staging folder and promote after comparing** · **remote destinations**: a folder (for example a NAS mount) or any S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, MinIO), with upload retries, checksums and remote retention · optional mirroring of safety backups to the remote destination and a per-server size cap on local backups.
 
 **Schedules, operations, notifications** · backup, start, stop, restart and console-command schedules in an IANA time zone (daylight-saving aware) · every long job is a persisted, cancellable operation · in-app inbox (read state is per user) plus optional Discord or generic webhook (HTTPS, SSRF-safe) · **signed event webhooks** (HMAC-SHA256, retries, auto-disable on repeated failure) for your own automation, see [docs/webhooks.md](docs/webhooks.md).
 
-**Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · support bundle with secrets redacted.
+**Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · "disk full in N days" forecast from the hourly host history · support bundle with secrets redacted.
 
 **Interface** · fourteen themes: dark, light, system and high contrast, plus game-inspired and seasonal ones such as Nether, Synthwave, Amber terminal, Deep sea, Campfire and Cherry blossom, all checked for WCAG AA contrast · a **theme editor** (live preview, contrast checker, import/export) · accent and density options · saved views for lists · command palette that searches servers, backups, content and files (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>) · **accessibility settings** (text size up to 150%, strong focus ring, always-underlined links, wider text spacing, reduced motion and effects, following the system's high-contrast request) · keyboard first, responsive, axe-checked in CI. See [ACCESSIBILITY.md](ACCESSIBILITY.md).
 
@@ -397,8 +397,8 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 
 **Reliability and operations**
 - [x] systemd and launchd unit files ship in [`packaging/`](packaging) and are documented. Still open: a `moss install-service` command that writes and enables them, and a health finding when Moss is not set up to start on boot.
-- [ ] Mirror safety (pre-change) backups to the configured remote destination, so a disk failure does not take the undo points with it.
-- [ ] "Disk full in N days" forecast from the hourly metrics, and backup retention by size as well as by count.
+- [x] Mirror safety (pre-change) backups to the configured remote destination, so a disk failure does not take the undo points with it (setting `backup_remote_safety`, off by default).
+- [x] "Disk full in N days" forecast from the hourly metrics, and backup retention by size as well as by count (`backup_keep_gib`).
 - [ ] Scheduled restore drills: restore the latest backup into a throwaway server and check that it starts.
 - [x] Support bundle with secrets redacted (`GET /support-bundle`).
 

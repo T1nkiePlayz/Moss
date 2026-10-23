@@ -81,7 +81,7 @@ Operation: `{id,kind,title,server_id|null,state:"queued"|"running"|"completed"|"
 
 ## Health
 Finding: `{id,severity:"info"|"warn"|"critical",server_id|null,title,detail,evidence:string[],action:{label,kind:"start"|"backup"|"open_tab"|"accept_eula"|"install_java",tab?}|null}`
-- `GET /health` → `Finding[]` (host + all servers). Rules: crash loop, no recent backup, low disk, missing Java, EULA not accepted, port conflict, readiness timeout, orphaned process.
+- `GET /health` → `Finding[]` (host + all servers). Rules: crash loop, no recent backup, low disk, disk full within N days (`host:disk-forecast`, admin only: warn at 14 days or less, critical at 3 or less, from a trend over the last 7 days of hourly host metrics), missing Java, EULA not accepted, port conflict, readiness timeout, orphaned process.
 
 ## Access (owner/admin)
 - `GET /users` · `POST /users {email,role}` · `PATCH /users/{id} {role}` · `DELETE /users/{id}`
@@ -89,7 +89,7 @@ Finding: `{id,severity:"info"|"warn"|"critical",server_id|null,title,detail,evid
 - Permissions: `server.view server.power server.console.read server.console.write files.read files.write content.manage backup.manage config.write server.delete admin.users admin.settings`
 
 ## Settings
-- `GET /settings` → `{default_memory_mb,backup_keep,backup_before_change:boolean,modrinth_contact,public_base_url,data_dir,bind,version}` · `PUT /settings` (admin)
+- `GET /settings` → `{default_memory_mb,backup_keep,backup_before_change:boolean,backup_remote_safety:boolean,backup_keep_gib:integer,modrinth_contact,public_base_url,data_dir,bind,version}` · `PUT /settings` (admin)
 
 ## Events (SSE) `GET /events?ticket=`
 `event: op` data=Operation · `event: server` data=Server · `event: activity` data=Activity · `event: update` data=UpdateInfo (administrators only; see Updating Moss) · `event: hello` data `{}`. Stream resumes with `Last-Event-ID` (best effort) and sends `:` keep-alives every 15 s.
@@ -161,6 +161,8 @@ Schedule gains `tz: string` (IANA name, e.g. `"Europe/Berlin"`, default `"UTC"`)
 
 ### Backups
 - Setting `backup_before_change` (existing) is now honoured: content install/update/update-all, modpack import, version upgrade, and in-place restore (always) take a `pre-change` backup first when true and the server has data. Plain file and `server.properties` edits use per-file undo snapshots instead, because a full backup per save would be absurd; pre-change backups are pruned to the newest 3 per server.
+- Setting `backup_remote_safety` (boolean, default false): when true, `pre-change` backups are also copied to the server's remote destination (no-op for servers without one). Remote retention counts them separately: the newest 3 per server and destination are kept, and they never push scheduled or manual copies out.
+- Setting `backup_keep_gib` (integer 0..=10000, default 0 = off): after each successful backup, the oldest unlocked `scheduled` and `pre-change` local backups of that server are removed until the local total fits; `manual`, locked and the newest ok backups are never removed (manual ones still count toward the total).
 - `PATCH /backups/{id} {locked?:boolean, note?:string}` → Backup. Locked backups are never pruned or deleted (`DELETE` → 409 `backup.locked`).
 - Backup objects gain `worlds:string[]` (directories containing `level.dat`), `locked:boolean`.
 - `POST /backups/{id}/preview {mode:"new_server"|"in_place", only?:string[]}` → `{mode, archive:{files,size,created_at}, current:{files,size}|null, added:number, removed:number, changed:number, unchanged:number, size_delta:number, samples:{added:string[],removed:string[],changed:string[]} /* ≤50 each */, worlds:string[], warnings:string[]}`. "changed" = size or modification time differs. Streams the archive once; never extracts.

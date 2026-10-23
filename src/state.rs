@@ -73,9 +73,50 @@ pub struct Inner {
     pub cf: Mutex<crate::providers::curseforge::Limiter>,
     pub cf_sem: tokio::sync::Semaphore,
     pub container: crate::container::Handle,
+    pub audit_q: AuditQueue,
 }
 
 pub type St = Arc<Inner>;
+
+/// One activity-log entry waiting for `AuditQueue`'s writer.
+struct AuditRow { time: String, actor: String, action: String, target: String, detail: String, server_id: Option<String> }
+
+/// Console-command audit entries, written in batches by one background task so a command never waits for a commit.
+/// Each command used to insert its own row on the shared writer before answering: with many admins or workflows
+/// typing at once, a slow commit (a WAL fsync on a busy disk) held every POST /command for its whole length.
+/// Rows reach the log and the event stream in order, a moment later. The queue holds 16k entries (a few MB at most),
+/// far more than people or workflows type during a long stall; a scripted flood beyond that waits rather than lose
+/// entries.
+pub struct AuditQueue(tokio::sync::mpsc::Sender<AuditRow>);
+
+impl AuditQueue {
+    const CAPACITY: usize = 16_384;
+    const BATCH: usize = 256;
+
+    pub fn spawn(db: Db, bus: broadcast::Sender<Event>) -> Self {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<AuditRow>(Self::CAPACITY);
+        tokio::spawn(async move {
+            let mut batch = Vec::with_capacity(Self::BATCH);
+            while rx.recv_many(&mut batch, Self::BATCH).await > 0 {
+                let rows: Vec<_> = batch.iter().map(|r| (r.time.clone(), r.actor.clone(), r.action.clone(), r.target.clone(), r.detail.clone(), r.server_id.clone())).collect();
+                let ids = db.call(move |c| {
+                    let tx = c.unchecked_transaction()?;
+                    let mut ids = Vec::with_capacity(rows.len());
+                    {
+                        let mut q = tx.prepare_cached("INSERT INTO activity(time,actor,action,target,detail,server_id) VALUES (?,?,?,?,?,?)")?;
+                        for r in &rows { q.execute(rusqlite::params![r.0, r.1, r.2, r.3, r.4, r.5])?; ids.push(tx.last_insert_rowid()); }
+                    }
+                    tx.commit()?;
+                    Ok(ids)
+                }).await.unwrap_or_else(|e| { tracing::warn!("activity log: {} console command entries not written: {e}", batch.len()); vec![] });
+                for (i, r) in batch.drain(..).enumerate() {
+                    let _ = bus.send(Event { kind: "activity", data: serde_json::json!({"id": ids.get(i).copied().unwrap_or(0), "time": r.time, "actor": r.actor, "action": r.action, "target": r.target, "detail": r.detail, "server_id": r.server_id}) });
+                }
+            }
+        });
+        Self(tx)
+    }
+}
 
 impl Inner {
     pub fn emit(&self, kind: &'static str, data: Value) {
@@ -123,7 +164,8 @@ impl Inner {
     pub async fn audit_command(&self, actor: &str, server_name: &str, cmd: &str, server_id: &str) {
         let mode = self.setting("audit_console_commands", "redacted").await;
         if let Some(detail) = crate::console::audit_command_detail(&mode, cmd) {
-            self.audit(actor, "console.command", server_name, &detail, Some(server_id)).await;
+            let row = AuditRow { time: crate::db::now(), actor: actor.into(), action: "console.command".into(), target: server_name.into(), detail, server_id: Some(server_id.into()) };
+            let _ = self.audit_q.0.send(row).await;
         }
     }
 
@@ -134,7 +176,7 @@ impl Inner {
 
     pub async fn setting(&self, key: &str, default: &str) -> String {
         let k = key.to_string();
-        let v = self.db.call(move |c| c.query_row("SELECT v FROM meta WHERE k=?", [k], |r| r.get::<_, String>(0)).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await;
+        let v = self.db.read(move |c| c.query_row("SELECT v FROM meta WHERE k=?", [k], |r| r.get::<_, String>(0)).map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })).await;
         v.ok().flatten().unwrap_or_else(|| default.to_string())
     }
 
@@ -142,5 +184,26 @@ impl Inner {
         let (k, v) = (key.to_string(), value.to_string());
         self.db.call(move |c| c.execute("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", [k, v])).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn console_command_audit_entries_are_written_in_order_and_announced() {
+        let st = crate::testutil::state(|_| {}).await;
+        let mut rx = st.bus.subscribe();
+        for i in 0..300 { st.audit_command("alice", "Survival", &format!("say {i}"), "s1").await; }
+        st.audit_command("alice", "Survival", "login hunter2", "s1").await;
+        let mut seen = vec![];
+        while seen.len() < 301 {
+            let e = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.expect("activity event").unwrap();
+            if e.kind == "activity" { seen.push((e.data["id"].as_i64().unwrap(), e.data["detail"].as_str().unwrap().to_string())); }
+        }
+        assert!(seen.windows(2).all(|w| w[0].0 < w[1].0), "ids increase in send order");
+        assert_eq!(seen[7].1, "say 7");
+        assert_eq!(seen[300].1, "[redacted: login]");
+        let rows: Vec<(i64, String)> = st.db.read(|c| c.prepare("SELECT id, detail FROM activity WHERE action='console.command' ORDER BY id")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).await.unwrap();
+        assert_eq!(rows, seen);
     }
 }

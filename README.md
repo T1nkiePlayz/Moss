@@ -80,11 +80,11 @@ Moss installs, runs, watches, updates and backs up game servers on a machine you
 
 **Version upgrades** · plan and run a Minecraft/loader upgrade with per-mod verdicts, backup and rollback; optionally try it on a copy first.
 
-**Backups** · manual and scheduled, checksummed `tar.zst`, verify, lock, world-aware listing, restore as a new server, in place or per world · busy servers are never backed up into a torn file: small files are snapshotted whole and a backup restarts if a large file is cut short · **restore preview, or restore to a staging folder and promote after comparing** · **remote destinations**: a folder (for example a NAS mount) or any S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, MinIO), with upload retries, checksums and remote retention.
+**Backups** · manual and scheduled, checksummed `tar.zst`, verify, lock, world-aware listing, restore as a new server, in place or per world · busy servers are never backed up into a torn file: small files are snapshotted whole and a backup restarts if a large file is cut short · **restore preview, or restore to a staging folder and promote after comparing** · **remote destinations**: a folder (for example a NAS mount) or any S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, MinIO), with upload retries, checksums and remote retention · optional mirroring of safety backups to the remote destination and a per-server size cap on local backups.
 
 **Schedules, operations, notifications** · backup, start, stop, restart and console-command schedules in an IANA time zone (daylight-saving aware) · every long job is a persisted, cancellable operation · in-app inbox (read state is per user) plus optional Discord or generic webhook (HTTPS, SSRF-safe) · **signed event webhooks** (HMAC-SHA256, retries, auto-disable on repeated failure) for your own automation, see [docs/webhooks.md](docs/webhooks.md).
 
-**Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · support bundle with secrets redacted.
+**Monitoring** · live CPU, memory and players, long-term history (1 h to 30 d) per server and for the host · "disk full in N days" forecast from the hourly host history · support bundle with secrets redacted.
 
 **Interface** · fourteen themes: dark, light, system and high contrast, plus game-inspired and seasonal ones such as Nether, Synthwave, Amber terminal, Deep sea, Campfire and Cherry blossom, all checked for WCAG AA contrast · a **theme editor** (live preview, contrast checker, import/export) · accent and density options · saved views for lists · command palette that searches servers, backups, content and files (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>) · **accessibility settings** (text size up to 150%, strong focus ring, always-underlined links, wider text spacing, reduced motion and effects, following the system's high-contrast request) · keyboard first, responsive, axe-checked in CI. See [ACCESSIBILITY.md](ACCESSIBILITY.md).
 
@@ -277,6 +277,8 @@ Data layout: `moss.sqlite`, `servers/<id>/` (game files; Moss metadata in `.moss
 
 ### Other games
 
+Whether each SteamCMD game really installs, starts and answers a player query is tracked in [docs/game-compat.md](docs/game-compat.md).
+
 | Game | Installed from | Platforms | Players | Notes |
 |---|---|---|---|---|
 | Minecraft Bedrock | minecraft.net (official server zip) | Linux | From the log | Needs the Minecraft EULA; `server.properties` editor |
@@ -386,7 +388,7 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 
 **Trust and testing**
 - [ ] Run container mode against real Docker and Podman in CI (one Minecraft server and one SteamCMD game each), not just the stand-in.
-- [ ] A nightly game end-to-end matrix (install, start, player query, backup, stop) for every SteamCMD game, with the results published as a compatibility table.
+- [x] A nightly game end-to-end matrix ([games-e2e.yml](.github/workflows/games-e2e.yml)) installs, starts, queries players, backs up and stops every SteamCMD game and renders a compatibility table; see [docs/game-compat.md](docs/game-compat.md). Results are filled in as runs complete.
 - [x] The desktop app has a build workflow ([desktop.yml](.github/workflows/desktop.yml), AppImage, `.deb` and `.dmg`). Still open: run it on every pull request as a smoke build, not by hand only.
 - [ ] Ship the first signed release.
 - [ ] An external security review, and fuzz or property tests for the riskiest parsers (archive and modpack import, jar manifests, path confinement in the file manager).
@@ -395,8 +397,8 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 
 **Reliability and operations**
 - [x] systemd and launchd unit files ship in [`packaging/`](packaging) and are documented. Still open: a `moss install-service` command that writes and enables them, and a health finding when Moss is not set up to start on boot.
-- [ ] Mirror safety (pre-change) backups to the configured remote destination, so a disk failure does not take the undo points with it.
-- [ ] "Disk full in N days" forecast from the hourly metrics, and backup retention by size as well as by count.
+- [x] Mirror safety (pre-change) backups to the configured remote destination, so a disk failure does not take the undo points with it (setting `backup_remote_safety`, off by default).
+- [x] "Disk full in N days" forecast from the hourly metrics, and backup retention by size as well as by count (`backup_keep_gib`).
 - [ ] Scheduled restore drills: restore the latest backup into a throwaway server and check that it starts.
 - [x] Support bundle with secrets redacted (`GET /support-bundle`).
 
@@ -424,6 +426,7 @@ Smaller items not tied to a milestone. ✅ means it already exists; unticked ite
 | [docs/migrating.md](docs/migrating.md) | Moving a Minecraft server to Moss from Pterodactyl, Pelican, AMP or a systemd setup |
 | [docs/threat-model.md](docs/threat-model.md) · [docs/security-review.md](docs/security-review.md) · [SECURITY.md](SECURITY.md) | What Moss defends against, what the internal review found, how to report a problem |
 | [docs/webhooks.md](docs/webhooks.md) | Signed event webhooks and how to verify them |
+| [docs/game-compat.md](docs/game-compat.md) | The nightly end-to-end matrix for the SteamCMD games and how to run one locally |
 | [docs/game-mods.md](docs/game-mods.md) · [docs/player-lists.md](docs/player-lists.md) | Mods for Valheim, Factorio, Garry's Mod and CS2; shared allow and ban lists |
 | [docs/maps.md](docs/maps.md) · [docs/push.md](docs/push.md) | Live web maps; installing the app and Web Push |
 | [docs/api-policy.md](docs/api-policy.md) | The frozen API and what counts as a breaking change |

@@ -102,7 +102,7 @@ pub fn get_sync(c: &Connection, id: &str) -> rusqlite::Result<Option<Srv>> {
 
 pub async fn get(st: &St, id: &str) -> ApiResult<Srv> {
     let i = id.to_string();
-    st.db.call(move |c| get_sync(c, &i)).await?.ok_or_else(|| ApiError::not_found("server"))
+    st.db.read(move |c| get_sync(c, &i)).await?.ok_or_else(|| ApiError::not_found("server"))
 }
 
 /// Servers the operator manages. Staging copies are real server rows but never appear here.

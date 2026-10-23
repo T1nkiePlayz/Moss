@@ -1,0 +1,158 @@
+name: Games end to end
+
+# Installs and runs every SteamCMD game for real (tests/games_e2e.rs): install, start, player query, backup, stop.
+# One job per game; the last job renders the results as a compatibility table (docs/game-compat.md).
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      games:
+        description: "Comma-separated game ids to run (empty for all SteamCMD games)"
+        default: ""
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: games-e2e
+  cancel-in-progress: false
+
+env:
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # Games whose install does not fit a hosted runner (about 14 GB free after cleanup). They are listed in the table as skipped.
+  TOO_LARGE: "cs2 ark"
+
+jobs:
+  list:
+    name: List games
+    runs-on: ubuntu-24.04
+    outputs:
+      games: ${{ steps.list.outputs.games }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+      - name: Cache Rust
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Prepare embedded UI directory
+        run: mkdir -p web/dist
+      # The ids come from the catalogue itself (src/games/mod.rs), so a new SteamCMD game joins the matrix on its own.
+      - name: List the SteamCMD games
+        id: list
+        env:
+          WANTED: ${{ inputs.games }}
+        run: |
+          all=$(cargo test --locked --bin moss -- --ignored --exact games::tests::list_steam_games --nocapture | sed -n 's/^STEAM_GAMES=//p')
+          test -n "$all"
+          if [ -n "$WANTED" ]; then
+            games=$(jq -c --arg w "$WANTED" '($w | split(",") | map(gsub("^\\s+|\\s+$"; ""))) as $want | map(select(. as $g | $want | index($g)))' <<<"$all")
+          else
+            games=$all
+          fi
+          test "$(jq 'length' <<<"$games")" -gt 0 || { echo "no matching games in $all"; exit 1; }
+          echo "games=$games" >> "$GITHUB_OUTPUT"
+
+  game:
+    name: ${{ matrix.game }}
+    needs: list
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        game: ${{ fromJSON(needs.list.outputs.games) }}
+    env:
+      MOSS_E2E_GAME: ${{ matrix.game }}
+      MOSS_E2E_RESULTS: ${{ github.workspace }}/results/${{ matrix.game }}.jsonl
+    steps:
+      - name: Skip games too large for a hosted runner
+        id: size
+        run: |
+          mkdir -p results
+          if [[ " $TOO_LARGE " == *" $MOSS_E2E_GAME "* ]]; then
+            echo '{"game":"'"$MOSS_E2E_GAME"'","step":"skipped","ok":true,"seconds":0,"error":"skipped: too large for hosted runner"}' > "$MOSS_E2E_RESULTS"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Free disk space
+        if: steps.size.outputs.run == 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null || true
+          df -h /
+      - name: Checkout
+        if: steps.size.outputs.run == 'true'
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Rust
+        if: steps.size.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (2026-10-09)
+      - name: Cache Rust
+        if: steps.size.outputs.run == 'true'
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-nextest
+        if: steps.size.outputs.run == 'true'
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-nextest@0.9.146
+      # SteamCMD is a 32-bit program; Moss downloads it itself (the official tarball) but needs these libraries.
+      - name: Install SteamCMD's 32-bit libraries
+        if: steps.size.outputs.run == 'true'
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lib32gcc-s1 lib32stdc++6 ca-certificates
+      - name: Prepare embedded UI directory
+        if: steps.size.outputs.run == 'true'
+        run: mkdir -p web/dist
+      - name: Build
+        if: steps.size.outputs.run == 'true'
+        run: cargo nextest run --locked --profile ci --test games_e2e --no-run
+      - name: Run the game
+        if: steps.size.outputs.run == 'true'
+        env:
+          MOSS_E2E_DIR: /mnt
+        run: |
+          sudo chown "$USER" /mnt
+          cargo nextest run --locked --profile ci --test games_e2e --run-ignored only --no-capture
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: results-${{ matrix.game }}
+          path: results/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  table:
+    name: Compatibility table
+    needs: game
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Download results
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: results-*
+          path: results
+          merge-multiple: true
+      - name: Render the table
+        run: |
+          mkdir -p results
+          node scripts/game-compat-table.mjs results > game-compat.md
+          cat game-compat.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the table
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: game-compat.md
+          path: game-compat.md
+          retention-days: 90

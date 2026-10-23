@@ -67,7 +67,7 @@ impl User {
 pub async fn authz(st: &St, user: &User, server_id: &str, perm: &str) -> ApiResult<()> {
     if user.is_admin() { return Ok(()); }
     let (sid, uid) = (server_id.to_string(), user.id.clone());
-    let bundle: Option<String> = st.db.call(move |c| {
+    let bundle: Option<String> = st.db.read(move |c| {
         c.query_row("SELECT bundle FROM grants WHERE server_id=? AND user_id=?", [sid, uid], |r| r.get(0))
             .map(Some).or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })
     }).await?;
@@ -82,7 +82,7 @@ pub async fn authz(st: &St, user: &User, server_id: &str, perm: &str) -> ApiResu
 pub async fn visible_servers(st: &St, user: &User) -> ApiResult<Option<Vec<String>>> {
     if user.is_admin() { return Ok(None); }
     let uid = user.id.clone();
-    Ok(Some(st.db.call(move |c| {
+    Ok(Some(st.db.read(move |c| {
         let mut q = c.prepare("SELECT server_id FROM grants WHERE user_id=?")?;
         q.query_map([uid], |r| r.get(0))?.collect()
     }).await?))

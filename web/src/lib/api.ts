@@ -159,7 +159,7 @@ export interface Finding {
 export interface User { id: string; email: string; role: Role; created_at?: string }
 export interface Grant { user_id: string; email: string; bundle: 'manager' | 'operator' | 'viewer' }
 export interface Settings {
-  default_memory_mb: number; backup_keep: number; backup_before_change: boolean; modrinth_contact: string;
+  default_memory_mb: number; backup_keep: number; backup_before_change: boolean; backup_remote_safety: boolean; backup_keep_gib: number; modrinth_contact: string;
   public_base_url: string; data_dir: string; bind: string; version: string;
 }
 

@@ -133,15 +133,7 @@ pub async fn drop_local(st: &St, server_id: &str, id: &str) {
 /// are untouched, and the newest stored copy is never removed.
 pub async fn retention(st: &St, server_id: &str, d: &Dest) -> Result<()> {
     let (sid, did, kl, kr) = (server_id.to_string(), d.id.clone(), d.keep_local, d.keep_remote.max(1));
-    let (drops, victims): (Vec<String>, Vec<(String, String, bool)>) = st.db.call(move |c| {
-        let drops = if kl > 0 {
-            c.prepare("SELECT id FROM backups WHERE server_id=?1 AND remote_dest=?2 AND remote='stored' AND local_present=1 AND locked=0 AND status='ok' ORDER BY created_at DESC LIMIT -1 OFFSET ?3")?
-                .query_map(rusqlite::params![sid, did, kl], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?
-        } else { vec![] };
-        let victims = c.prepare("SELECT id,COALESCE(remote_key,''),local_present FROM backups WHERE server_id=?1 AND remote_dest=?2 AND remote='stored' AND locked=0 AND status='ok' ORDER BY created_at DESC LIMIT -1 OFFSET ?3")?
-            .query_map(rusqlite::params![sid, did, kr], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<Vec<_>, _>>()?;
-        Ok((drops, victims))
-    }).await?;
+    let (drops, victims) = st.db.call(move |c| retention_victims(c, &sid, &did, kl, kr)).await?;
     for id in drops { if !victims.iter().any(|v| v.0 == id) { drop_local(st, server_id, &id).await; } }
     if victims.is_empty() { return Ok(()); }
     let store = dest::open(st, d).await?;
@@ -155,10 +147,62 @@ pub async fn retention(st: &St, server_id: &str, d: &Dest) -> Result<()> {
     Ok(())
 }
 
+/// Local drops and remote victims. Safety (`pre-change`) copies are counted apart so they never displace scheduled/manual ones.
+type Victims = (Vec<String>, Vec<(String, String, bool)>);
+fn retention_victims(c: &rusqlite::Connection, sid: &str, did: &str, kl: i64, kr: i64) -> rusqlite::Result<Victims> {
+    let drops = if kl > 0 {
+        c.prepare("SELECT id FROM backups WHERE server_id=?1 AND remote_dest=?2 AND remote='stored' AND local_present=1 AND locked=0 AND status='ok' AND kind<>'pre-change' ORDER BY created_at DESC LIMIT -1 OFFSET ?3")?
+            .query_map(rusqlite::params![sid, did, kl], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?
+    } else { vec![] };
+    let sql = |cmp: &str| format!("SELECT id,COALESCE(remote_key,''),local_present FROM backups WHERE server_id=?1 AND remote_dest=?2 AND remote='stored' AND locked=0 AND status='ok' AND kind{cmp}'pre-change' ORDER BY created_at DESC LIMIT -1 OFFSET ?3");
+    let mut victims = vec![];
+    for (cmp, keep) in [("<>", kr), ("=", crate::backups::pre_change::KEEP)] {
+        victims.extend(c.prepare(&sql(cmp))?.query_map(rusqlite::params![sid, did, keep], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<Vec<_>, _>>()?);
+    }
+    Ok((drops, victims))
+}
+
 /// At startup: uploads that were running when the controller stopped did not finish.
 pub async fn recover(st: &St) {
     let _ = st.db.call(|c| {
         c.execute("UPDATE backups SET remote='failed', remote_error='the upload was interrupted by a controller restart; retry it from the backup menu' WHERE remote='uploading'", [])?;
         c.execute("UPDATE staged_restores SET status='failed', error='interrupted by a controller restart' WHERE status='preparing'", [])
     }).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> rusqlite::Connection {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_tests(&c);
+        c.execute("INSERT INTO servers(id,name,runtime,game_version,port,created_at) VALUES ('s','s','vanilla','1.21',25565,'t')", []).ok();
+        c
+    }
+    fn ins(c: &rusqlite::Connection, id: &str, at: &str, kind: &str) {
+        c.execute("INSERT INTO backups(id,server_id,created_at,status,kind,remote,remote_dest,local_present) VALUES (?,'s',?,'ok',?,'stored','d',1)", rusqlite::params![id, at, kind]).unwrap();
+    }
+
+    #[test]
+    fn safety_copies_beyond_keep_are_victims() {
+        let c = db();
+        for i in 0..5 { ins(&c, &format!("p{i}"), &format!("2024-02-0{i}"), "pre-change"); }
+        let (_, v) = retention_victims(&c, "s", "d", 0, 10).unwrap();
+        let mut ids: Vec<_> = v.into_iter().map(|x| x.0).collect(); ids.sort();
+        assert_eq!(ids, vec!["p0".to_string(), "p1".to_string()], "only the oldest beyond KEEP=3");
+    }
+
+    #[test]
+    fn safety_copies_do_not_displace_scheduled_ones() {
+        let c = db();
+        ins(&c, "s1", "2024-01-01", "scheduled"); ins(&c, "s2", "2024-01-02", "manual");
+        for i in 0..3 { ins(&c, &format!("p{i}"), &format!("2024-03-0{i}"), "pre-change"); }
+        let (drops, v) = retention_victims(&c, "s", "d", 2, 2).unwrap();
+        assert!(v.is_empty(), "newer pre-change copies must not push the older scheduled/manual copies out: {v:?}");
+        assert!(drops.is_empty());
+        ins(&c, "s3", "2024-01-03", "scheduled");
+        let (drops, v) = retention_victims(&c, "s", "d", 2, 2).unwrap();
+        assert_eq!(v.len(), 1); assert_eq!(v[0].0, "s1"); assert_eq!(drops, vec!["s1".to_string()]);
+    }
 }

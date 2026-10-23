@@ -22,7 +22,7 @@ pub async fn provision(st: &St, c: &Claims, token: &str) -> ApiResult<User> {
     let owners = st.cfg.owner_email_list();
     let sub = c.sub.clone();
     let lookup = |db: &rusqlite::Connection, sub: &str| db.query_row("SELECT id,email,role FROM users WHERE id=?", [sub], |r| Ok(User { id: r.get(0)?, email: r.get(1)?, role: r.get(2)?, token: None, via_token: None, aal: None })).ok();
-    let known = { let sub = sub.clone(); st.db.call(move |db| Ok(lookup(db, &sub))).await? };
+    let known = { let sub = sub.clone(); st.db.read(move |db| Ok(lookup(db, &sub))).await? };
     let found = if let Some(u) = known { Found::User(u) } else {
     if email.is_empty() { return Err(not_provisioned()); }
     // unlinked identity: never trust token claims for verification, ask Supabase (outside any db call)

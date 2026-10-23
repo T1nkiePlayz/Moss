@@ -16,12 +16,14 @@ pub async fn build_state(cfg: config::Config) -> anyhow::Result<state::St> {
     let db = db::Db::open(&cfg.data_dir.join("moss.sqlite"))?;
     let contact = db.call(|c| c.query_row("SELECT v FROM meta WHERE k='modrinth_contact'", [], |r| r.get::<_, String>(0))).await.unwrap_or_default();
     let (bus, _) = tokio::sync::broadcast::channel(512);
+    let audit_q = state::AuditQueue::spawn(db.clone(), bus.clone());
     Ok(Arc::new(state::Inner {
         http: download::client(&contact), cfg, db, bus, started: Instant::now(),
         live: Mutex::new(HashMap::new()), hubs: Mutex::new(HashMap::new()), stats: Mutex::new(HashMap::new()), tickets: Mutex::new(HashMap::new()),
         ops: Mutex::new(ops::Registry::default()), locks: Mutex::new(HashMap::new()), cache: Mutex::new(HashMap::new()), users: Mutex::new(HashMap::new()),
         jwks: Mutex::new(None), guard: Default::default(), host: Mutex::new(platform::HostSampler::default()),
         cf: Mutex::new(Default::default()), cf_sem: tokio::sync::Semaphore::new(curseforge::CONCURRENCY), container: Default::default(),
+        audit_q,
     }))
 }
 

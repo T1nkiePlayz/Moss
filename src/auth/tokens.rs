@@ -49,7 +49,7 @@ pub async fn authenticate(st: &St, presented: &str) -> anyhow::Result<Option<(Us
     let hash = secret::sha256_hex(presented);
     let now = chrono::Utc::now();
     let h2 = hash.clone();
-    let row = st.db.call(move |c| {
+    let row = st.db.read(move |c| {
         c.query_row(
             "SELECT t.id,t.name,t.scope,t.expires_at,t.hash,u.id,u.email,u.role FROM api_tokens t JOIN users u ON u.id=t.user_id WHERE t.hash=?",
             [h2], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, String>(4)?,
@@ -59,7 +59,9 @@ pub async fn authenticate(st: &St, presented: &str) -> anyhow::Result<Option<(Us
     let Some((id, name, scope, expires, stored, mut user)) = row else { return Ok(None) };
     if !secret::ct_eq(stored.as_bytes(), hash.as_bytes()) || expired(expires.as_deref(), now) { return Ok(None); }
     let (cutoff, stamp) = ((now - chrono::Duration::seconds(60)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true), crate::db::now());
-    let _ = st.db.call(move |c| c.execute("UPDATE api_tokens SET last_used=? WHERE id=? AND (last_used IS NULL OR last_used<?)", params![stamp, id, cutoff])).await;
+    // bookkeeping only: the request does not wait for this write
+    let db = st.db.clone();
+    tokio::spawn(async move { let _ = db.call(move |c| c.execute("UPDATE api_tokens SET last_used=? WHERE id=? AND (last_used IS NULL OR last_used<?)", params![stamp, id, cutoff])).await; });
     user.via_token = Some(name);
     Ok(Some((user, scope)))
 }

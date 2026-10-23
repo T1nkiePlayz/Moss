@@ -5,7 +5,8 @@
 //!   cargo test --release --test perf -- --ignored --nocapture
 //!
 //! Measured: time from spawn until /healthz answers (startup), controller resident memory after ten idle seconds with two
-//! simulated servers running, and, while one simulated server is flooded with console commands, the console lines per
+//! simulated servers running, and, while one simulated server is flooded with console commands at a fixed rate
+//! (`flood_commands_per_s`), the console lines per
 //! second delivered over a WebSocket, the activity events per second delivered over the SSE stream, the fraction of
 //! console lines that arrived (the bounded broadcast buffer may drop lines for a slow viewer, a fast one must see them
 //! all) and the controller's CPU use. A Markdown table of measured against budget goes to stdout and, when set, to
@@ -151,12 +152,20 @@ async fn perf_budget() {
     let sse = tokio::spawn(watch_events(c.clone(), moss.base.clone(), ticket(&c, &moss.base).await, stop.clone(), events.clone()));
     tokio::time::sleep(Duration::from_millis(500)).await; // both are subscribed before the first command
     let (accepted, flooding) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(true)));
+    // Paced at a fixed rate: unpaced, a fast runner produces far more than a viewer is meant to keep up with, and the
+    // broadcast buffer then skips lines and disconnects it by design (docs/spikes/console-flood.md), so the ratio
+    // would measure the runner, not Moss.
+    const SENDERS: u32 = 4;
+    let every = Duration::from_secs_f64(f64::from(SENDERS) / limit("flood_commands_per_s"));
     let (cpu0, t0) = (cpu_seconds(pid), Instant::now());
-    let senders: Vec<_> = (0..4).map(|w| {
+    let senders: Vec<_> = (0..SENDERS).map(|w| {
         let (c, url, accepted, flooding) = (c.clone(), format!("{}/servers/{target}/command", moss.base), accepted.clone(), flooding.clone());
         tokio::spawn(async move {
             let mut n = 0u64;
+            let mut tick = tokio::time::interval(every);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             while flooding.load(Ordering::Relaxed) {
+                tick.tick().await;
                 match c.post(&url).json(&json!({"command": format!("say {TOKEN} {w}-{n} {}", "x".repeat(100))})).send().await.map(|r| r.status().as_u16()) {
                     Ok(204) => { accepted.fetch_add(1, Ordering::Relaxed); }
                     Ok(429) => tokio::time::sleep(Duration::from_millis(2)).await, // the game's console pipe is full: by design

@@ -1,5 +1,6 @@
 {
   "_comment": "Limits for tests/perf.rs (release build, GitHub-hosted ubuntu runner). Set at 2 to 3 times what a developer machine measures; tighten when CI numbers settle.",
+  "flood_commands_per_s": 250,
   "startup_ms": 8000,
   "idle_rss_mb": 120,
   "min_console_lines_per_s": 150,

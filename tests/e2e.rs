@@ -112,7 +112,8 @@ async fn a_stop_lost_to_a_controller_crash_is_finished_after_restart() {
     // the controller recorded the stop wish and died before the background task delivered it
     moss.sigkill();
     rusqlite::Connection::open(data.join("moss.sqlite")).unwrap().execute("UPDATE servers SET desired='stopped' WHERE id=?", [&id]).unwrap();
-    let mut moss = Moss::start(&data, moss.port);
+    // a fresh port: the old one may have been handed to another test's server while this one was down
+    let mut moss = Moss::start(&data, free_port());
     until("the pending stop to be finished", 40, || async { (server_state(&c, &moss.base, &id).await?["state"] == "stopped").then_some(()) }).await;
     assert!(std::net::TcpStream::connect_timeout(&format!("127.0.0.1:{game_port}").parse().unwrap(), Duration::from_millis(500)).is_err(), "the game is still listening");
     moss.sigkill();

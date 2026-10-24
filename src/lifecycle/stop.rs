@@ -23,7 +23,16 @@ pub async fn stop_and_wait(st: &St, s: &Srv, graceful: Duration) {
     match (s.game().map(|g| g.stop), s.pid) {
         (Some(Stop::Signal(sig)), Some(pid)) if !s.in_container => signal_game(pid, sig),
         (Some(Stop::Signal(sig)), _) if s.in_container => ctr::signal_container(st, s, sig).await,
-        _ => { let _ = send_command(st, s, stop_command(s)).await; }
+        _ => {
+            // A console that is not accepting input yet (a controller that just restarted) must not turn a stop into the
+            // full graceful wait: retry for a few seconds unless the server is already gone.
+            for _ in 0..10 {
+                if send_command(st, s, stop_command(s)).await.is_ok() { break; }
+                let gone = if s.in_container { !ctr::running_now(st, s).await } else { !process_alive(s) };
+                if gone { break; }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
     }
     let wait = |d: Duration| async move {
         let end = Instant::now() + d;
